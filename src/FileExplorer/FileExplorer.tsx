@@ -1,19 +1,21 @@
 import { useState, useEffect, useRef } from "react";
-// import { confirm } from "@tauri-apps/plugin-dialog";
-import { join, dirname } from '@tauri-apps/api/path';
+import { confirm } from "@tauri-apps/plugin-dialog";
+import { dirname } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 import FolderTree from "./FolderTree";
 import FileList from "./FileList";
-import { deleteFiles, pasteFiles } from '../command/fileOperations';
+import SearchView from "../SearchView/SearchView";
+import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOperations';
 import "./FileExplorer.css";
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[] };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[] }>) => void;
   currentView: 'folder' | 'search';
+  searchQuery?: string;
 }
 
-export default function FileExplorer({ config, onSaveConfig, currentView }: FileExplorerProps) {
+export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery }: FileExplorerProps) {
   const [selected, setSelected] = useState<string>(config.defaultPath || "C:");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([config.defaultPath || "C:"]));
   const [filesSelected, setFilesSelected] = useState<Set<string>>(new Set());
@@ -118,6 +120,37 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
     onSaveConfig({ expandedPaths: Array.from(next) });
   };
 
+  const handleSetPermission = (path: string, type: 'editable' | 'readonly') => {
+    const currentEditable = config.editableFolders || [];
+    const currentReadonly = config.readonlyFolders || [];
+    
+    if (type === 'editable') {
+      if (!currentEditable.includes(path)) {
+        const newReadonly = currentReadonly.filter(p => p !== path);
+        onSaveConfig({ 
+          editableFolders: [...currentEditable, path],
+          readonlyFolders: newReadonly
+        });
+      }
+    } else {
+      if (!currentReadonly.includes(path)) {
+        const newEditable = currentEditable.filter(p => p !== path);
+        onSaveConfig({ 
+          readonlyFolders: [...currentReadonly, path],
+          editableFolders: newEditable
+        });
+      }
+    }
+    setContextMenu(null);
+  };
+
+  const handleClearPermission = (path: string) => {
+    const newEditable = (config.editableFolders || []).filter(p => p !== path);
+    const newReadonly = (config.readonlyFolders || []).filter(p => p !== path);
+    onSaveConfig({ editableFolders: newEditable, readonlyFolders: newReadonly });
+    setContextMenu(null);
+  };
+
   const handleTreeContextMenu = (e: React.MouseEvent, path: string) => {
     setContextMenu({ x: e.clientX, y: e.clientY, path, source: 'tree' });
   };
@@ -132,10 +165,21 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
   };
 
   const handleCut = (paths: string[]) => {
+    // Check permission for source paths (need delete permission)
+    for (const path of paths) {
+      if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
+        confirm(`'${path}'에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        return;
+      }
+    }
     setClipboard({ paths, op: 'move' });
   };
 
   const handlePaste = async (targetDir: string) => {
+    if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
+      await confirm(`'${targetDir}'에 대한 쓰기 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+      return;
+    }
     if (!clipboard || !clipboard.paths.length) return;
     
     const success = await pasteFiles(clipboard.paths, targetDir, clipboard.op);
@@ -146,6 +190,12 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
   };
 
   const handleDelete = async (paths: string[]) => {
+    for (const path of paths) {
+      if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
+        await confirm(`'${path}'에 대한 삭제 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        return;
+      }
+    }
     const success = await deleteFiles(paths);
     if (success) {
       setRefreshTrigger(p => p + 1);
@@ -153,6 +203,14 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
   };
 
   const handleMove = async (sourcePaths: string[], targetDir: string, op: 'move' | 'copy') => {
+    if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
+      await confirm(`'${targetDir}'에 대한 쓰기 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+      return;
+    }
+    if (op === 'move' && !sourcePaths.every(p => checkPathPermission(p, config.editableFolders, config.readonlyFolders))) {
+      await confirm(`원본 파일에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+      return;
+    }
     const success = await pasteFiles(sourcePaths, targetDir, op);
     if (success) {
       setRefreshTrigger(p => p + 1);
@@ -161,12 +219,47 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
 
   const handleExtract = async (path: string) => {
     try {
+      if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
+        await confirm(`'${path}'에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        return;
+      }
       const parentDir = await dirname(path);
       await invoke('extract_zip', { zipPath: path, targetDir: parentDir });
       setRefreshTrigger(p => p + 1);
     } catch (error) {
       console.error('Extraction failed:', error);
     }
+  };
+
+  const getMenuPosition = () => {
+    if (!contextMenu) return {};
+    const { x, y } = contextMenu;
+    const width = 200;
+    const height = 250;
+    
+    const style = {
+      top: y,
+      left: x,
+      width: '200px',
+      fontSize: '14px',
+      transform: 'none'
+    };
+
+    let tx = '0';
+    let ty = '0';
+
+    if (x + width > window.innerWidth) {
+      tx = '-100%';
+    }
+    if (y + height > window.innerHeight) {
+      ty = '-100%';
+    }
+    
+    if (tx !== '0' || ty !== '0') {
+      style.transform = `translate(${tx}, ${ty})`;
+    }
+    
+    return style;
   };
 
   useEffect(() => {
@@ -177,14 +270,14 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
 
       if (e.ctrlKey && e.key === 'c') {
         if (activePane === 'list' && filesSelected.size > 0) {
-          const paths = await Promise.all(Array.from(filesSelected).map(name => join(selected, name)));
+          const paths = Array.from(filesSelected);
           handleCopy(paths);
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
           handleCopy(Array.from(selectedPaths));
         }
       } else if (e.ctrlKey && e.key === 'x') {
         if (activePane === 'list' && filesSelected.size > 0) {
-          const paths = await Promise.all(Array.from(filesSelected).map(name => join(selected, name)));
+          const paths = Array.from(filesSelected);
           handleCut(paths);
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
           handleCut(Array.from(selectedPaths));
@@ -195,7 +288,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
         }
       } else if (e.key === 'Delete') {
         if (activePane === 'list' && filesSelected.size > 0) {
-          const paths = await Promise.all(Array.from(filesSelected).map(name => join(selected, name)));
+          const paths = Array.from(filesSelected);
           handleDelete(paths);
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
           handleDelete(Array.from(selectedPaths));
@@ -208,21 +301,26 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
 
   if (currentView === 'search') {
     return (
-      <div style={{ padding: '20px', height: '100%', boxSizing: 'border-box' }}>
-        <h2>Search View</h2>
-        <p>검색 기능이 여기에 구현될 예정입니다.</p>
-        <input
-          type="search"
-          placeholder="파일 및 폴더 검색..."
-          style={{ width: '100%', padding: '8px', fontSize: '1em', boxSizing: 'border-box' }}
-        />
-      </div>
+      <SearchView 
+        searchQuery={searchQuery || ''}
+        onNavigate={(path) => {
+          setSelected(path);
+          setSelectedPaths(new Set([path]));
+          onSaveConfig({ view: 'folder' }); // 폴더 뷰로 전환
+        }}
+        onCopy={handleCopy}
+        onCut={handleCut}
+        onPaste={handlePaste}
+        onDelete={handleDelete}
+        onExtract={handleExtract}
+        refreshTrigger={refreshTrigger}
+      />
     );
   }
 
   return (
     <div className="mhz-explorer">
-      <aside className="mhz-explorer__tree" style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column' }}>
+      <aside className="mhz-explorer__tree" style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', gap: '5px', padding: '5px', alignItems: 'center', flexShrink: 0 }}>
           <input 
             type="text" 
@@ -289,6 +387,10 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
       <div 
         className="mhz-resizer"
         onMouseDown={() => setIsResizing(true)}
+        onDoubleClick={() => {
+          setSidebarWidth(0);
+          onSaveConfig({ sidebarWidth: 0 });
+        }}
         style={{ width: '4px', cursor: 'col-resize', backgroundColor: '#f0f0f0', borderLeft: '1px solid #ddd' }}
       />
       <section className="mhz-explorer__files">
@@ -308,10 +410,13 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
           onDelete={handleDelete}
           onExtract={handleExtract}
           refreshTrigger={refreshTrigger}
+          searchQuery={searchQuery}
+          editableFolders={config.editableFolders}
+          readonlyFolders={config.readonlyFolders}
         />
       </section>
       {contextMenu && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+        <div className="context-menu" style={getMenuPosition()}>
           {contextMenu.source === 'quickAccess' ? (
             <div className="context-menu-item delete" onClick={() => handleRemoveQuickAccess(contextMenu.path)}>
               <span>Quick Access에서 삭제</span>
@@ -338,6 +443,10 @@ export default function FileExplorer({ config, onSaveConfig, currentView }: File
               <div className="context-menu-item" onClick={() => Array.from(selectedPaths).forEach(p => handleAddToQuickAccess(p))}>
                 Quick Access 추가
               </div>
+              <div className="context-menu-separator"></div>
+              <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')}>Set as Editable</div>
+              <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'readonly')}>Set as Read-only</div>
+              <div className="context-menu-item" onClick={() => handleClearPermission(contextMenu.path)}>Clear Permission</div>
             </>
           )}
         </div>

@@ -1,11 +1,15 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
-use tauri::{Emitter, Window};
+use tauri::{AppHandle, Emitter, Manager, Window};
 use walkdir::WalkDir;
 use zip::write::FileOptions;
+
+mod mft;
+use mft::MftIndex;
 
 #[derive(serde::Serialize)]
 struct ZipEntry {
@@ -22,6 +26,64 @@ struct ProgressPayload {
     total: u64,
     processed: u64,
     filename: String,
+}
+
+// 앱 상태 관리
+struct AppState {
+    mft: Arc<MftIndex>,
+}
+
+/// 앱 데이터 디렉터리에 인덱스 파일 경로를 가져옵니다.
+fn get_index_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path()
+        .app_config_dir()
+        .map_err(|e| format!("Failed to get app config directory: {}", e))?;
+
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create app config directory: {}", e))?;
+    }
+    Ok(dir.join("mft_index.bin"))
+}
+
+#[tauri::command]
+async fn build_mft_index(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    let index_for_build = state.mft.clone();
+
+    // build_index는 CPU 집약적이고 동기적인 함수이므로, 비동기 런타임이 차단되지 않도록 별도 스레드에서 실행합니다.
+    let (count, next_usn, journal_id) =
+        tauri::async_runtime::spawn_blocking(move || index_for_build.build_index())
+            .await
+            .map_err(|e| e.to_string())??; // JoinError 처리 후 build_index의 Result 처리
+
+    // 인덱스 파일 저장 (이것도 I/O 작업이므로 spawn_blocking 사용)
+    let index_for_save = state.mft.clone();
+    let index_path = get_index_path(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        index_for_save.save_to_disk(&index_path, next_usn, journal_id)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    // 모니터링은 무한 루프이므로 별도의 OS 스레드에서 실행합니다.
+    let index_for_monitor = state.mft.clone();
+    let app_for_monitor = app.clone();
+    std::thread::spawn(move || {
+        index_for_monitor.monitor(next_usn, journal_id, move |changes| {
+            let _ = app_for_monitor.emit("file-changes", changes);
+        });
+    });
+
+    Ok(count)
+}
+
+#[tauri::command]
+async fn search_mft(state: tauri::State<'_, AppState>, query: String) -> Result<Vec<String>, String> {
+    let paths = state.mft.search(&query);
+    // PathBuf를 String으로 변환하여 반환
+    Ok(paths.into_iter().map(|p| p.to_string_lossy().into_owned()).collect())
 }
 
 // 압축 명령어
@@ -389,9 +451,54 @@ fn open_file(path: String) -> Result<(), String> {
     open::that(path).map_err(|e| e.to_string())
 }
 
+// 휴지통으로 이동 명령어
+#[tauri::command]
+fn delete_to_trash(paths: Vec<String>) -> Result<(), String> {
+    trash::delete_all(&paths).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let state = AppState {
+                mft: Arc::new(MftIndex::new("C:".to_string())),
+            };
+
+            // 앱 시작 시 인덱스 로드 및 모니터링 시작
+            let index_clone = state.mft.clone();
+            let app_handle = app.handle().clone();
+            let index_path = get_index_path(&app_handle).expect("Failed to get index path on setup");
+
+            // 파일 로드는 I/O 작업이므로 별도 스레드에서 처리
+            std::thread::spawn(move || {
+                if index_path.exists() {
+                    println!("Loading existing index from disk...");
+                    if let Ok((next_usn, journal_id)) = index_clone.load_from_disk(&index_path) {
+                        println!("Index loaded successfully. Starting USN journal monitoring...");
+
+                        // 모니터링 스레드 시작
+                        let monitor_index = index_clone.clone();
+                        let monitor_app_handle = app_handle.clone();
+                        std::thread::spawn(move || {
+                            monitor_index.monitor(next_usn, journal_id, move |changes| {
+                                let _ = monitor_app_handle.emit("file-changes", changes);
+                            });
+                        });
+
+                        // 프론트엔드에 로드 완료 이벤트 전송
+                        let _ = app_handle.emit("index-ready", true);
+                    } else {
+                        println!("Failed to load index file. Please re-index manually.");
+                    }
+                } else {
+                    println!("");
+                }
+            });
+
+            app.manage(state);
+            Ok(())
+        })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
@@ -401,7 +508,10 @@ pub fn run() {
             extract_zip,
             list_zip_contents,
             extract_zip_files,
-            open_file
+            open_file,
+            build_mft_index,
+            search_mft,
+            delete_to_trash
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

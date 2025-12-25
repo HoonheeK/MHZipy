@@ -21,10 +21,15 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+bincode = "1.3"
 serde_json = "1"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
 zip = { version = "2.2", features = ["deflate", "aes-crypto"] }
 walkdir = "2"
 open = "5.0"
+windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Ioctl", "Win32_System_Threading", "Win32_Security", "Win32_System_IO"] }
+dashmap = { version = "5.5", features = ["rayon"] } # 멀티스레드 환경에서 안전한 Map
+rayon = "1.8"   # 병렬 처리용
+trash = "3.3"

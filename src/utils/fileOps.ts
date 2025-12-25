@@ -31,3 +31,9 @@ export async function copyRecursive(source: string, target: string) {
     await copyFile(source, target);
   }
 }
+
+export async function ensureDir(dir: string) {
+  if (!(await exists(dir))) {
+    await mkdir(dir, { recursive: true });
+  }
+}

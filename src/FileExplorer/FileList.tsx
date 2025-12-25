@@ -3,7 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { readDir, stat, rename } from '@tauri-apps/plugin-fs';
 import { confirm } from '@tauri-apps/plugin-dialog';
-import { join, basename } from '@tauri-apps/api/path';
+import { join, basename, dirname } from '@tauri-apps/api/path';
+import { checkPathPermission } from '../command/fileOperations';
 
 interface FileListProps {
   path: string | null;
@@ -17,6 +18,10 @@ interface FileListProps {
   onDelete: (paths: string[]) => void;
   onExtract: (path: string) => void;
   refreshTrigger?: number;
+  searchQuery?: string;
+  filesOverride?: FileData[];
+  editableFolders?: string[];
+  readonlyFolders?: string[];
 }
 
 interface FileData {
@@ -35,7 +40,14 @@ interface FileData {
 type SortKey = 'name' | 'path' | 'size' | 'extension' | 'type' | 'mtime' | 'birthtime' | 'atime';
 type SortDirection = 'asc' | 'desc';
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger }: FileListProps) {
+interface FilterConfig {
+  operator: 'contains' | 'gt' | 'lt' | 'range' | 'after' | 'before' | 'between';
+  value: string;
+  value2: string;
+  unit: number; // for size multiplier
+}
+
+export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -43,6 +55,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     key: 'name',
     direction: 'asc',
   });
+  
+  const [activeFilters, setActiveFilters] = useState<Record<string, FilterConfig>>({});
+  const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [filterState, setFilterState] = useState<FilterConfig>({ operator: 'contains', value: '', value2: '', unit: 1 });
+
   const [version, setVersion] = useState(0); // 파일 목록 갱신용
 
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
@@ -73,6 +90,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   // Column Resizing State
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
     name: 250,
+    path: 150,
     size: 100,
     type: 120,
     birthtime: 150,
@@ -90,6 +108,12 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const fileRefs = useRef<Map<string, HTMLLIElement>>(new Map());
 
   useEffect(() => {
+    if (filesOverride) {
+      setFiles(filesOverride);
+      setLastSelectedIndex(null);
+      setAnchorIndex(null);
+      return;
+    }
     if (!path) return;
     setLastSelectedIndex(null);
     setAnchorIndex(null);
@@ -153,7 +177,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     return () => {
       isMounted = false;
     };
-  }, [path, version, refreshTrigger]);
+  }, [path, version, refreshTrigger, filesOverride]);
+
+  // 검색어가 변경되면 포커스 인덱스 초기화
+  useEffect(() => {
+    setLastSelectedIndex(null);
+    setAnchorIndex(null);
+  }, [searchQuery]);
 
   // Column Resize Handlers
   const handleResizeStart = (e: React.MouseEvent, colKey: string) => {
@@ -186,6 +216,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     };
   }, [resizingCol]);
 
+  const handleOpenFilter = (e: React.MouseEvent, colKey: string) => {
+    e.stopPropagation();
+    const isOpen = openFilter === colKey;
+    setOpenFilter(isOpen ? null : colKey);
+    setFilterState(activeFilters[colKey] || { operator: 'contains', value: '', value2: '', unit: 1 });
+  };
+
   const handleAutoFit = (colKey: string) => {
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
@@ -198,6 +235,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       let text = '';
       switch (colKey) {
         case 'name': text = file.name; break;
+        case 'path': text = file.path; break;
         case 'size': text = formatSize(file.size, file.isDirectory); break;
         case 'type': text = file.type; break;
         case 'mtime': text = formatDate(file.mtime); break;
@@ -219,7 +257,46 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }));
   };
 
-  const sortedFiles = [...files].sort((a, b) => {
+  const sortedFiles = [...files]
+    .filter((file) => !searchQuery || file.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter((file) => {
+      for (const [key, filter] of Object.entries(activeFilters)) {
+        let val: any = null;
+        if (key === 'name') val = file.name;
+        else if (key === 'path') val = file.path;
+        else if (key === 'type') val = file.type;
+        else if (key === 'size') val = file.size;
+        else if (key === 'birthtime') val = file.birthtime;
+        else if (key === 'mtime') val = file.mtime;
+        else if (key === 'atime') val = file.atime;
+
+        if (val === null) return false;
+
+        if (['name', 'path', 'type'].includes(key)) {
+          if (filter.value && !String(val).toLowerCase().includes(filter.value.toLowerCase())) return false;
+        } else if (key === 'size') {
+          const size = Number(val);
+          const v1 = Number(filter.value) * filter.unit;
+          const v2 = Number(filter.value2) * filter.unit;
+          if (filter.operator === 'gt' && size <= v1) return false;
+          if (filter.operator === 'lt' && size >= v1) return false;
+          if (filter.operator === 'range' && (size < v1 || size > v2)) return false;
+        } else if (['birthtime', 'mtime', 'atime'].includes(key)) {
+          const date = val as Date;
+          const time = date.getTime();
+          const d1 = new Date(filter.value).getTime();
+          const d2 = new Date(filter.value2).getTime();
+          
+          if (isNaN(d1)) continue; // Invalid date input
+
+          if (filter.operator === 'after' && time <= d1) return false;
+          if (filter.operator === 'before' && time >= d1) return false;
+          if (filter.operator === 'between' && (time < d1 || time > d2)) return false;
+        }
+      }
+      return true;
+    })
+    .sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) {
       return a.isDirectory ? -1 : 1;
     }
@@ -254,6 +331,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     return direction === 'asc' ? result : -result;
   });
 
+  useEffect(() => {
+    if (searchQuery) {
+      console.log('Current Search Folder:', path);
+      console.log('Filtered Files:', sortedFiles);
+    }
+  }, [searchQuery, path, files, sortConfig]);
+
   const formatSize = (bytes: number, isDir?: boolean) => {
     if (isDir) return '';
     if (bytes === 0) return '0 B';
@@ -283,21 +367,21 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     const newSelected = new Set(isMulti ? selectedFiles : []);
     
     // Shift Click: Anchor부터 현재까지 선택
-    if (e.shiftKey && (anchorIndex !== null || lastSelectedIndex !== null)) {
+    if (e.shiftKey && (anchorIndex !== null || lastSelectedIndex !== null) && sortedFiles.length > 0) {
       const startIdx = anchorIndex ?? lastSelectedIndex ?? index;
       const start = Math.min(startIdx, index);
       const end = Math.max(startIdx, index);
       for (let i = start; i <= end; i++) {
-        newSelected.add(sortedFiles[i].name);
+        newSelected.add(sortedFiles[i].path);
       }
       setLastSelectedIndex(index); // 포커스 이동, 앵커 유지
     } else {
       // 일반 클릭 또는 Ctrl 클릭
       if (isMulti) {
-        if (newSelected.has(file.name)) newSelected.delete(file.name);
-        else newSelected.add(file.name);
+        if (newSelected.has(file.path)) newSelected.delete(file.path);
+        else newSelected.add(file.path);
       } else {
-        newSelected.add(file.name);
+        newSelected.add(file.path);
       }
       setLastSelectedIndex(index);
       setAnchorIndex(index); // 앵커 이동
@@ -311,8 +395,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
       dragStartRef.current = {
-        x: e.clientX - rect.left + containerRef.current.scrollLeft,
-        y: e.clientY - rect.top + containerRef.current.scrollTop
+        x: (e.clientX - rect.left) + containerRef.current.scrollLeft,
+        y: (e.clientY - rect.top) + containerRef.current.scrollTop
       };
       setIsSelecting(true);
       onSelectFiles(new Set()); // Clear selection on drag start
@@ -324,8 +408,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       if (!isSelecting || !dragStartRef.current || !containerRef.current) return;
 
       const rect = containerRef.current.getBoundingClientRect();
-      const currentX = e.clientX - rect.left + containerRef.current.scrollLeft;
-      const currentY = e.clientY - rect.top + containerRef.current.scrollTop;
+      const currentX = (e.clientX - rect.left) + containerRef.current.scrollLeft;
+      const currentY = (e.clientY - rect.top) + containerRef.current.scrollTop;
 
       const newRect = {
         x: Math.min(dragStartRef.current.x, currentX),
@@ -338,7 +422,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       // Calculate intersection
       const newSelected = new Set<string>();
       sortedFiles.forEach((file) => {
-        const el = fileRefs.current.get(file.name);
+        const el = fileRefs.current.get(file.path);
         if (el) {
           const itemRect = {
             x: el.offsetLeft,
@@ -354,7 +438,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             newRect.y < itemRect.y + itemRect.h &&
             newRect.y + newRect.h > itemRect.y
           ) {
-            newSelected.add(file.name);
+            newSelected.add(file.path);
           }
         }
       });
@@ -378,13 +462,18 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   }, [isSelecting, sortedFiles, onSelectFiles]);
 
   const handleRename = async () => {
-    if (!path || !renamingFile || !renameText || renamingFile === renameText) {
+    if (!renamingFile || !renameText) {
+      setRenamingFile(null);
+      return;
+    }
+    if (!checkPathPermission(renamingFile, editableFolders, readonlyFolders)) {
+      await confirm('이 파일에 대한 편집 권한이 없습니다.', { title: '권한 오류', kind: 'error' });
       setRenamingFile(null);
       return;
     }
     try {
-      const oldPath = await join(path, renamingFile);
-      const newPath = await join(path, renameText);
+      const oldPath = renamingFile;
+      const newPath = await join(await dirname(oldPath), renameText);
       await rename(oldPath, newPath);
       setVersion(v => v + 1);
     } catch (error) {
@@ -395,43 +484,58 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   };
 
   const performDelete = async () => {
-    if (!path || selectedFiles.size === 0) return;
-    const fullPaths = await Promise.all(Array.from(selectedFiles).map(name => join(path, name)));
+    if (selectedFiles.size === 0) return;
+    const fullPaths = Array.from(selectedFiles);
+    for (const p of fullPaths) {
+      if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
+        await confirm(`'${p}'에 대한 삭제 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        return;
+      }
+    }
     onDelete(fullPaths);
     // Note: We don't clear selection here immediately as we rely on refreshTrigger from parent
     // but we could optimistically clear it if needed.
   };
 
   const performCopy = () => {
-    if (!path) return;
-    (async () => {
-       const fullPaths = await Promise.all(Array.from(selectedFiles).map(name => join(path, name)));
-       onCopy(fullPaths);
-    })();
+    if (selectedFiles.size === 0) return;
+    const fullPaths = Array.from(selectedFiles);
+    onCopy(fullPaths);
   };
 
   const performCut = () => {
-    if (!path) return;
-    (async () => {
-       const fullPaths = await Promise.all(Array.from(selectedFiles).map(name => join(path, name)));
-       onCut(fullPaths);
-    })();
+    if (selectedFiles.size === 0) return;
+    for (const p of Array.from(selectedFiles)) {
+      if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
+        confirm(`'${p}'에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        return;
+      }
+    }
+    const fullPaths = Array.from(selectedFiles);
+    onCut(fullPaths);
   };
 
   const performCompress = () => {
-    if (!path) return;
     if (selectedFiles.size === 0) return;
 
     (async () => {
+      // 압축 파일 생성 위치: 첫 번째 선택된 파일의 부모 폴더
+      const firstFile = Array.from(selectedFiles)[0];
+      // const parentDir = await dirname(firstFile);
+
       // 기본 압축 파일명 설정
       let defaultName = "Archive.zip";
       if (selectedFiles.size === 1) {
-        const name = Array.from(selectedFiles)[0];
+        const name = await basename(firstFile);
         const extIndex = name.lastIndexOf('.');
         defaultName = (extIndex > 0 ? name.substring(0, extIndex) : name) + ".zip";
       } else {
-        const parentName = await basename(path);
-        defaultName = `${parentName}.zip`;
+        if (path) {
+          const parentName = await basename(path);
+          defaultName = `${parentName}.zip`;
+        } else {
+          defaultName = "Archive.zip";
+        }
       }
       setCompressName(defaultName);
       setCompressMethod('deflated');
@@ -442,12 +546,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   };
 
   const performExtract = () => {
-    if (!path || selectedFiles.size !== 1) return;
-    (async () => {
-       const fileName = Array.from(selectedFiles)[0];
-       const fullPath = await join(path, fileName);
-       onExtract(fullPath);
-    })();
+    if (selectedFiles.size !== 1) return;
+    if (!checkPathPermission(Array.from(selectedFiles)[0], editableFolders, readonlyFolders)) {
+      confirm('이 위치에 압축을 풀 권한이 없습니다.', { title: '권한 오류', kind: 'error' });
+      return;
+    }
+    const fullPath = Array.from(selectedFiles)[0];
+    onExtract(fullPath);
   };
 
   const handleContextMenu = (e: React.MouseEvent, file?: FileData, index?: number) => {
@@ -456,8 +561,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     
     if (file && index !== undefined) {
       // 선택되지 않은 파일 위에서 우클릭 시 해당 파일만 선택
-      if (!selectedFiles.has(file.name)) {
-        onSelectFiles(new Set([file.name]));
+      if (!selectedFiles.has(file.path)) {
+        onSelectFiles(new Set([file.path]));
         setLastSelectedIndex(index);
         setAnchorIndex(index);
       }
@@ -497,19 +602,42 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
   };
 
-  const handleFileDoubleClick = async (e: React.MouseEvent, file: FileData) => {
+  const openItem = async (file: FileData) => {
     if (file.isDirectory) {
-      e.stopPropagation();
       onNavigate(file.path);
       return;
     }
     if (file.name.toLowerCase().endsWith('.zip')) {
-      e.stopPropagation();
       await openZipFile(file);
     } else {
-      e.stopPropagation();
       console.log('Opening file:', file.path);
       await invoke('open_file', { path: file.path });
+    }
+  };
+
+  const openItems = async (items: FileData[]) => {
+    if (items.length === 1) {
+      await openItem(items[0]);
+      return;
+    }
+    for (const item of items) {
+      if (item.isDirectory) continue;
+      if (item.name.toLowerCase().endsWith('.zip')) {
+        await openZipFile(item);
+      } else {
+        console.log('Opening file:', item.path);
+        await invoke('open_file', { path: item.path });
+      }
+    }
+  };
+
+  const handleFileDoubleClick = async (e: React.MouseEvent, file: FileData) => {
+    e.stopPropagation();
+    const selectedData = sortedFiles.filter(f => selectedFiles.has(f.path));
+    if (selectedFiles.has(file.path) && selectedData.length > 1) {
+      await openItems(selectedData);
+    } else {
+      await openItem(file);
     }
   };
 
@@ -669,6 +797,10 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (!dataString) dataString = e.dataTransfer.getData('text/plain'); // fallback 확인
     if (!dataString) return;
 
+    if (path && !checkPathPermission(path, editableFolders, readonlyFolders)) {
+      await confirm('이 폴더에 대한 쓰기 권한이 없습니다.', { title: '권한 오류', kind: 'error' });
+      return;
+    }
     try {
       const data = JSON.parse(dataString);
       if (data.action === 'extract_zip_files' && data.zipPath && path) {
@@ -712,8 +844,9 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       });
 
     try {
-      const fullPaths = await Promise.all(Array.from(selectedFiles).map(name => join(path, name)));
-      const targetZipPath = await join(path, compressName.endsWith('.zip') ? compressName : `${compressName}.zip`);
+      const fullPaths = Array.from(selectedFiles);
+      const targetDir = await dirname(fullPaths[0]);
+      const targetZipPath = await join(targetDir, compressName.endsWith('.zip') ? compressName : `${compressName}.zip`);
       
       await invoke('compress_files', { 
         paths: fullPaths, 
@@ -748,10 +881,21 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
     if (sortedFiles.length === 0) return;
 
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const selectedData = sortedFiles.filter(f => selectedFiles.has(f.path));
+      if (selectedData.length > 0) {
+        await openItems(selectedData);
+      } else if (lastSelectedIndex !== null && sortedFiles[lastSelectedIndex]) {
+        await openItem(sortedFiles[lastSelectedIndex]);
+      }
+      return;
+    }
+
     if (e.key === 'F2' && selectedFiles.size === 1) {
       const fileName = Array.from(selectedFiles)[0];
       setRenamingFile(fileName);
-      setRenameText(fileName);
+      basename(fileName).then(name => setRenameText(name));
       return;
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
       e.preventDefault();
@@ -771,7 +915,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       setLastSelectedIndex(newIndex);
       
       // Scroll into view
-      const el = fileRefs.current.get(sortedFiles[newIndex].name);
+      const el = fileRefs.current.get(sortedFiles[newIndex].path);
       el?.scrollIntoView({ block: 'nearest' });
 
       if (e.shiftKey) {
@@ -782,11 +926,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         const end = Math.max(startIdx, newIndex);
         const newSelected = new Set<string>();
         for (let i = start; i <= end; i++) {
-          newSelected.add(sortedFiles[i].name);
+          newSelected.add(sortedFiles[i].path);
         }
         onSelectFiles(newSelected);
       } else {
-        onSelectFiles(new Set([sortedFiles[newIndex].name]));
+        onSelectFiles(new Set([sortedFiles[newIndex].path]));
         setAnchorIndex(newIndex);
       }
     }
@@ -797,8 +941,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     // If dragging a file not in selection, select it (optional, but standard behavior usually)
     // If dragging selection, drag all.
     let filesToDrag = Array.from(selectedFiles);
-    if (!selectedFiles.has(file.name)) {
-      filesToDrag = [file.name];
+    if (!selectedFiles.has(file.path)) {
+      filesToDrag = [file.path];
     }
     
     // We need full paths. Since we can't await, we construct them manually or hope receiver handles it.
@@ -812,16 +956,45 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     // Let's use a trick: send the source dir and filenames, let receiver join?
     // Or just hardcode separator based on navigator.platform?
     // Let's try to use the `path` prop which is `C:\...`.
-    const separator = path.includes('\\') ? '\\' : '/';
-    const fullPaths = filesToDrag.map(name => `${path}${path.endsWith(separator) ? '' : separator}${name}`);
-    
-    e.dataTransfer.setData('application/json', JSON.stringify({ paths: fullPaths }));
+    e.dataTransfer.setData('application/json', JSON.stringify({ paths: filesToDrag }));
     e.dataTransfer.effectAllowed = 'copyMove';
   };
 
-  if (!path) return <div style={{ padding: '20px', color: '#888' }}>폴더를 선택하여 파일을 확인하세요.</div>;
+  const getMenuPosition = () => {
+    if (!contextMenu) return {};
+    const { x, y } = contextMenu;
+    const width = 200;
+    const height = 300;
+    
+    const style = {
+      top: y,
+      left: x,
+      width: '200px',
+      fontSize: '14px',
+      transform: 'none'
+    };
 
-  const cellStyle = { padding: '0 8px', borderRight: '1px solid #eee', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 } as const;
+    let tx = '0';
+    let ty = '0';
+
+    if (x + width > window.innerWidth) {
+      tx = '-100%';
+    }
+    if (y + height > window.innerHeight) {
+      ty = '-100%';
+    }
+    
+    if (tx !== '0' || ty !== '0') {
+      style.transform = `translate(${tx}, ${ty})`;
+    }
+    
+    return style;
+  };
+
+  // path가 없고 filesOverride도 없으면 안내 메시지
+  if (!path && !filesOverride) return <div style={{ padding: '20px', color: '#888' }}>폴더를 선택하여 파일을 확인하세요.</div>;
+
+  const cellStyle = { padding: '0 8px', borderRight: '1px solid #eee', display: 'flex', alignItems: 'center', flexShrink: 0 } as const;
 
   const renderResizer = (colKey: string) => (
     <div
@@ -830,9 +1003,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         right: 0,
         top: 0,
         bottom: 0,
-        width: '4px',
+        width: '12px',
+        // right: '-6px',
         cursor: 'col-resize',
         zIndex: 10,
+        opacity: 0,
       }}
       onMouseDown={(e) => handleResizeStart(e, colKey)}
       onDoubleClick={(e) => {
@@ -841,6 +1016,106 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       }}
       onClick={(e) => e.stopPropagation()}
     />
+  );
+
+  const renderFilterPopup = (colKey: string) => {
+    const isSize = colKey === 'size';
+    const isDate = ['mtime', 'birthtime', 'atime'].includes(colKey);
+    
+    return (
+      <div 
+        style={{ 
+          position: 'absolute', top: '100%', left: 0, backgroundColor: 'white', 
+          border: '1px solid #ccc', padding: '10px', zIndex: 100, 
+          boxShadow: '0 4px 8px rgba(0,0,0,0.1)', minWidth: '220px',
+          cursor: 'default', color: 'black', fontWeight: 'normal'
+        }} 
+        onClick={e => e.stopPropagation()}
+      >
+        {/* <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Filter: {colKey}</div> */}
+        
+        {isSize ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <select 
+              value={filterState.operator} 
+              onChange={e => setFilterState({ ...filterState, operator: e.target.value as any })}
+              style={{ width: '100%', padding: '4px' }}
+            >
+              <option value="gt">Greater than (&gt;)</option>
+              <option value="lt">Less than (&lt;)</option>
+              <option value="range">Range</option>
+            </select>
+            <div style={{ display: 'flex', gap: '5px' }}>
+              <input type="number" value={filterState.value} onChange={e => setFilterState({ ...filterState, value: e.target.value })} style={{ flex: 1, padding: '4px' }} placeholder="Size" />
+              <select value={filterState.unit} onChange={e => setFilterState({ ...filterState, unit: Number(e.target.value) })} style={{ width: '60px' }}>
+                <option value={1}>B</option>
+                <option value={1024}>KB</option>
+                <option value={1024*1024}>MB</option>
+                <option value={1024*1024*1024}>GB</option>
+              </select>
+            </div>
+            {filterState.operator === 'range' && (
+              <input type="number" value={filterState.value2} onChange={e => setFilterState({ ...filterState, value2: e.target.value })} style={{ width: '100%', padding: '4px' }} placeholder="Max Size" />
+            )}
+          </div>
+        ) : isDate ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <select 
+              value={filterState.operator} 
+              onChange={e => setFilterState({ ...filterState, operator: e.target.value as any })}
+              style={{ width: '100%', padding: '4px' }}
+            >
+              <option value="after">After</option>
+              <option value="before">Before</option>
+              <option value="between">Between</option>
+            </select>
+            <input type="date" value={filterState.value} onChange={e => setFilterState({ ...filterState, value: e.target.value })} style={{ width: '100%', padding: '4px' }} />
+            {filterState.operator === 'between' && (
+              <input type="date" value={filterState.value2} onChange={e => setFilterState({ ...filterState, value2: e.target.value })} style={{ width: '100%', padding: '4px' }} />
+            )}
+          </div>
+        ) : (
+          <input 
+            type="text" 
+            value={filterState.value} 
+            onChange={e => setFilterState({ ...filterState, value: e.target.value })} 
+            placeholder="Contains..." 
+            style={{ width: '100%', padding: '4px', boxSizing: 'border-box' }}
+            autoFocus
+          />
+        )}
+
+        <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '5px' }}>
+          <button onClick={() => {
+            const newFilters = { ...activeFilters };
+            delete newFilters[colKey];
+            setActiveFilters(newFilters);
+            setOpenFilter(null);
+          }}>Clear</button>
+          <button onClick={() => {
+            setActiveFilters({ ...activeFilters, [colKey]: filterState });
+            setOpenFilter(null);
+          }}>Apply</button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderHeaderCell = (colKey: string, label: string, align: 'left' | 'center' | 'right' = 'left') => (
+    <div style={{ ...cellStyle, width: columnWidths[colKey], cursor: 'pointer', position: 'relative', overflow: 'visible' }} onClick={() => handleSort(colKey as SortKey)}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: align }}>
+        {label} {sortConfig.key === colKey && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+      </span>
+      <span 
+        onClick={(e) => handleOpenFilter(e, colKey)}
+        style={{ marginLeft: '4px', padding: '0 4px', color: activeFilters[colKey] ? '#007bff' : '#ccc', fontWeight: 'bold' }}
+        title="Filter"
+      >
+        Y
+      </span>
+      {renderResizer(colKey)}
+      {openFilter === colKey && renderFilterPopup(colKey)}
+    </div>
   );
 
   return (
@@ -874,30 +1149,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <div style={{ ...cellStyle, width: columnWidths.name, cursor: 'pointer', display: 'flex', alignItems: 'center', position: 'relative' }} onClick={() => handleSort('name')}>
-            이름 {sortConfig.key === 'name' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-            {renderResizer('name')}
-          </div>
-          <div style={{ ...cellStyle, width: columnWidths.size, cursor: 'pointer', textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', position: 'relative' }} onClick={() => handleSort('size')}>
-            크기 {sortConfig.key === 'size' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-            {renderResizer('size')}
-          </div>
-          <div style={{ ...cellStyle, width: columnWidths.type, cursor: 'pointer', display: 'flex', alignItems: 'center', position: 'relative' }} onClick={() => handleSort('type')}>
-            Type {sortConfig.key === 'type' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-            {renderResizer('type')}
-          </div>
-          <div style={{ ...cellStyle, width: columnWidths.birthtime, cursor: 'pointer', textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', position: 'relative' }} onClick={() => handleSort('birthtime')}>
-            Date Created {sortConfig.key === 'birthtime' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-            {renderResizer('birthtime')}
-          </div>
-          <div style={{ ...cellStyle, width: columnWidths.mtime, cursor: 'pointer', textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', position: 'relative' }} onClick={() => handleSort('mtime')}>
-            Date Modified {sortConfig.key === 'mtime' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-            {renderResizer('mtime')}
-          </div>
-          <div style={{ ...cellStyle, width: columnWidths.atime, cursor: 'pointer', textAlign: 'right', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', borderRight: 'none', position: 'relative' }} onClick={() => handleSort('atime')}>
-            Date Accessed {sortConfig.key === 'atime' && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-            {renderResizer('atime')}
-          </div>
+          {renderHeaderCell('name', 'Name')}
+          {renderHeaderCell('size', 'Size', 'right')}
+          {renderHeaderCell('type', 'Type')}
+          {renderHeaderCell('birthtime', 'Date Created', 'center')}
+          {renderHeaderCell('mtime', 'Date Modified', 'center')}
+          {renderHeaderCell('atime', 'Date Accessed', 'center')}
+          {renderHeaderCell('path', 'Path')}
         </div>
 
         {selectionRect && (
@@ -914,13 +1172,15 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           }} />
         )}
         {sortedFiles.length === 0 ? (
-          <div style={{ padding: '20px', color: '#888', textAlign: 'center' }}>파일이 없습니다.</div>
+          <div style={{ padding: '20px', color: '#888', textAlign: 'center' }}>
+            {files.length > 0 && searchQuery ? '검색 결과가 없습니다.' : '파일이 없습니다.'}
+          </div>
         ) : (
           <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
             {sortedFiles.map((file, index) => (
               <li 
-                key={file.name} 
-                ref={(el) => { if (el) fileRefs.current.set(file.name, el); }}
+                key={file.path} 
+                ref={(el) => { if (el) fileRefs.current.set(file.path, el); }}
                 onClick={(e) => handleFileClick(e, file, index)}
                 onDoubleClick={(e) => handleFileDoubleClick(e, file)}
                 onMouseDown={(e) => e.stopPropagation()}
@@ -929,13 +1189,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                 onContextMenu={(e) => handleContextMenu(e, file, index)}
                 style={{ 
                   padding: '6px 0', borderBottom: '1px solid #f5f5f5', display: 'flex', alignItems: 'center', fontSize: '0.9em',
-                  backgroundColor: selectedFiles.has(file.name) ? '#e6f3ff' : 'transparent',
+                  backgroundColor: selectedFiles.has(file.path) ? '#e6f3ff' : 'transparent',
                   cursor: 'default', minWidth: 'fit-content'
                 }}
               >
                 <div style={{ ...cellStyle, width: columnWidths.name, display: 'flex', alignItems: 'center' }}>
                   <span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : '📄'}</span>
-                  {renamingFile === file.name ? (
+                  {renamingFile === file.path ? (
                     <input
                       autoFocus
                       value={renameText}
@@ -950,23 +1210,26 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                       style={{ flex: 1 }}
                     />
                   ) : (
-                    <span title={file.name}>{file.name}</span>
+                    <span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.name}</span>
                   )}
                 </div>
-                <div style={{ ...cellStyle, width: columnWidths.size, textAlign: 'right', color: '#666' }}>
-                  {formatSize(file.size, file.isDirectory)}
+                <div style={{ ...cellStyle, width: columnWidths.size, color: '#666' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>
                 </div>
                 <div style={{ ...cellStyle, width: columnWidths.type, color: '#666' }}>
-                  {file.type}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>
                 </div>
-                <div style={{ ...cellStyle, width: columnWidths.birthtime, textAlign: 'right', color: '#666' }}>
-                  {formatDate(file.birthtime)}
+                <div style={{ ...cellStyle, width: columnWidths.birthtime, color: '#666' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>
                 </div>
-                <div style={{ ...cellStyle, width: columnWidths.mtime, textAlign: 'right', color: '#666' }}>
-                  {formatDate(file.mtime)}
+                <div style={{ ...cellStyle, width: columnWidths.mtime, color: '#666' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.mtime)}</span>
                 </div>
-                <div style={{ ...cellStyle, width: columnWidths.atime, textAlign: 'right', color: '#666' }}>
-                  {formatDate(file.atime)}
+                <div style={{ ...cellStyle, width: columnWidths.atime, color: '#666' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.atime)}</span>
+                </div>
+                <div style={{ ...cellStyle, width: columnWidths.path, color: '#666' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>
                 </div>
               </li>
             ))}
@@ -975,32 +1238,34 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       </div>
       
       {contextMenu && (
-        <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+        <div className="context-menu" style={getMenuPosition()}>
           {contextMenu.type === 'file' && (
             <>
-              <div className="context-menu-item" onClick={performCut}>
+              <div className="context-menu-item" onClick={performCut} style={{ padding: '4px 10px' }}>
                 <span>잘라내기</span> <span className="shortcut">Ctrl+X</span>
               </div>
-              <div className="context-menu-item" onClick={performCopy}>
+              <div className="context-menu-item" onClick={performCopy} style={{ padding: '4px 10px' }}>
                 <span>복사</span> <span className="shortcut">Ctrl+C</span>
               </div>
               <div className="context-menu-item" onClick={() => {
                 if (selectedFiles.size === 1) {
-                  const fileName = Array.from(selectedFiles)[0];
-                  setRenamingFile(fileName);
-                  setRenameText(fileName);
+                  const filePath = Array.from(selectedFiles)[0];
+                  (async () => {
+                    setRenamingFile(filePath);
+                    setRenameText(await basename(filePath));
+                  })();
                 }
-              }}>
+              }} style={{ padding: '4px 10px' }}>
                 <span>이름 변경</span> <span className="shortcut">F2</span>
               </div>
-              <div className="context-menu-item delete" onClick={performDelete}>
+              <div className="context-menu-item delete" onClick={performDelete} style={{ padding: '4px 10px' }}>
                 <span>삭제</span> <span className="shortcut">Del</span>
               </div>
-              <div className="context-menu-item" onClick={performCompress}>
+              <div className="context-menu-item" onClick={performCompress} style={{ padding: '4px 10px' }}>
                 <span>압축하기</span>
               </div>
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
-                <div className="context-menu-item" onClick={performExtract}>
+                <div className="context-menu-item" onClick={performExtract} style={{ padding: '4px 10px' }}>
                   <span>여기에 풀기</span>
                 </div>
               )}
@@ -1009,7 +1274,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           )}
           <div className="context-menu-item" onClick={() => {
             if (path) onPaste(path);
-          }}>
+          }} style={{ padding: '4px 10px' }}>
             <span>붙여넣기</span> <span className="shortcut">Ctrl+V</span>
           </div>
         </div>

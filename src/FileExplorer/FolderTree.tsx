@@ -154,7 +154,6 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
   };
 
   const handleToggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
     if (e.shiftKey && activePath) {
       const range = getRangePaths(activePath, path);
       onSelect(range, false);
