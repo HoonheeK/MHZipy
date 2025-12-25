@@ -1,0 +1,53 @@
+.mhz-menu {
+  height: 40px;
+  background-color: #333;
+  color: white;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  user-select: none;
+}
+
+.mhz-menu__brand {
+  font-weight: bold;
+  margin-left: auto;
+  font-size: 1.1em;
+}
+
+.mhz-menu__nav {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mhz-btn {
+  background: none;
+  border: none;
+  color: #ddd;
+  cursor: pointer;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.mhz-btn:hover {
+  color: white;
+  background-color: #555;
+  border-radius: 4px;
+}
+
+.mhz-search-input {
+  background-color: #444;
+  border: 1px solid #555;
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  outline: none;
+  height: 20px;
+  font-size: 0.9em;
+}
+
+.mhz-btn.active {
+  color: white;
+  background-color: #555;
+  border-radius: 4px;
+}

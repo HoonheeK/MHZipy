@@ -1,0 +1,69 @@
+.mhz-explorer {
+  display: flex;
+  height: calc(100vh - 56px);
+}
+.mhz-explorer__tree {
+  width: 260px;
+  border-right: 1px solid rgba(0,0,0,0.06);
+  padding: 12px;
+  overflow: auto;
+}
+.mhz-explorer__files {
+  flex: 1;
+  padding: 12px;
+  overflow: auto;
+}
+.mhz-explorer__path { font-weight: 600; margin-bottom: 8px }
+.mhz-tree ul { list-style: none; padding-left: 12px; }
+.mhz-folder { padding: 6px 8px; border-radius: 6px; cursor: pointer }
+.mhz-folder:hover { background: rgba(0,0,0,0.03) }
+.mhz-folder.selected { background: rgba(100,120,255,0.12); }
+.mhz-filelist ul { list-style: none; padding: 0 }
+.mhz-fileitem { padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; background: rgba(0,0,0,0.02)}
+
+.mhz-btn {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 12px;
+  background-color: #222;
+  color: #eee;
+  border: 1px solid #444;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+.mhz-btn:hover {
+  background-color: #333;
+  border-color: #666;
+}
+
+.context-menu {
+  position: fixed;
+  background-color: white;
+  border: 1px solid #ccc;
+  z-index: 1000;
+  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+  padding: 4px 0;
+  min-width: 180px;
+  border-radius: 4px;
+}
+
+.context-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.context-menu-item:hover {
+  background-color: #f0f0f0;
+}
+
+.context-menu-item.delete { color: #d32f2f; }
+.context-menu-separator { border-top: 1px solid #eee; margin: 4px 0; }
+.shortcut { color: #888; font-size: 11px; margin-left: 16px; }
