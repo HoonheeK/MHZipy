@@ -41,6 +41,20 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
   const [isIndexReady, setIsIndexReady] = useState(false); // 인덱스 준비 상태
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 
+  // 페이지(컴포넌트) 마운트 시 로컬 플래그를 확인해 인덱스 준비 상태를 복원
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const flag = localStorage.getItem('mft_index_ready');
+        if (flag === 'true') {
+          setIsIndexReady(true);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to read mft_index_ready from localStorage:', e);
+    }
+  }, []);
+
   // MFT 인덱싱 실행 함수
   const handleBuildIndex = async () => {
     setIsIndexing(true);
@@ -75,7 +89,7 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
     // 파일 변경 이벤트 리스너 설정
     const setupListener = async () => {
       unlisten = await listen<FileChangePayload[]>('file-changes', (event) => {
-        console.log('File changes received:', event.payload);
+        // console.log('File changes received:', event.payload);
         setResults(currentResults => {
           let newResults = [...currentResults];
           for (const change of event.payload) {

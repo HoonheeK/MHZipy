@@ -13,14 +13,31 @@ interface FolderTreeProps {
   onMove: (sourcePaths: string[], targetDir: string, op: 'move' | 'copy') => void;
   refreshTrigger?: number;
   onContextMenu?: (e: React.MouseEvent, path: string) => void;
+  editableFolders?: string[];
 }
 
-export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu }: FolderTreeProps) {
+export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, editableFolders }: FolderTreeProps) {
   const [subFolders, setSubFolders] = useState<{ name: string; path: string }[]>([]);
   const nodeRef = useRef<HTMLDivElement>(null);
 
   const isExpanded = expandedPaths.has(path);
   const isSelected = selectedPaths.has(path);
+
+  // Determine if this path is editable. If `editableFolders` is provided and non-empty,
+  // only folders listed (and their descendants) are considered editable. Otherwise
+  // everything is editable.
+  const isEditable = (() => {
+    if (!Array.isArray(editableFolders) || editableFolders.length === 0) return true;
+    if (path === 'My PC') return true;
+    return editableFolders.some(allowed => {
+      if (path === allowed) return true;
+      if (path.startsWith(allowed)) {
+        const char = path[allowed.length];
+        return char === '\\' || char === '/';
+      }
+      return false;
+    });
+  })();
 
   useEffect(() => {
     if (isSelected && nodeRef.current) {
@@ -70,7 +87,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
             return;
           }
 
-          console.log(`Reading dir: ${path}`);
+          // console.log(`Reading dir: ${path}`);
           const entries = await readDir(path);
           if (!isMounted) return;
           
@@ -86,7 +103,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
           
           // 이름순 정렬
           folders.sort((a, b) => a.name.localeCompare(b.name));
-          console.log(`Loaded ${folders.length} subfolders in ${path}`);
+          // console.log(`Loaded ${folders.length} subfolders in ${path}`);
           setSubFolders(folders);
         } catch (error) {
           if (isMounted) {
@@ -218,7 +235,9 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
           whiteSpace: 'nowrap', 
           outline: 'none', 
           border: '1px solid transparent',
-          backgroundColor: isSelected ? '#cce8ff' : 'transparent'
+          backgroundColor: isSelected ? '#cce8ff' : 'transparent',
+          // Gray out folders that are NOT editable (and their descendants)
+          color: !isEditable ? 'gray' : 'inherit'
         }}
       >
         <span style={{ marginRight: '4px' }}>{isExpanded ? '📂' : '📁'}</span>
@@ -239,6 +258,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
               onMove={onMove}
               refreshTrigger={refreshTrigger}
               onContextMenu={onContextMenu}
+              editableFolders={editableFolders}
             />
           ))}
         </div>

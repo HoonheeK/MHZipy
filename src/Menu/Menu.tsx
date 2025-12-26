@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import "./Menu.css";
+import logo from "../assets/logo.png";
 
 interface MenuProps {
   onPreference?: () => void;
@@ -29,6 +30,7 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
         <button className="mhz-btn" style={{ marginTop: "12px"}} onClick={onToggleView}>
           {currentView === 'folder' ? 'Search View' : 'Folder View'}
         </button>
+        {/* <button className="mhz-btn" style={{ marginTop: "12px"}} onClick={onAutoFitColumns}>Auto-fit Columns</button> */}
         <input 
           type="text" 
           className="mhz-search-input" 
@@ -38,7 +40,7 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
           onKeyDown={handleKeyDown}
         />
       </nav>
-      <div className="mhz-menu__brand"><img src="./src/assets/logo.png" alt="MHZipy" /></div>
+      <div className="mhz-menu__brand"><img src={logo} alt="MHZipy" /></div>
     </header>
   );
 }

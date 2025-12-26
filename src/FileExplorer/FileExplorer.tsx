@@ -299,8 +299,8 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [activePane, filesSelected, selectedPaths, selected]);
 
-  if (currentView === 'search') {
-    return (
+  const searchViewElement = (
+    <div style={{ display: currentView === 'search' ? 'flex' : 'none', height: '100%' }}>
       <SearchView 
         searchQuery={searchQuery || ''}
         onNavigate={(path) => {
@@ -315,11 +315,13 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         onExtract={handleExtract}
         refreshTrigger={refreshTrigger}
       />
-    );
-  }
+    </div>
+  );
 
   return (
-    <div className="mhz-explorer">
+    <>
+      {searchViewElement}
+      <div className="mhz-explorer" style={{ display: currentView === 'search' ? 'none' : 'flex' }}>
       <aside className="mhz-explorer__tree" style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', gap: '5px', padding: '5px', alignItems: 'center', flexShrink: 0 }}>
           <input 
@@ -381,6 +383,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             onMove={handleMove}
             onContextMenu={handleTreeContextMenu}
             refreshTrigger={refreshTrigger}
+            editableFolders={config.editableFolders}
           />
         </div>
       </aside>
@@ -452,5 +455,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         </div>
       )}
     </div>
+    </>
   );
 }

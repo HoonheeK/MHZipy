@@ -492,7 +492,7 @@ pub fn run() {
                         println!("Failed to load index file. Please re-index manually.");
                     }
                 } else {
-                    println!("");
+                    println!("No index file found. Please build the index.");
                 }
             });
 

@@ -64,16 +64,29 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     setQuickAccess(quickAccess.filter((f) => f !== folder));
   };
 
-  const handleAddFolderList = async (list: string[], setList: (l: string[]) => void, title: string) => {
+  const handleAddEditableFolder = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: title,
-      });
+      const selected = await open({ directory: true, multiple: false, title: '편집 가능 폴더 추가' });
       if (selected && typeof selected === 'string') {
-        if (!list.includes(selected)) {
-          setList([...list, selected]);
+        if (!editable.includes(selected)) {
+          setEditable(prev => [...prev, selected]);
+          // Remove from readonly if present
+          setReadonly(prev => prev.filter(p => p !== selected));
+        }
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleAddReadonlyFolder = async () => {
+    try {
+      const selected = await open({ directory: true, multiple: false, title: '읽기 전용 폴더 추가' });
+      if (selected && typeof selected === 'string') {
+        if (!readonly.includes(selected)) {
+          setReadonly(prev => [...prev, selected]);
+          // Remove from editable if present
+          setEditable(prev => prev.filter(p => p !== selected));
         }
       }
     } catch (error) {
@@ -86,7 +99,10 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   };
 
   const handleSave = () => {
-    onSave(path, quickAccess, editable, readonly);
+    // Ensure editable/readonly do not contain the same paths: editable takes precedence
+    const finalEditable = Array.from(new Set(editable));
+    const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
+    onSave(path, quickAccess, finalEditable, finalReadonly);
     onClose();
   };
 
@@ -129,7 +145,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 </div>
               ))}
             </div>
-            <button onClick={() => handleAddFolderList(editable, setEditable, '편집 가능 폴더 추가')}>Add Editable Folder</button>
+            <button onClick={handleAddEditableFolder}>Add Editable Folder</button>
           </div>
           <div className="preference-item">
             <label>Read-only Folders (Deny)</label>
@@ -141,7 +157,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 </div>
               ))}
             </div>
-            <button onClick={() => handleAddFolderList(readonly, setReadonly, '읽기 전용 폴더 추가')}>Add Read-only Folder</button>
+            <button onClick={handleAddReadonlyFolder}>Add Read-only Folder</button>
           </div>
         </div>
         <div className="preference-footer">

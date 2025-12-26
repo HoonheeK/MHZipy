@@ -22,6 +22,7 @@ interface FileListProps {
   filesOverride?: FileData[];
   editableFolders?: string[];
   readonlyFolders?: string[];
+  autoFitTrigger?: number;
 }
 
 interface FileData {
@@ -47,7 +48,7 @@ interface FilterConfig {
   unit: number; // for size multiplier
 }
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders }: FileListProps) {
+export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -55,7 +56,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     key: 'name',
     direction: 'asc',
   });
-  
+
   const [activeFilters, setActiveFilters] = useState<Record<string, FilterConfig>>({});
   const [openFilter, setOpenFilter] = useState<string | null>(null);
   const [filterState, setFilterState] = useState<FilterConfig>({ operator: 'contains', value: '', value2: '', unit: 1 });
@@ -79,7 +80,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const [showPassword, setShowPassword] = useState(false);
   const [extractProgress, setExtractProgress] = useState<{ total: number; processed: number; filename: string; startTime: number } | null>(null);
   const [extractProgressPos, setExtractProgressPos] = useState({ x: 300, y: 300 });
-  
+
   // Compress Dialog State
   const [compressDialogOpen, setCompressDialogOpen] = useState(false);
   const [compressName, setCompressName] = useState('');
@@ -133,7 +134,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
               const isDir = entry.isDirectory;
               const extension = isDir ? '' : (entry.name.split('.').pop() || '');
               const type = isDir ? 'File folder' : (extension ? `${extension.toUpperCase()} File` : 'File');
-              
+
               return {
                 name: entry.name,
                 path: fullPath,
@@ -147,15 +148,15 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                 isDirectory: isDir,
               };
             } catch (error) {
-              return { 
-                name: entry.name, 
-                path: fullPath, 
-                size: 0, 
-                extension: '', 
-                type: '', 
-                mtime: null, 
-                birthtime: null, 
-                atime: null, 
+              return {
+                name: entry.name,
+                path: fullPath,
+                size: 0,
+                extension: '',
+                type: '',
+                mtime: null,
+                birthtime: null,
+                atime: null,
                 readonly: false,
                 isDirectory: entry.isDirectory
               };
@@ -229,7 +230,18 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (!context) return;
     context.font = '0.9em sans-serif'; // CSS 폰트와 유사하게 설정
 
-    let maxWidth = context.measureText(colKey).width + 30; // 헤더 텍스트 + 여백
+    let headerText = colKey;
+    switch (colKey) {
+      case 'name': headerText = 'Name'; break;
+      case 'size': headerText = 'Size'; break;
+      case 'type': headerText = 'Type'; break;
+      case 'birthtime': headerText = 'Date Created'; break;
+      case 'mtime': headerText = 'Date Modified'; break;
+      case 'atime': headerText = 'Date Accessed'; break;
+      case 'path': headerText = 'Path'; break;
+    }
+
+    let maxWidth = context.measureText(headerText).width + 40; // 헤더 텍스트 + 여백 + 정렬 아이콘
 
     files.forEach(file => {
       let text = '';
@@ -248,6 +260,36 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
     // 최대 800px로 제한
     setColumnWidths(prev => ({ ...prev, [colKey]: Math.min(maxWidth, 800) }));
+  };
+
+  // 외부 트리거가 변경되면 모든 컬럼을 Auto-fit 합니다.
+  useEffect(() => {
+    if (autoFitTrigger === undefined) return;
+    const cols: Array<keyof typeof columnWidths> = ['name', 'path', 'size', 'type', 'birthtime', 'mtime', 'atime'];
+    // Slight timeout to ensure DOM/layout ready
+    setTimeout(() => {
+      cols.forEach(c => handleAutoFit(c as string));
+    }, 50);
+  }, [autoFitTrigger, files]);
+
+  const handleFitToScreen = () => {
+    if (!containerRef.current) return;
+    const containerWidth = containerRef.current.clientWidth;
+    
+    const cols = ['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'];
+    const currentTotal = cols.reduce((acc, key) => acc + (columnWidths[key] || 0), 0);
+    
+    if (currentTotal <= 0) return;
+
+    const ratio = containerWidth / currentTotal;
+
+    setColumnWidths(prev => {
+      const next = { ...prev };
+      cols.forEach(key => {
+        next[key] = Math.max(50, Math.floor((prev[key] || 0) * ratio));
+      });
+      return next;
+    });
   };
 
   const handleSort = (key: SortKey) => {
@@ -286,7 +328,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           const time = date.getTime();
           const d1 = new Date(filter.value).getTime();
           const d2 = new Date(filter.value2).getTime();
-          
+
           if (isNaN(d1)) continue; // Invalid date input
 
           if (filter.operator === 'after' && time <= d1) return false;
@@ -297,44 +339,44 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       return true;
     })
     .sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) {
-      return a.isDirectory ? -1 : 1;
-    }
+      if (a.isDirectory !== b.isDirectory) {
+        return a.isDirectory ? -1 : 1;
+      }
 
-    const { key, direction } = sortConfig;
-    let result = 0;
+      const { key, direction } = sortConfig;
+      let result = 0;
 
-    if (key === 'name') {
-      result = a.name.localeCompare(b.name, undefined, { numeric: true });
-    } else if (key === 'path') {
-      result = a.path.localeCompare(b.path);
-    } else if (key === 'size') {
-      result = a.size - b.size;
-    } else if (key === 'extension') {
-      result = a.extension.localeCompare(b.extension);
-    } else if (key === 'type') {
-      result = a.type.localeCompare(b.type);
-    } else if (key === 'mtime') {
-      const timeA = a.mtime?.getTime() || 0;
-      const timeB = b.mtime?.getTime() || 0;
-      result = timeA - timeB;
-    } else if (key === 'birthtime') {
-      const timeA = a.birthtime?.getTime() || 0;
-      const timeB = b.birthtime?.getTime() || 0;
-      result = timeA - timeB;
-    } else if (key === 'atime') {
-      const timeA = a.atime?.getTime() || 0;
-      const timeB = b.atime?.getTime() || 0;
-      result = timeA - timeB;
-    }
+      if (key === 'name') {
+        result = a.name.localeCompare(b.name, undefined, { numeric: true });
+      } else if (key === 'path') {
+        result = a.path.localeCompare(b.path);
+      } else if (key === 'size') {
+        result = a.size - b.size;
+      } else if (key === 'extension') {
+        result = a.extension.localeCompare(b.extension);
+      } else if (key === 'type') {
+        result = a.type.localeCompare(b.type);
+      } else if (key === 'mtime') {
+        const timeA = a.mtime?.getTime() || 0;
+        const timeB = b.mtime?.getTime() || 0;
+        result = timeA - timeB;
+      } else if (key === 'birthtime') {
+        const timeA = a.birthtime?.getTime() || 0;
+        const timeB = b.birthtime?.getTime() || 0;
+        result = timeA - timeB;
+      } else if (key === 'atime') {
+        const timeA = a.atime?.getTime() || 0;
+        const timeB = b.atime?.getTime() || 0;
+        result = timeA - timeB;
+      }
 
-    return direction === 'asc' ? result : -result;
-  });
+      return direction === 'asc' ? result : -result;
+    });
 
   useEffect(() => {
     if (searchQuery) {
-      console.log('Current Search Folder:', path);
-      console.log('Filtered Files:', sortedFiles);
+      // console.log('Current Search Folder:', path);
+      // console.log('Filtered Files:', sortedFiles);
     }
   }, [searchQuery, path, files, sortConfig]);
 
@@ -365,7 +407,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     setContextMenu(null);
     const isMulti = e.ctrlKey || e.metaKey;
     const newSelected = new Set(isMulti ? selectedFiles : []);
-    
+
     // Shift Click: Anchor부터 현재까지 선택
     if (e.shiftKey && (anchorIndex !== null || lastSelectedIndex !== null) && sortedFiles.length > 0) {
       const startIdx = anchorIndex ?? lastSelectedIndex ?? index;
@@ -430,7 +472,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             w: el.offsetWidth,
             h: el.offsetHeight
           };
-          
+
           // Simple AABB intersection
           if (
             newRect.x < itemRect.x + itemRect.w &&
@@ -558,7 +600,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const handleContextMenu = (e: React.MouseEvent, file?: FileData, index?: number) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     if (file && index !== undefined) {
       // 선택되지 않은 파일 위에서 우클릭 시 해당 파일만 선택
       if (!selectedFiles.has(file.path)) {
@@ -580,7 +622,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       entries.sort((a, b) => (a.isDir === b.isDir ? 0 : a.isDir ? -1 : 1) || a.name.localeCompare(b.name));
       setZipEntries(entries);
       setZipPath(file.path);
-      
+
       const hasEncrypted = entries.some(e => e.isEncrypted);
       setIsZipEncrypted(hasEncrypted);
       setExtractPassword(''); // 목록 조회 시에는 암호를 사용하지 않으므로 초기화
@@ -595,7 +637,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
       setZipDialogOpen(true);
       setSelectedZipEntries(new Set());
-      
+
     } catch (error) {
       console.error('Failed to list zip contents:', error);
       await confirm(`ZIP 파일 내용을 읽을 수 없습니다.\n${String(error)}`, { title: '오류', kind: 'error' });
@@ -610,7 +652,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (file.name.toLowerCase().endsWith('.zip')) {
       await openZipFile(file);
     } else {
-      console.log('Opening file:', file.path);
+      // console.log('Opening file:', file.path);
       await invoke('open_file', { path: file.path });
     }
   };
@@ -625,7 +667,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       if (item.name.toLowerCase().endsWith('.zip')) {
         await openZipFile(item);
       } else {
-        console.log('Opening file:', item.path);
+        // console.log('Opening file:', item.path);
         await invoke('open_file', { path: item.path });
       }
     }
@@ -829,9 +871,9 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   const handleExecuteCompress = async () => {
     if (!path || !compressName) return;
-    
+
     setCompressProgress({ total: 0, processed: 0, filename: '준비 중...', startTime: Date.now() });
-    
+
     let unlisten: UnlistenFn | undefined;
     try {
       unlisten = await listen<{ total: number; processed: number; filename: string }>('compress-progress', (event) => {
@@ -843,27 +885,27 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         }));
       });
 
-    try {
-      const fullPaths = Array.from(selectedFiles);
-      const targetDir = await dirname(fullPaths[0]);
-      const targetZipPath = await join(targetDir, compressName.endsWith('.zip') ? compressName : `${compressName}.zip`);
-      
-      await invoke('compress_files', { 
-        paths: fullPaths, 
-        targetZipPath, 
-        method: compressMethod,
-        password: compressPassword || null
-      });
-      
-      setCompressDialogOpen(false);
-      setVersion(v => v + 1);
-    } catch (error) {
-      console.error('Compression failed:', error);
-      await confirm(`압축 실패: ${String(error)}`, { title: '오류', kind: 'error' });
-    } finally {
-      if (unlisten) unlisten();
-      setCompressProgress(null);
-    }
+      try {
+        const fullPaths = Array.from(selectedFiles);
+        const targetDir = await dirname(fullPaths[0]);
+        const targetZipPath = await join(targetDir, compressName.endsWith('.zip') ? compressName : `${compressName}.zip`);
+
+        await invoke('compress_files', {
+          paths: fullPaths,
+          targetZipPath,
+          method: compressMethod,
+          password: compressPassword || null
+        });
+
+        setCompressDialogOpen(false);
+        setVersion(v => v + 1);
+      } catch (error) {
+        console.error('Compression failed:', error);
+        await confirm(`압축 실패: ${String(error)}`, { title: '오류', kind: 'error' });
+      } finally {
+        if (unlisten) unlisten();
+        setCompressProgress(null);
+      }
     } catch (err) {
       // Listener setup failed
     }
@@ -903,17 +945,17 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       onSelectFiles(allNames);
       return;
     }
-    
+
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       setContextMenu(null);
       e.preventDefault();
       let newIndex = lastSelectedIndex === null ? -1 : lastSelectedIndex;
-      
+
       if (e.key === 'ArrowDown') newIndex = Math.min(newIndex + 1, sortedFiles.length - 1);
       else newIndex = Math.max(newIndex - 1, 0);
 
       setLastSelectedIndex(newIndex);
-      
+
       // Scroll into view
       const el = fileRefs.current.get(sortedFiles[newIndex].path);
       el?.scrollIntoView({ block: 'nearest' });
@@ -921,7 +963,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       if (e.shiftKey) {
         const startIdx = anchorIndex ?? lastSelectedIndex ?? newIndex;
         if (anchorIndex === null) setAnchorIndex(startIdx);
-        
+
         const start = Math.min(startIdx, newIndex);
         const end = Math.max(startIdx, newIndex);
         const newSelected = new Set<string>();
@@ -944,7 +986,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (!selectedFiles.has(file.path)) {
       filesToDrag = [file.path];
     }
-    
+
     // We need full paths. Since we can't await, we construct them manually or hope receiver handles it.
     // But FolderTree expects full paths.
     // We can use a synchronous approximation or just the names and source dir?
@@ -965,7 +1007,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     const { x, y } = contextMenu;
     const width = 200;
     const height = 300;
-    
+
     const style = {
       top: y,
       left: x,
@@ -983,11 +1025,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (y + height > window.innerHeight) {
       ty = '-100%';
     }
-    
+
     if (tx !== '0' || ty !== '0') {
       style.transform = `translate(${tx}, ${ty})`;
     }
-    
+
     return style;
   };
 
@@ -1012,7 +1054,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       onMouseDown={(e) => handleResizeStart(e, colKey)}
       onDoubleClick={(e) => {
         e.stopPropagation();
-        handleAutoFit(colKey);
+        handleFitToScreen();
       }}
       onClick={(e) => e.stopPropagation()}
     />
@@ -1021,23 +1063,23 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const renderFilterPopup = (colKey: string) => {
     const isSize = colKey === 'size';
     const isDate = ['mtime', 'birthtime', 'atime'].includes(colKey);
-    
+
     return (
-      <div 
-        style={{ 
-          position: 'absolute', top: '100%', left: 0, backgroundColor: 'white', 
-          border: '1px solid #ccc', padding: '10px', zIndex: 100, 
+      <div
+        style={{
+          position: 'absolute', top: '100%', left: 0, backgroundColor: 'white',
+          border: '1px solid #ccc', padding: '10px', zIndex: 100,
           boxShadow: '0 4px 8px rgba(0,0,0,0.1)', minWidth: '220px',
           cursor: 'default', color: 'black', fontWeight: 'normal'
-        }} 
+        }}
         onClick={e => e.stopPropagation()}
       >
         {/* <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Filter: {colKey}</div> */}
-        
+
         {isSize ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <select 
-              value={filterState.operator} 
+            <select
+              value={filterState.operator}
               onChange={e => setFilterState({ ...filterState, operator: e.target.value as any })}
               style={{ width: '100%', padding: '4px' }}
             >
@@ -1050,8 +1092,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
               <select value={filterState.unit} onChange={e => setFilterState({ ...filterState, unit: Number(e.target.value) })} style={{ width: '60px' }}>
                 <option value={1}>B</option>
                 <option value={1024}>KB</option>
-                <option value={1024*1024}>MB</option>
-                <option value={1024*1024*1024}>GB</option>
+                <option value={1024 * 1024}>MB</option>
+                <option value={1024 * 1024 * 1024}>GB</option>
               </select>
             </div>
             {filterState.operator === 'range' && (
@@ -1060,8 +1102,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           </div>
         ) : isDate ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-            <select 
-              value={filterState.operator} 
+            <select
+              value={filterState.operator}
               onChange={e => setFilterState({ ...filterState, operator: e.target.value as any })}
               style={{ width: '100%', padding: '4px' }}
             >
@@ -1075,11 +1117,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             )}
           </div>
         ) : (
-          <input 
-            type="text" 
-            value={filterState.value} 
-            onChange={e => setFilterState({ ...filterState, value: e.target.value })} 
-            placeholder="Contains..." 
+          <input
+            type="text"
+            value={filterState.value}
+            onChange={e => setFilterState({ ...filterState, value: e.target.value })}
+            placeholder="Contains..."
             style={{ width: '100%', padding: '4px', boxSizing: 'border-box' }}
             autoFocus
           />
@@ -1102,11 +1144,15 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   };
 
   const renderHeaderCell = (colKey: string, label: string, align: 'left' | 'center' | 'right' = 'left') => (
-    <div style={{ ...cellStyle, width: columnWidths[colKey], cursor: 'pointer', position: 'relative', overflow: 'visible' }} onClick={() => handleSort(colKey as SortKey)}>
+    <div
+      style={{ ...cellStyle, width: columnWidths[colKey], cursor: 'pointer', position: 'relative', overflow: 'visible' }}
+      onClick={() => handleSort(colKey as SortKey)}
+      onDoubleClick={() => handleAutoFit(colKey)}
+    >
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: align }}>
         {label} {sortConfig.key === colKey && (sortConfig.direction === 'asc' ? '▲' : '▼')}
       </span>
-      <span 
+      <span
         onClick={(e) => handleOpenFilter(e, colKey)}
         style={{ marginLeft: '4px', padding: '0 4px', color: activeFilters[colKey] ? '#007bff' : '#ccc', fontWeight: 'bold' }}
         title="Filter"
@@ -1119,7 +1165,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   );
 
   return (
-    <div 
+    <div
       style={{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', outline: 'none' }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
@@ -1128,19 +1174,19 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       onDrop={handleContainerDrop}
       onDragOver={handleContainerDragOver}
     >
-      <div 
+      <div
         ref={containerRef}
         style={{ flex: 1, overflow: 'auto', position: 'relative', userSelect: 'none' }}
         onMouseDown={handleMouseDown}
       >
-        <div 
-          style={{ 
-            display: 'flex', 
-            fontWeight: 'bold', 
-            padding: '8px 0', 
-            borderBottom: '2px solid #eee', 
-            userSelect: 'none', 
-            fontSize: '0.9em', 
+        <div
+          style={{
+            display: 'flex',
+            fontWeight: 'bold',
+            padding: '8px 0',
+            borderBottom: '2px solid #eee',
+            userSelect: 'none',
+            fontSize: '0.9em',
             minWidth: 'fit-content',
             position: 'sticky',
             top: 0,
@@ -1178,8 +1224,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         ) : (
           <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
             {sortedFiles.map((file, index) => (
-              <li 
-                key={file.path} 
+              <li
+                key={file.path}
                 ref={(el) => { if (el) fileRefs.current.set(file.path, el); }}
                 onClick={(e) => handleFileClick(e, file, index)}
                 onDoubleClick={(e) => handleFileDoubleClick(e, file)}
@@ -1187,7 +1233,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                 draggable
                 onDragStart={(e) => handleDragStart(e, file)}
                 onContextMenu={(e) => handleContextMenu(e, file, index)}
-                style={{ 
+                style={{
                   padding: '6px 0', borderBottom: '1px solid #f5f5f5', display: 'flex', alignItems: 'center', fontSize: '0.9em',
                   backgroundColor: selectedFiles.has(file.path) ? '#e6f3ff' : 'transparent',
                   cursor: 'default', minWidth: 'fit-content'
@@ -1236,7 +1282,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           </ul>
         )}
       </div>
-      
+
       {contextMenu && (
         <div className="context-menu" style={getMenuPosition()}>
           {contextMenu.type === 'file' && (
@@ -1264,6 +1310,19 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
               <div className="context-menu-item" onClick={performCompress} style={{ padding: '4px 10px' }}>
                 <span>압축하기</span>
               </div>
+              <div className="context-menu-item" onClick={async () => {
+                if (selectedFiles.size === 0) return;
+                const first = Array.from(selectedFiles)[0];
+                try {
+                  const parent = await dirname(first);
+                  setContextMenu(null);
+                  onNavigate(parent);
+                } catch (e) {
+                  console.error('Failed to open in File Explorer:', e);
+                }
+              }} style={{ padding: '4px 10px' }}>
+                <span>File Explorer 로 열기</span>
+              </div>
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className="context-menu-item" onClick={performExtract} style={{ padding: '4px 10px' }}>
                   <span>여기에 풀기</span>
@@ -1289,131 +1348,131 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)', overflow: 'hidden',
           border: '1px solid #ccc'
         }} onClick={e => e.stopPropagation()}>
-          <div 
+          <div
             onMouseDown={handleZipHeaderMouseDown}
-            style={{ 
-              padding: '12px', borderBottom: '1px solid #eee', 
-              fontWeight: 'bold', display: 'flex', justifyContent: 'space-between', 
-              alignItems: 'center', backgroundColor: '#f8f9fa', cursor: 'move' 
+            style={{
+              padding: '12px', borderBottom: '1px solid #eee',
+              fontWeight: 'bold', display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', backgroundColor: '#f8f9fa', cursor: 'move'
             }}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
               ZIP 내용: {zipPath?.split(/[/\\]/).pop()}
             </span>
-            <button 
-              onClick={() => setZipDialogOpen(false)} 
+            <button
+              onClick={() => setZipDialogOpen(false)}
               onMouseDown={(e) => e.stopPropagation()}
               style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.2em', padding: '0 8px' }}
             >×</button>
           </div>
-            <div style={{ padding: '10px', borderBottom: '1px solid #eee', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>풀릴 위치:</label>
-                <input 
-                  type="text" 
-                  value={extractPath} 
-                  onChange={(e) => setExtractPath(e.target.value)}
-                  style={{ flex: 1, padding: '4px', fontSize: '0.9em' }}
+          <div style={{ padding: '10px', borderBottom: '1px solid #eee', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>풀릴 위치:</label>
+              <input
+                type="text"
+                value={extractPath}
+                onChange={(e) => setExtractPath(e.target.value)}
+                style={{ flex: 1, padding: '4px', fontSize: '0.9em' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Password:</label>
+              <div style={{ flex: 1, position: 'relative', display: 'flex' }}>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={extractPassword}
+                  onChange={(e) => setExtractPassword(e.target.value)}
+                  disabled={!isZipEncrypted}
+                  placeholder={isZipEncrypted ? "암호를 입력하세요" : "암호 없음"}
+                  style={{ width: '100%', padding: '4px', paddingRight: '30px', fontSize: '0.9em', backgroundColor: isZipEncrypted ? 'white' : '#f0f0f0', boxSizing: 'border-box' }}
                 />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Password:</label>
-                <div style={{ flex: 1, position: 'relative', display: 'flex' }}>
-                  <input 
-                    type={showPassword ? "text" : "password"} 
-                    value={extractPassword} 
-                    onChange={(e) => setExtractPassword(e.target.value)}
-                    disabled={!isZipEncrypted}
-                    placeholder={isZipEncrypted ? "암호를 입력하세요" : "암호 없음"}
-                    style={{ width: '100%', padding: '4px', paddingRight: '30px', fontSize: '0.9em', backgroundColor: isZipEncrypted ? 'white' : '#f0f0f0', boxSizing: 'border-box' }}
-                  />
-                  {isZipEncrypted && (
-                    <button
-                      onClick={() => setShowPassword(!showPassword)}
-                      style={{
-                        position: 'absolute',
-                        right: '0',
-                        top: '0',
-                        bottom: '0',
-                        border: 'none',
-                        background: 'none',
-                        cursor: 'pointer',
-                        padding: '0 8px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                      tabIndex={-1}
-                      title={showPassword ? "암호 숨기기" : "암호 보이기"}
-                    >
-                      {showPassword ? '🔒' : '👁️'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: '0' }}>
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                {zipEntries.map((entry) => (
-                  <li
-                    key={entry.name}
-                    onClick={(e) => handleZipEntryClick(e, entry.name)}
-                    draggable
-                    onDragStart={(e) => handleZipDragStart(e, entry.name)}
+                {isZipEncrypted && (
+                  <button
+                    onClick={() => setShowPassword(!showPassword)}
                     style={{
-                      padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
-                      backgroundColor: selectedZipEntries.has(entry.name) ? '#e6f3ff' : 'transparent',
-                      cursor: 'default', display: 'flex', alignItems: 'center'
+                      position: 'absolute',
+                      right: '0',
+                      top: '0',
+                      bottom: '0',
+                      border: 'none',
+                      background: 'none',
+                      cursor: 'pointer',
+                      padding: '0 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
                     }}
+                    tabIndex={-1}
+                    title={showPassword ? "암호 숨기기" : "암호 보이기"}
                   >
-                    <span style={{ marginRight: '8px' }}>{entry.isDir ? '📁' : '📄'}</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {entry.name}
-                      {entry.isEncrypted && <span style={{ marginLeft: '6px', fontSize: '0.8em' }}>🔒</span>}
-                    </span>
-                    <span style={{ color: '#888', fontSize: '0.9em' }}>{entry.isDir ? '' : formatSize(entry.size)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div style={{ padding: '10px', borderTop: '1px solid #eee', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.85em', color: '#666', flex: 1 }}>
-                드래그하거나 버튼을 눌러 추출하세요.
-              </span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button 
-                  onClick={handleExtractAllClick}
-                  style={{
-                    padding: '6px 12px', cursor: 'pointer', backgroundColor: '#28a745', color: 'white',
-                    border: 'none', borderRadius: '4px', fontSize: '0.9em'
-                  }}
-                >
-                  모든 항목 추출
-                </button>
-                <button 
-                  onClick={handleExtractSelectedClick}
-                  style={{
-                    padding: '6px 12px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white',
-                    border: 'none', borderRadius: '4px', fontSize: '0.9em'
-                  }}
-                >
-                  선택 항목 추출
-                </button>
+                    {showPassword ? '🔒' : '👁️'}
+                  </button>
+                )}
               </div>
-            </div>
-            <div
-              onMouseDown={handleZipResizeMouseDown}
-              style={{
-                position: 'absolute', bottom: 0, right: 0,
-                width: '16px', height: '16px',
-                cursor: 'nwse-resize',
-                zIndex: 10,
-                display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end'
-              }}
-            >
-              <div style={{ width: 0, height: 0, borderBottom: '10px solid #ccc', borderLeft: '10px solid transparent', margin: '2px' }}></div>
             </div>
           </div>
+          <div style={{ flex: 1, overflow: 'auto', padding: '0' }}>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {zipEntries.map((entry) => (
+                <li
+                  key={entry.name}
+                  onClick={(e) => handleZipEntryClick(e, entry.name)}
+                  draggable
+                  onDragStart={(e) => handleZipDragStart(e, entry.name)}
+                  style={{
+                    padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
+                    backgroundColor: selectedZipEntries.has(entry.name) ? '#e6f3ff' : 'transparent',
+                    cursor: 'default', display: 'flex', alignItems: 'center'
+                  }}
+                >
+                  <span style={{ marginRight: '8px' }}>{entry.isDir ? '📁' : '📄'}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {entry.name}
+                    {entry.isEncrypted && <span style={{ marginLeft: '6px', fontSize: '0.8em' }}>🔒</span>}
+                  </span>
+                  <span style={{ color: '#888', fontSize: '0.9em' }}>{entry.isDir ? '' : formatSize(entry.size)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div style={{ padding: '10px', borderTop: '1px solid #eee', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.85em', color: '#666', flex: 1 }}>
+              드래그하거나 버튼을 눌러 추출하세요.
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={handleExtractAllClick}
+                style={{
+                  padding: '6px 12px', cursor: 'pointer', backgroundColor: '#28a745', color: 'white',
+                  border: 'none', borderRadius: '4px', fontSize: '0.9em'
+                }}
+              >
+                모든 항목 추출
+              </button>
+              <button
+                onClick={handleExtractSelectedClick}
+                style={{
+                  padding: '6px 12px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white',
+                  border: 'none', borderRadius: '4px', fontSize: '0.9em'
+                }}
+              >
+                선택 항목 추출
+              </button>
+            </div>
+          </div>
+          <div
+            onMouseDown={handleZipResizeMouseDown}
+            style={{
+              position: 'absolute', bottom: 0, right: 0,
+              width: '16px', height: '16px',
+              cursor: 'nwse-resize',
+              zIndex: 10,
+              display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end'
+            }}
+          >
+            <div style={{ width: 0, height: 0, borderBottom: '10px solid #ccc', borderLeft: '10px solid transparent', margin: '2px' }}></div>
+          </div>
+        </div>
       )}
 
       {compressDialogOpen && (
@@ -1428,18 +1487,18 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             display: 'flex', flexDirection: 'column', gap: '15px'
           }} onClick={e => e.stopPropagation()}>
             <h3 style={{ margin: 0 }}>압축 설정</h3>
-            
+
             {compressProgress ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px 0' }}>
                 <div style={{ fontSize: '0.9em', color: '#333' }}>
-                  {compressProgress.total > 0 
-                    ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% 완료` 
+                  {compressProgress.total > 0
+                    ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% 완료`
                     : '준비 중...'}
                 </div>
-                <progress 
-                  value={compressProgress.processed} 
-                  max={compressProgress.total || 100} 
-                  style={{ width: '100%', height: '20px' }} 
+                <progress
+                  value={compressProgress.processed}
+                  max={compressProgress.total || 100}
+                  style={{ width: '100%', height: '20px' }}
                 />
                 <div style={{ fontSize: '0.8em', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   처리 중: {compressProgress.filename}
@@ -1457,51 +1516,51 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                 </div>
               </div>
             ) : (
-            <>
-            <div>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>압축 파일 이름</label>
-              <input 
-                type="text" 
-                value={compressName} 
-                onChange={(e) => setCompressName(e.target.value)}
-                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                autoFocus
-              />
-            </div>
+              <>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>압축 파일 이름</label>
+                  <input
+                    type="text"
+                    value={compressName}
+                    onChange={(e) => setCompressName(e.target.value)}
+                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    autoFocus
+                  />
+                </div>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>압축 방식</label>
-              <select 
-                value={compressMethod} 
-                onChange={(e) => setCompressMethod(e.target.value)}
-                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-              >
-                <option value="deflated">Deflate (표준)</option>
-                <option value="stored">Store (압축 안 함)</option>
-              </select>
-            </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>압축 방식</label>
+                  <select
+                    value={compressMethod}
+                    onChange={(e) => setCompressMethod(e.target.value)}
+                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                  >
+                    <option value="deflated">Deflate (표준)</option>
+                    <option value="stored">Store (압축 안 함)</option>
+                  </select>
+                </div>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>암호 (선택 사항)</label>
-              <input 
-                type="password" 
-                value={compressPassword} 
-                onChange={(e) => setCompressPassword(e.target.value)}
-                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                placeholder="암호를 입력하면 파일이 암호화됩니다"
-              />
-            </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>암호 (선택 사항)</label>
+                  <input
+                    type="password"
+                    value={compressPassword}
+                    onChange={(e) => setCompressPassword(e.target.value)}
+                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    placeholder="암호를 입력하면 파일이 암호화됩니다"
+                  />
+                </div>
 
-            <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid #eee', padding: '5px', fontSize: '0.85em', color: '#666' }}>
-              <div>대상 파일 ({selectedFiles.size}개):</div>
-              {Array.from(selectedFiles).map(f => <div key={f}>{f}</div>)}
-            </div>
+                <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid #eee', padding: '5px', fontSize: '0.85em', color: '#666' }}>
+                  <div>대상 파일 ({selectedFiles.size}개):</div>
+                  {Array.from(selectedFiles).map(f => <div key={f}>{f}</div>)}
+                </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>취소</button>
-              <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>압축하기</button>
-            </div>
-            </>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>취소</button>
+                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>압축하기</button>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -1519,14 +1578,14 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         }} onMouseDown={handleExtractProgressMouseDown}>
           <h4 style={{ margin: 0, fontSize: '1em' }}>압축 해제 중...</h4>
           <div style={{ fontSize: '0.9em', color: '#333' }}>
-            {extractProgress.total > 0 
-              ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% 완료` 
+            {extractProgress.total > 0
+              ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% 완료`
               : '준비 중...'}
           </div>
-          <progress 
-            value={extractProgress.processed} 
-            max={extractProgress.total || 100} 
-            style={{ width: '100%', height: '20px' }} 
+          <progress
+            value={extractProgress.processed}
+            max={extractProgress.total || 100}
+            style={{ width: '100%', height: '20px' }}
           />
           <div style={{ fontSize: '0.8em', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {extractProgress.filename}
