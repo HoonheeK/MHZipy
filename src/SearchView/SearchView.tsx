@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { stat } from '@tauri-apps/plugin-fs';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core'; // invoke 추가
+import { open } from '@tauri-apps/plugin-dialog';
 import FileList from '../FileExplorer/FileList';
 
 interface SearchViewProps {
@@ -40,6 +41,8 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
   const [isIndexing, setIsIndexing] = useState(false);
   const [isIndexReady, setIsIndexReady] = useState(false); // 인덱스 준비 상태
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [searchMode, setSearchMode] = useState<'index' | 'directory'>('index');
+  const [manualPath, setManualPath] = useState<string>('');
 
   // 페이지(컴포넌트) 마운트 시 로컬 플래그를 확인해 인덱스 준비 상태를 복원
   useEffect(() => {
@@ -134,8 +137,17 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
   }, [searchQuery]); // searchQuery가 변경될 때마다 리스너의 로직이 최신 검색어를 참조하도록 함
 
   useEffect(() => {
-    if (!searchQuery || !isIndexReady) { // 인덱스가 준비되지 않았으면 검색 안함
+    if (!searchQuery) {
       setResults([]);
+      return;
+    }
+    
+    if (searchMode === 'index' && !isIndexReady) {
+      setResults([]);
+      return;
+    }
+
+    if (searchMode === 'directory' && !manualPath) {
       return;
     }
 
@@ -144,9 +156,13 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
 
     const runSearch = async () => {
       try {
-        // Rust 백엔드의 MFT 검색 호출 (초고속 검색)
-        const paths = await invoke<string[]>('search_mft', { query: searchQuery });
-        
+        let paths: string[] = [];
+        if (searchMode === 'index') {
+           paths = await invoke<string[]>('search_mft', { query: searchQuery });
+        } else {
+           paths = await invoke<string[]>('search_directory', { path: manualPath, query: searchQuery });
+        }
+
         if (!isMounted) return;
 
         // 검색 결과 제한 (성능 최적화)
@@ -211,30 +227,69 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
     return () => {
       isMounted = false;
     };
-  }, [searchQuery, refreshTrigger]);
+  }, [searchQuery, refreshTrigger, searchMode, manualPath, isIndexReady]);
+
+  const handleSelectFolder = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+    });
+    if (selected && typeof selected === 'string') {
+      setManualPath(selected);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', height: '100%', flexDirection: 'column' }}>
-      <div style={{ padding: '10px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <strong>Search Results for: "{searchQuery}"</strong>
-          {isSearching && <span style={{ marginLeft: '10px', color: '#888' }}>(Searching...)</span>}
-          {isIndexReady && <span style={{ marginLeft: '10px', color: '#666' }}>Found: {results.length}</span>}
+      <div style={{ padding: '10px', borderBottom: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <strong>Search Results for: "{searchQuery}"</strong>
+            {isSearching && <span style={{ marginLeft: '10px', color: '#888' }}>(Searching...)</span>}
+            {!isSearching && <span style={{ marginLeft: '10px', color: '#666' }}>Found: {results.length}</span>}
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                <input type="radio" checked={searchMode === 'index'} onChange={() => setSearchMode('index')} style={{ marginRight: '4px' }} />
+                MFT Index (Fast)
+             </label>
+             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                <input type="radio" checked={searchMode === 'directory'} onChange={() => setSearchMode('directory')} style={{ marginRight: '4px' }} />
+                Folder (Recursive)
+             </label>
+          </div>
         </div>
-        <button 
-          onClick={handleBuildIndex} 
-          disabled={isIndexing}
-          style={{ 
-            padding: '6px 12px', 
-            cursor: isIndexing ? 'wait' : 'pointer',
-            backgroundColor: isIndexing ? '#ccc' : (isIndexReady ? '#28a745' : '#007bff'),
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px'
-          }}
-        >
-          {isIndexing ? '인덱싱 중...' : (isIndexReady ? 'MFT 다시 인덱싱' : 'MFT 인덱싱 실행')}
-        </button>
+
+        {searchMode === 'index' ? (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+             <button 
+              onClick={handleBuildIndex} 
+              disabled={isIndexing}
+              style={{ 
+                padding: '4px 12px', 
+                cursor: isIndexing ? 'wait' : 'pointer',
+                backgroundColor: isIndexing ? '#ccc' : (isIndexReady ? '#28a745' : '#007bff'),
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '0.9em'
+              }}
+            >
+              {isIndexing ? '인덱싱 중...' : (isIndexReady ? 'MFT 다시 인덱싱' : 'MFT 인덱싱 실행')}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+            <input 
+              type="text" 
+              value={manualPath} 
+              readOnly 
+              placeholder="검색할 폴더를 선택하세요 (네트워크 드라이브 포함)" 
+              style={{ flex: 1, padding: '4px', fontSize: '0.9em', border: '1px solid #ccc', borderRadius: '4px', backgroundColor: '#f9f9f9' }} 
+            />
+            <button onClick={handleSelectFolder} style={{ padding: '4px 8px', cursor: 'pointer' }}>폴더 선택</button>
+          </div>
+        )}
       </div>
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <FileList

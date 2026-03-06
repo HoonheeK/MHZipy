@@ -33,3 +33,4 @@ windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Storage_Fil
 dashmap = { version = "5.5", features = ["rayon"] } # 멀티스레드 환경에서 안전한 Map
 rayon = "1.8"   # 병렬 처리용
 trash = "3.3"
+sysinfo = "0.30"

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { readDir, exists } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
+import { invoke } from '@tauri-apps/api/core';
 
 interface FolderTreeProps {
   path: string;
@@ -14,9 +14,26 @@ interface FolderTreeProps {
   refreshTrigger?: number;
   onContextMenu?: (e: React.MouseEvent, path: string) => void;
   editableFolders?: string[];
+  allowedPaths?: string[];
 }
 
-export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, editableFolders }: FolderTreeProps) {
+export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, editableFolders, allowedPaths }: FolderTreeProps) {
+  const isAncestorOf = (ancestor: string, descendant: string) => {
+    if (!descendant.startsWith(ancestor)) return false;
+    if (descendant.length === ancestor.length) return true;
+
+    const ancestorHasSlash = ancestor.endsWith('\\') || ancestor.endsWith('/');
+    if (ancestorHasSlash) {
+      return true;
+    }
+
+    const sep = descendant[ancestor.length];
+    return sep === '\\' || sep === '/';
+  };
+
+  if (allowedPaths && path !== 'My PC' && !allowedPaths.some(allowed => isAncestorOf(path, allowed) || isAncestorOf(allowed, path))) {
+    return null;
+  }
   const [subFolders, setSubFolders] = useState<{ name: string; path: string }[]>([]);
   const nodeRef = useRef<HTMLDivElement>(null);
 
@@ -59,7 +76,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
     if (activePath.startsWith(path) && activePath !== path) {
       const charAfterPath = activePath[path.length];
       const isBoundary = path.endsWith('\\') || path.endsWith('/') || charAfterPath === '\\' || charAfterPath === '/';
-      
+
       if (isBoundary && !isExpanded) {
         onToggleExpand(path);
       }
@@ -72,26 +89,34 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
       const loadSubFolders = async () => {
         try {
           if (path === 'My PC') {
-            const drives = ['C:\\', 'D:\\', 'E:\\', 'F:\\', 'G:\\'];
-            const validDrives = [];
-            for (const drive of drives) {
-              try {
-                if (await exists(drive)) {
-                  validDrives.push({ name: `Local Disk (${drive.replace('\\', '')})`, path: drive });
+            try {
+              const drives = await invoke<string[]>('get_available_drives');
+              const validDrives = drives.map((drive) => {
+                let name = drive;
+                if (drive.toLowerCase().includes('onedrive')) {
+                  name = drive.replace(/[/\\]$/, '').split(/[/\\]/).pop() || 'OneDrive';
+                } else if (drive.endsWith(':\\') || drive.endsWith(':/')) {
+                  name = `Local Disk (${drive.replace(/[\\/]$/, '')})`;
                 }
-              } catch (e) {
-                // 드라이브 접근 불가 시 무시
+                return { name, path: drive };
+              });
+
+              if (isMounted) {
+                const finalDrives = allowedPaths
+                  ? validDrives.filter((drive) => allowedPaths.some((allowed) => allowed.startsWith(drive.path)))
+                  : validDrives;
+                setSubFolders(finalDrives);
               }
+            } catch (e) {
+              console.error('Failed to get drives:', e);
             }
-            if (isMounted) setSubFolders(validDrives);
             return;
           }
 
-          // console.log(`Reading dir: ${path}`);
-          const entries = await readDir(path);
+          const entries = await invoke<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }[]>('read_directory', { path });
           if (!isMounted) return;
-          
-          const folders = await Promise.all(
+
+          let folders = await Promise.all(
             entries
               .filter((entry) => entry.isDirectory)
               .map(async (entry) => ({
@@ -100,10 +125,9 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
               }))
           );
           if (!isMounted) return;
-          
+
           // 이름순 정렬
           folders.sort((a, b) => a.name.localeCompare(b.name));
-          // console.log(`Loaded ${folders.length} subfolders in ${path}`);
           setSubFolders(folders);
         } catch (error) {
           if (isMounted) {
@@ -116,17 +140,17 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
     return () => {
       isMounted = false;
     };
-  }, [isExpanded, path, refreshTrigger]);
+  }, [isExpanded, path, refreshTrigger, allowedPaths]);
 
   const getRangePaths = (start: string, end: string): string[] => {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>('.folder-tree-node'));
     const startIdx = nodes.findIndex(n => n.dataset.path === start);
     const endIdx = nodes.findIndex(n => n.dataset.path === end);
     if (startIdx === -1 || endIdx === -1) return [end];
-    
+
     const low = Math.min(startIdx, endIdx);
     const high = Math.max(startIdx, endIdx);
-    
+
     return nodes.slice(low, high + 1).map(n => n.dataset.path!).filter(Boolean);
   };
 
@@ -154,7 +178,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
         const nextIndex = e.key === 'ArrowDown' ? index + 1 : index - 1;
         if (nextIndex >= 0 && nextIndex < nodes.length) {
           nodes[nextIndex].focus();
-          
+
           if (e.shiftKey && activePath) {
             const targetPath = nodes[nextIndex].dataset.path;
             if (targetPath) {
@@ -202,12 +226,12 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
+
     // 선택되지 않은 항목 위에서 우클릭 시 해당 항목만 선택
     if (!selectedPaths.has(path)) {
       onSelect(path, false);
     }
-    
+
     if (onContextMenu) {
       onContextMenu(e, path);
     }
@@ -226,14 +250,14 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
         onContextMenu={handleContextMenu}
-        style={{ 
-          cursor: 'pointer', 
-          userSelect: 'none', 
-          padding: '2px 4px', 
-          display: 'flex', 
-          alignItems: 'center', 
-          whiteSpace: 'nowrap', 
-          outline: 'none', 
+        style={{
+          cursor: 'pointer',
+          userSelect: 'none',
+          padding: '2px 4px',
+          display: 'flex',
+          alignItems: 'center',
+          whiteSpace: 'nowrap',
+          outline: 'none',
           border: '1px solid transparent',
           backgroundColor: isSelected ? '#cce8ff' : 'transparent',
           // Gray out folders that are NOT editable (and their descendants)

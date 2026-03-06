@@ -7,9 +7,11 @@ interface MenuProps {
   currentView: 'folder' | 'search';
   onToggleView: () => void;
   onSearch?: (query: string) => void;
+  onBack?: () => void;
+  canGoBack?: boolean;
 }
 
-export default function Menu({ onPreference, currentView, onToggleView, onSearch }: MenuProps) {
+export default function Menu({ onPreference, currentView, onToggleView, onSearch, onBack, canGoBack }: MenuProps) {
   const [searchTerm, setSearchTerm] = useState('');
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -25,6 +27,14 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
   return (
     <header className="mhz-menu">
       <nav className="mhz-menu__nav">
+        <button 
+          className="mhz-btn" 
+          style={{ marginTop: "12px", opacity: canGoBack ? 1 : 0.5, cursor: canGoBack ? 'pointer' : 'default', marginRight: '8px' }} 
+          onClick={canGoBack ? onBack : undefined}
+          disabled={!canGoBack}
+        >
+          Back
+        </button>
         <button className="mhz-btn" style={{ marginTop: "12px"}} onClick={onPreference}>Preference</button>
         {/* <button className="mhz-btn" style={{ marginTop: "12px"}} >Edit</button> */}
         <button className="mhz-btn" style={{ marginTop: "12px"}} onClick={onToggleView}>

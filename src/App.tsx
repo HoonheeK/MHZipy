@@ -26,6 +26,10 @@ function App() {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [currentView, setCurrentView] = useState<'folder' | 'search'>('folder');
   const [searchQuery, setSearchQuery] = useState('');
+  const [history, setHistory] = useState<string[]>([]);
+  const [currentPath, setCurrentPath] = useState<string>('');
+  const [requestedPath, setRequestedPath] = useState<string | undefined>(undefined);
+
 
   useEffect(() => {
     const initConfig = async () => {
@@ -37,6 +41,9 @@ function App() {
           const parsed = JSON.parse(content);
           setConfig(parsed);
           if (parsed.view) setCurrentView(parsed.view);
+          if (parsed.defaultPath && !currentPath) {
+            setCurrentPath(parsed.defaultPath);
+          }
         }
       } catch (e) {
         console.error('Failed to load config:', e);
@@ -96,18 +103,51 @@ function App() {
     // 의도적으로 의존성은 빈 배열이나 configLoaded로 제어: 한번만 실행
   }, [configLoaded]);
 
+  const handleFileExplorerNavigate = (path: string) => {
+    if (path === currentPath) return;
+
+    // If this navigation matches the requested back navigation
+    if (path === requestedPath) {
+      setRequestedPath(undefined);
+      setCurrentPath(path);
+      return;
+    }
+
+    // Normal navigation: push current to history
+    if (currentPath) {
+      setHistory(prev => [...prev, currentPath]);
+    }
+    setCurrentPath(path);
+  };
+
+  const handleBack = () => {
+    if (history.length === 0) return;
+    const prevPath = history[history.length - 1];
+    setHistory(prev => prev.slice(0, -1));
+    setRequestedPath(prevPath);
+  };
+
   if (!configLoaded) return null;
 
   return (
     <div className="app-wrapper">
-      <Menu 
-        onPreference={() => setIsPrefOpen(true)} 
+      <Menu
+        onPreference={() => setIsPrefOpen(true)}
         currentView={currentView}
         onToggleView={() => saveConfig({ view: currentView === 'folder' ? 'search' : 'folder' })}
         onSearch={setSearchQuery}
+        onBack={handleBack}
+        canGoBack={history.length > 0}
       />
-      <FileExplorer config={config} onSaveConfig={saveConfig} currentView={currentView} searchQuery={searchQuery} />
-      <PreferenceDialog 
+      <FileExplorer
+        config={config}
+        onSaveConfig={saveConfig}
+        currentView={currentView}
+        searchQuery={searchQuery}
+        externalPath={requestedPath}
+        onNavigate={handleFileExplorerNavigate}
+      />
+      <PreferenceDialog
         isOpen={isPrefOpen}
         onClose={() => setIsPrefOpen(false)}
         initialDefaultPath={config.defaultPath}
@@ -115,8 +155,8 @@ function App() {
         initialEditableFolders={config.editableFolders}
         initialReadonlyFolders={config.readonlyFolders}
         onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[]) => {
-          saveConfig({ 
-            defaultPath: newDefault, 
+          saveConfig({
+            defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
             editableFolders: newEditable ?? config.editableFolders,
             readonlyFolders: newReadonly ?? config.readonlyFolders,

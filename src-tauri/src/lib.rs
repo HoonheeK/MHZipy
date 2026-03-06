@@ -7,6 +7,7 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager, Window};
 use walkdir::WalkDir;
 use zip::write::FileOptions;
+use sysinfo::Disks;
 
 mod mft;
 use mft::MftIndex;
@@ -26,6 +27,17 @@ struct ProgressPayload {
     total: u64,
     processed: u64,
     filename: String,
+}
+
+#[derive(serde::Serialize)]
+struct DirectoryEntry {
+    name: String,
+    #[serde(rename = "isDirectory")]
+    is_directory: bool,
+    #[serde(rename = "isFile")]
+    is_file: bool,
+    #[serde(rename = "isSymlink")]
+    is_symlink: bool,
 }
 
 // 앱 상태 관리
@@ -329,12 +341,15 @@ fn extract_zip_files(
     let target_path = Path::new(&target_dir);
 
     // 추출할 파일 인덱스 식별 및 전체 크기 계산
+    // 먼저 파일 이름 목록을 확보한 뒤, 제공된 비밀번호로 항목을 열어보거나
+    // 암호가 필요하면 크기를 알 수 없으므로 0으로 처리하여 진행합니다.
+    let names: Vec<String> = archive.file_names().map(|s| s.to_string()).collect();
     let mut indices = Vec::new();
     let mut total_size = 0u64;
     for i in 0..archive.len() {
-        let file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let name = file.name().to_string();
+        let name = names.get(i).cloned().unwrap_or_else(|| format!("Unknown_{}", i));
 
+        // Determine whether this entry is targeted
         let is_target = if let Some(ref target_files) = files {
             target_files.iter().any(|f| {
                 if *f == name {
@@ -349,13 +364,36 @@ fn extract_zip_files(
                 false
             })
         } else {
-            true // files가 None이면 모든 파일 대상
+            true
         };
 
-        if is_target {
-            indices.push(i);
-            if !file.is_dir() {
-                total_size += file.size();
+        if !is_target {
+            continue;
+        }
+
+        // Try to open the entry using provided password if any, otherwise try without.
+        let file_result = if let Some(ref p) = password {
+            archive.by_index_decrypt(i, p.as_bytes())
+        } else {
+            archive.by_index(i)
+        };
+
+        match file_result {
+            Ok(f) => {
+                indices.push(i);
+                if !f.is_dir() {
+                    total_size += f.size();
+                }
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                // If password is required or invalid, include the index but size unknown (0)
+                if err_str.contains("Password required") || err_str.contains("Invalid password") {
+                    indices.push(i);
+                    // size unknown when encrypted and password not provided or invalid
+                } else {
+                    return Err(err_str);
+                }
             }
         }
     }
@@ -363,7 +401,11 @@ fn extract_zip_files(
     // 덮어쓰기 방지 체크 (overwrite가 false일 경우)
     if !overwrite {
         for &i in &indices {
-            let file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let file = if let Some(ref p) = password {
+                archive.by_index_decrypt(i, p.as_bytes()).map_err(|e| e.to_string())?
+            } else {
+                archive.by_index(i).map_err(|e| e.to_string())?
+            };
             if file.is_dir() {
                 continue;
             } // 폴더는 체크 제외
@@ -457,6 +499,61 @@ fn delete_to_trash(paths: Vec<String>) -> Result<(), String> {
     trash::delete_all(&paths).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_available_drives() -> Vec<String> {
+    let disks = Disks::new_with_refreshed_list();
+    let mut drives: Vec<String> = disks.iter()
+        .map(|disk| disk.mount_point().to_string_lossy().to_string())
+        .collect();
+
+    for key in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial", "Google Drive", "Dropbox"].iter() {
+        if let Ok(path) = std::env::var(key) {
+            if !drives.contains(&path) {
+                drives.push(path);
+            }
+        }
+    }
+    drives
+}
+
+#[tauri::command]
+async fn read_directory(path: String) -> Result<Vec<DirectoryEntry>, String> {
+    let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
+    let mut result = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        result.push(DirectoryEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            is_directory: file_type.is_dir(),
+            is_file: file_type.is_file(),
+            is_symlink: file_type.is_symlink(),
+        });
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+async fn search_directory(path: String, query: String) -> Result<Vec<String>, String> {
+    let query = query.to_lowercase();
+    // CPU 집약적이거나 I/O 작업이 많을 수 있으므로 spawn_blocking 사용
+    let results = tauri::async_runtime::spawn_blocking(move || {
+        let mut matches = Vec::new();
+        for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name.contains(&query) {
+                matches.push(entry.path().to_string_lossy().to_string());
+                if matches.len() >= 1000 { // 결과 너무 많으면 제한
+                    break;
+                }
+            }
+        }
+        matches
+    }).await.map_err(|e| e.to_string())?;
+    
+    Ok(results)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -511,7 +608,10 @@ pub fn run() {
             open_file,
             build_mft_index,
             search_mft,
-            delete_to_trash
+            delete_to_trash,
+            get_available_drives,
+            read_directory,
+            search_directory
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

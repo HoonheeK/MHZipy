@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { readDir, stat, rename } from '@tauri-apps/plugin-fs';
+import { stat, rename } from '@tauri-apps/plugin-fs';
 import { confirm } from '@tauri-apps/plugin-dialog';
+import ErrorDialog from './ErrorDialog';
 import { join, basename, dirname } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
 
@@ -78,8 +79,15 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const [extractPassword, setExtractPassword] = useState('');
   const [isZipEncrypted, setIsZipEncrypted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
   const [extractProgress, setExtractProgress] = useState<{ total: number; processed: number; filename: string; startTime: number } | null>(null);
   const [extractProgressPos, setExtractProgressPos] = useState({ x: 300, y: 300 });
+
+  // Error dialog state
+  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [errorDialogTitle, setErrorDialogTitle] = useState('오류');
+  const [errorDialogMessage, setErrorDialogMessage] = useState('');
+  const [errorDialogDetails, setErrorDialogDetails] = useState<string | undefined>(undefined);
 
   // Compress Dialog State
   const [compressDialogOpen, setCompressDialogOpen] = useState(false);
@@ -122,7 +130,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
     const loadFiles = async () => {
       try {
-        const entries = await readDir(path);
+        const entries = await invoke<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }[]>('read_directory', { path });
         if (!isMounted) return;
 
         const filesWithStats = await Promise.all(
@@ -627,6 +635,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       setIsZipEncrypted(hasEncrypted);
       setExtractPassword(''); // 목록 조회 시에는 암호를 사용하지 않으므로 초기화
       setShowPassword(false);
+      setExtractError(null);
 
       if (path) {
         const zipName = file.name;
@@ -640,7 +649,17 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
     } catch (error) {
       console.error('Failed to list zip contents:', error);
-      await confirm(`ZIP 파일 내용을 읽을 수 없습니다.\n${String(error)}`, { title: '오류', kind: 'error' });
+      setExtractError(String(error));
+      setIsZipEncrypted(true);
+      setZipDialogOpen(true);
+      setZipEntries([]);
+      setZipPath(file.path);
+      setShowPassword(false);
+      // also show detailed modal
+      setErrorDialogTitle('ZIP 목록 읽기 실패');
+      setErrorDialogMessage('ZIP 파일 내용을 읽는 동안 오류가 발생했습니다. 암호가 필요한 ZIP일 수 있습니다. 암호를 입력하고 다시 시도하세요.');
+      setErrorDialogDetails(String(error));
+      setErrorDialogOpen(true);
     }
   };
 
@@ -802,7 +821,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       });
       setVersion(v => v + 1);
     } catch (error) {
-      if (error === 'FILE_EXISTS') {
+      const errStr = String(error);
+      if (errStr === 'FILE_EXISTS') {
         const confirmed = await confirm(
           '일부 파일이 이미 존재합니다. 덮어쓰시겠습니까?',
           { title: '파일 덮어쓰기 확인', kind: 'warning' }
@@ -818,13 +838,28 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             });
             setVersion(v => v + 1);
           } catch (e) {
+            const estr = String(e);
             console.error('Extraction failed:', e);
-            await confirm(`압축 해제 실패: ${String(e)}`, { title: '오류', kind: 'error' });
+            if (estr.includes('Password required') || estr.includes('Invalid password')) {
+              setExtractError(estr);
+            } else {
+              setErrorDialogTitle('압축 해제 실패');
+              setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+              setErrorDialogDetails(estr);
+              setErrorDialogOpen(true);
+            }
           }
         }
       } else {
         console.error('Extraction failed:', error);
-        await confirm(`압축 해제 실패: ${String(error)}`, { title: '오류', kind: 'error' });
+        if (errStr.includes('Password required') || errStr.includes('Invalid password')) {
+          setExtractError(errStr);
+        } else {
+          setErrorDialogTitle('압축 해제 실패');
+          setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+          setErrorDialogDetails(errStr);
+          setErrorDialogOpen(true);
+        }
       }
     } finally {
       if (unlisten) unlisten();
@@ -859,14 +894,44 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       await confirm('추출할 파일을 선택해주세요.', { title: '알림', kind: 'info' });
       return;
     }
-    await executeZipExtraction(zipPath, Array.from(selectedZipEntries), extractPath || path, extractPassword);
+    setExtractError(null);
+    try {
+      await executeZipExtraction(zipPath, Array.from(selectedZipEntries), extractPath || path, extractPassword);
+    } catch (e) {
+      const err = String(e);
+      if (err.includes('Password required') || err.includes('Invalid password')) {
+        setExtractError(err);
+        // Keep ZIP dialog open so user can re-enter password
+        setZipDialogOpen(true);
+      } else {
+        // show modal for other errors
+        setErrorDialogTitle('압축 해제 실패');
+        setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+        setErrorDialogDetails(err);
+        setErrorDialogOpen(true);
+      }
+    }
   };
 
   const handleExtractAllClick = async () => {
     if (!zipPath || !path) return;
     // extractPath가 있으면 그곳으로, 없으면 현재 경로로
     const target = extractPath || path;
-    await executeZipExtraction(zipPath, null, target, extractPassword);
+    setExtractError(null);
+    try {
+      await executeZipExtraction(zipPath, null, target, extractPassword);
+    } catch (e) {
+      const err = String(e);
+      if (err.includes('Password required') || err.includes('Invalid password')) {
+        setExtractError(err);
+        setZipDialogOpen(true);
+      } else {
+        setErrorDialogTitle('압축 해제 실패');
+        setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+        setErrorDialogDetails(err);
+        setErrorDialogOpen(true);
+      }
+    }
   };
 
   const handleExecuteCompress = async () => {
@@ -899,9 +964,33 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
         setCompressDialogOpen(false);
         setVersion(v => v + 1);
+
+        // Verify that the resulting ZIP reflects encryption when a password was provided.
+        if (compressPassword) {
+          try {
+            const entries = await invoke<{ name: string; isDir: boolean; size: number; isEncrypted: boolean }[]>('list_zip_contents', { zipPath: targetZipPath });
+            const hasEncrypted = entries.some(e => e.isEncrypted);
+            if (!hasEncrypted) {
+              setErrorDialogTitle('압축 암호 확인 경고');
+              setErrorDialogMessage('압축에 암호를 넣었으나 생성된 ZIP에 암호화 표시가 없습니다. 복호화가 필요하면 암호가 적용되지 않았을 수 있습니다.');
+              setErrorDialogDetails(`대상: ${targetZipPath}\n엔트리 수: ${entries.length}\n암호화된 엔트리: ${entries.filter(e=>e.isEncrypted).length}`);
+              setErrorDialogOpen(true);
+            }
+          } catch (e) {
+            console.error('Failed to verify zip contents:', e);
+            // Non-fatal: show details so user can inspect
+            setErrorDialogTitle('압축 생성 확인 실패');
+            setErrorDialogMessage('생성된 ZIP 파일의 내용을 확인하는 중 오류가 발생했습니다.');
+            setErrorDialogDetails(String(e));
+            setErrorDialogOpen(true);
+          }
+        }
       } catch (error) {
         console.error('Compression failed:', error);
-        await confirm(`압축 실패: ${String(error)}`, { title: '오류', kind: 'error' });
+        setErrorDialogTitle('압축 실패');
+        setErrorDialogMessage('파일 압축 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+        setErrorDialogDetails(String(error));
+        setErrorDialogOpen(true);
       } finally {
         if (unlisten) unlisten();
         setCompressProgress(null);
@@ -1347,7 +1436,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           display: 'flex', flexDirection: 'column', borderRadius: '8px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)', overflow: 'hidden',
           border: '1px solid #ccc'
-        }} onClick={e => e.stopPropagation()}>
+        }} onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
           <div
             onMouseDown={handleZipHeaderMouseDown}
             style={{
@@ -1382,6 +1471,12 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   type={showPassword ? "text" : "password"}
                   value={extractPassword}
                   onChange={(e) => setExtractPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.stopPropagation();
+                      handleExtractAllClick();
+                    }
+                  }}
                   disabled={!isZipEncrypted}
                   placeholder={isZipEncrypted ? "암호를 입력하세요" : "암호 없음"}
                   style={{ width: '100%', padding: '4px', paddingRight: '30px', fontSize: '0.9em', backgroundColor: isZipEncrypted ? 'white' : '#f0f0f0', boxSizing: 'border-box' }}
@@ -1409,6 +1504,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   </button>
                 )}
               </div>
+              {extractError && (
+                <div style={{ color: '#c00', fontSize: '0.85em', marginTop: '6px' }}>
+                  {extractError}
+                </div>
+              )}
             </div>
           </div>
           <div style={{ flex: 1, overflow: 'auto', padding: '0' }}>
@@ -1485,7 +1585,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             backgroundColor: 'white', width: '400px', padding: '20px',
             borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             display: 'flex', flexDirection: 'column', gap: '15px'
-          }} onClick={e => e.stopPropagation()}>
+          }} onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
             <h3 style={{ margin: 0 }}>압축 설정</h3>
 
             {compressProgress ? (
@@ -1603,6 +1703,16 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           </div>
         </div>
       )}
+      <ErrorDialog
+        open={errorDialogOpen}
+        title={errorDialogTitle}
+        message={errorDialogMessage}
+        details={errorDialogDetails}
+        onClose={() => {
+          setErrorDialogOpen(false);
+          setErrorDialogDetails(undefined);
+        }}
+      />
     </div>
   );
 }
