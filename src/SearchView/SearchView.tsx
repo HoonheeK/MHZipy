@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { stat } from '@tauri-apps/plugin-fs';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core'; // invoke 추가
 import { open } from '@tauri-apps/plugin-dialog';
 import FileList from '../FileExplorer/FileList';
+import { SearchConfig } from '../App';
 
 interface SearchViewProps {
   searchQuery: string;
@@ -14,6 +15,9 @@ interface SearchViewProps {
   onDelete: (paths: string[]) => void;
   onExtract: (path: string) => void;
   refreshTrigger?: number;
+  quickAccess?: string[];
+  searchConfig?: SearchConfig;
+  onSaveSearchConfig?: (config: SearchConfig) => void;
 }
 
 interface FileData {
@@ -35,14 +39,59 @@ interface FileChangePayload {
   is_dir: boolean;
 }
 
-export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger }: SearchViewProps) {
+function getOptimalSearchRoots(paths: string[]): string[] {
+  return paths.filter(path => 
+    !paths.some(otherPath => path !== otherPath && (path.startsWith(otherPath + '\\') || path.startsWith(otherPath + '/')))
+  );
+}
+
+// Utility: Parse Size String (e.g., "> 10MB")
+const parseSizeQuery = (input: string) => {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const match = trimmed.match(/^([><=]{1,2})?\s*([\d.]+)\s*([a-z]*)$/);
+  if (!match) return null;
+
+  const operator = match[1] || '=';
+  const value = parseFloat(match[2]);
+  const unit = match[3];
+
+  let bytes = value;
+  if (unit.includes('kb')) bytes *= 1024;
+  else if (unit.includes('mb')) bytes *= 1024 * 1024;
+  else if (unit.includes('gb')) bytes *= 1024 * 1024 * 1024;
+
+  return { operator, bytes };
+};
+
+const FILE_TYPES = ['All', 'Folder', 'Image', 'Video', 'Audio', 'Archive', 'Document', 'Code'];
+
+export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger, quickAccess = [], searchConfig, onSaveSearchConfig }: SearchViewProps) {
   const [results, setResults] = useState<FileData[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
   const [isIndexReady, setIsIndexReady] = useState(false); // 인덱스 준비 상태
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  const [searchMode, setSearchMode] = useState<'index' | 'directory'>('index');
-  const [manualPath, setManualPath] = useState<string>('');
+  const [searchMode, setSearchMode] = useState<'index' | 'directory'>(searchConfig?.searchMode || 'directory');
+  const [directorySearchPaths, setDirectorySearchPaths] = useState<Set<string>>(new Set(searchConfig?.directorySearchPaths || quickAccess));
+  const [isFolderSelectOpen, setIsFolderSelectOpen] = useState(false);
+  const folderSelectRef = useRef<HTMLDivElement>(null);
+
+  // Search & Filter State
+  const [localQuery, setLocalQuery] = useState(searchConfig?.query || searchQuery);
+  const [sizeQuery, setSizeQuery] = useState(searchConfig?.sizeQuery || '');
+  const [useRegex, setUseRegex] = useState(searchConfig?.useRegex || false);
+  const [showFilters, setShowFilters] = useState(searchConfig?.showFilters || false);
+  const [selectedType, setSelectedType] = useState(searchConfig?.type || 'All');
+  const [dateAfter, setDateAfter] = useState(searchConfig?.dateAfter || '');
+  const [dateBefore, setDateBefore] = useState(searchConfig?.dateBefore || '');
+  const [regexError, setRegexError] = useState<string | null>(null);
+
+  // Sync prop to local state
+  useEffect(() => {
+    setLocalQuery(searchQuery);
+  }, [searchQuery]);
 
   // 페이지(컴포넌트) 마운트 시 로컬 플래그를 확인해 인덱스 준비 상태를 복원
   useEffect(() => {
@@ -58,17 +107,55 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
     }
   }, []);
 
+  // Auto-save search config (Debounced)
+  useEffect(() => {
+    if (!onSaveSearchConfig) return;
+    const handler = setTimeout(() => {
+      onSaveSearchConfig({
+        query: localQuery,
+        useRegex,
+        sizeQuery,
+        type: selectedType,
+        dateAfter,
+        dateBefore,
+        showFilters,
+        searchMode,
+        directorySearchPaths: Array.from(directorySearchPaths)
+      });
+    }, 1000);
+    return () => clearTimeout(handler);
+  }, [localQuery, useRegex, sizeQuery, selectedType, dateAfter, dateBefore, showFilters, searchMode, directorySearchPaths, onSaveSearchConfig]);
+
+  // Only sync quickAccess if we don't have a saved config or if directorySearchPaths is empty
+  useEffect(() => {
+    if (!searchConfig && directorySearchPaths.size === 0) {
+      setDirectorySearchPaths(new Set(quickAccess));
+    }
+  }, [quickAccess, searchConfig]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (folderSelectRef.current && !folderSelectRef.current.contains(event.target as Node)) {
+        setIsFolderSelectOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
   // MFT 인덱싱 실행 함수
   const handleBuildIndex = async () => {
     setIsIndexing(true);
     setIsIndexReady(false); // 인덱싱 시작 시 준비 안된 상태로 변경
     try {
       const count = await invoke<number>('build_mft_index');
-      alert(`인덱싱 완료: ${count}개의 파일을 찾았습니다.`);
+      alert(`Indexing complete: Found ${count} files.`);
       setIsIndexReady(true); // 인덱싱 완료 후 준비 상태로 변경
     } catch (error) {
       console.error('Indexing failed:', error);
-      alert(`인덱싱 실패: ${String(error)}`);
+      alert(`Indexing failed: ${String(error)}`);
     } finally {
       setIsIndexing(false);
     }
@@ -101,7 +188,7 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
             } else if (change.action === 'create') {
               // 현재 검색어와 일치하는 경우에만 추가
               const name = change.path.split(/[/\\]/).pop() || change.path;
-              if (searchQuery && name.toLowerCase().includes(searchQuery.toLowerCase())) {
+              if (localQuery && name.toLowerCase().includes(localQuery.toLowerCase())) {
                 // 중복 방지
                 if (!newResults.some(r => r.path === change.path)) {
                    const ext = name.lastIndexOf('.') > 0 ? name.split('.').pop() || '' : '';
@@ -134,10 +221,10 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       unlisten?.();
       unlistenIndexReady?.();
     }
-  }, [searchQuery]); // searchQuery가 변경될 때마다 리스너의 로직이 최신 검색어를 참조하도록 함
+  }, [localQuery]); // localQuery가 변경될 때마다 리스너의 로직이 최신 검색어를 참조하도록 함
 
   useEffect(() => {
-    if (!searchQuery) {
+    if (!localQuery) {
       setResults([]);
       return;
     }
@@ -147,7 +234,8 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       return;
     }
 
-    if (searchMode === 'directory' && !manualPath) {
+    if (searchMode === 'directory' && directorySearchPaths.size === 0) {
+      setResults([]);
       return;
     }
 
@@ -158,9 +246,12 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       try {
         let paths: string[] = [];
         if (searchMode === 'index') {
-           paths = await invoke<string[]>('search_mft', { query: searchQuery });
+           paths = await invoke<string[]>('search_mft', { query: localQuery });
         } else {
-           paths = await invoke<string[]>('search_directory', { path: manualPath, query: searchQuery });
+           const searchRoots = getOptimalSearchRoots(Array.from(directorySearchPaths));
+           const searchPromises = searchRoots.map(p => invoke<string[]>('search_directory', { path: p, query: localQuery }));
+           const resultsFromAllRoots = await Promise.all(searchPromises);
+           paths = Array.from(new Set(resultsFromAllRoots.flat()));
         }
 
         if (!isMounted) return;
@@ -222,12 +313,71 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       }
     };
 
-    runSearch();
-
+    // Debounce search slightly to avoid too many calls while typing
+    const timeoutId = setTimeout(runSearch, 300);
     return () => {
       isMounted = false;
+      clearTimeout(timeoutId);
     };
-  }, [searchQuery, refreshTrigger, searchMode, manualPath, isIndexReady]);
+  }, [localQuery, refreshTrigger, searchMode, directorySearchPaths, isIndexReady, quickAccess]);
+
+  // --- Client-Side Filtering Logic ---
+  const filteredResults = useMemo(() => {
+    setRegexError(null);
+    const parsedSize = parseSizeQuery(sizeQuery);
+    let regex: RegExp | null = null;
+
+    if (useRegex && localQuery) {
+      try {
+        regex = new RegExp(localQuery, 'i');
+      } catch (e) {
+        setRegexError('Invalid Regex');
+      }
+    }
+
+    return results.filter(file => {
+      // 1. Regex Filter (Client-side refinement)
+      if (useRegex && regex) {
+        if (!regex.test(file.name)) return false;
+      }
+
+      // 2. Type Filter
+      if (selectedType !== 'All') {
+        const ext = file.extension.toLowerCase();
+        if (selectedType === 'Folder') { if (!file.isDirectory) return false; }
+        else if (selectedType === 'Image') { if (!['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) return false; }
+        else if (selectedType === 'Video') { if (!['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) return false; }
+        else if (selectedType === 'Audio') { if (!['mp3', 'wav', 'ogg', 'flac'].includes(ext)) return false; }
+        else if (selectedType === 'Archive') { if (!['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return false; }
+        else if (selectedType === 'Document') { if (!['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md'].includes(ext)) return false; }
+        else if (selectedType === 'Code') { if (!['js', 'ts', 'tsx', 'jsx', 'html', 'css', 'json', 'rs', 'py', 'java'].includes(ext)) return false; }
+      }
+
+      // 3. Date Filter
+      if (file.mtime) {
+        const modifiedDate = new Date(file.mtime);
+        if (dateAfter && modifiedDate < new Date(dateAfter)) return false;
+        if (dateBefore) {
+          const d = new Date(dateBefore);
+          d.setHours(23, 59, 59, 999);
+          if (modifiedDate > d) return false;
+        }
+      }
+
+      // 4. Size Filter
+      if (parsedSize) {
+        const { operator, bytes } = parsedSize;
+        if (operator === '>' && file.size <= bytes) return false;
+        if (operator === '<' && file.size >= bytes) return false;
+        if (operator === '>=' && file.size < bytes) return false;
+        if (operator === '<=' && file.size > bytes) return false;
+        if (operator === '=' && Math.floor(file.size / 1024) !== Math.floor(bytes / 1024)) return false;
+      }
+
+      return true;
+    });
+  }, [results, localQuery, useRegex, sizeQuery, selectedType, dateAfter, dateBefore]);
+
 
   const handleSelectFolder = async () => {
     const selected = await open({
@@ -235,78 +385,263 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       multiple: false,
     });
     if (selected && typeof selected === 'string') {
-      setManualPath(selected);
+      setDirectorySearchPaths(prev => new Set(prev).add(selected));
     }
   };
 
+  const handleToggleDirectoryPath = (path: string) => {
+    setDirectorySearchPaths(prev => {
+      const newPaths = new Set(prev);
+      newPaths.has(path) ? newPaths.delete(path) : newPaths.add(path);
+      return newPaths;
+    });
+  };
+
+  const handleFileListFocus = useCallback(() => {}, []);
+
   return (
-    <div style={{ display: 'flex', height: '100%', flexDirection: 'column' }}>
-      <div style={{ padding: '10px', borderBottom: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <div style={{ display: 'flex', height: '100%', width: '100%', flexDirection: 'column', backgroundColor: '#f8f9fa' }}>
+      {/* Header & Search Bar Area */}
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid #e0e0e0', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+        
+        {/* Top Row: Title & Search Mode */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <strong>Search Results for: "{searchQuery}"</strong>
-            {isSearching && <span style={{ marginLeft: '10px', color: '#888' }}>(Searching...)</span>}
-            {!isSearching && <span style={{ marginLeft: '10px', color: '#666' }}>Found: {results.length}</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h2 style={{ margin: 0, fontSize: '1.2em', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              🔍 <span style={{ fontWeight: '800', color: '#2563eb' }}>EVERYTHING WEB</span>
+            </h2>
+            <span style={{ fontSize: '0.85em', color: '#666', fontWeight: '500' }}>Intelligent File Search</span>
           </div>
-          <div style={{ display: 'flex', gap: '10px' }}>
-             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-                <input type="radio" checked={searchMode === 'index'} onChange={() => setSearchMode('index')} style={{ marginRight: '4px' }} />
-                MFT Index (Fast)
-             </label>
-             <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
-                <input type="radio" checked={searchMode === 'directory'} onChange={() => setSearchMode('directory')} style={{ marginRight: '4px' }} />
-                Folder (Recursive)
-             </label>
+          
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+             <div style={{ display: 'flex', gap: '8px', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '6px' }}>
+               <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '2px 8px', borderRadius: '4px', backgroundColor: searchMode === 'index' ? '#fff' : 'transparent', boxShadow: searchMode === 'index' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>
+                  <input type="radio" checked={searchMode === 'index'} onChange={() => setSearchMode('index')} style={{ display: 'none' }} />
+                  <span style={{ fontSize: '0.85em', fontWeight: searchMode === 'index' ? 'bold' : 'normal', color: searchMode === 'index' ? '#2563eb' : '#64748b' }}>⚡ MFT Index</span>
+               </label>
+               <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '2px 8px', borderRadius: '4px', backgroundColor: searchMode === 'directory' ? '#fff' : 'transparent', boxShadow: searchMode === 'directory' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>
+                  <input type="radio" checked={searchMode === 'directory'} onChange={() => setSearchMode('directory')} style={{ display: 'none' }} />
+                  <span style={{ fontSize: '0.85em', fontWeight: searchMode === 'directory' ? 'bold' : 'normal', color: searchMode === 'directory' ? '#2563eb' : '#64748b' }}>📂 Folder</span>
+               </label>
+             </div>
+             <button 
+                onClick={() => setShowFilters(!showFilters)}
+                style={{ 
+                  display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '6px', 
+                  backgroundColor: showFilters ? '#2563eb' : '#fff', color: showFilters ? '#fff' : '#475569', 
+                  border: '1px solid #cbd5e1', cursor: 'pointer', fontSize: '0.85em', fontWeight: '600', transition: 'all 0.2s'
+                }}
+              >
+                <span>⚙️ Filter Settings</span>
+              </button>
           </div>
         </div>
 
-        {searchMode === 'index' ? (
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Search Input Row */}
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>🔎</div>
+          <input 
+            type="text"
+            placeholder={useRegex ? "Search with Regex (e.g. ^report.*\\.pdf$)" : "Enter file name to search..."}
+            value={localQuery}
+            onChange={(e) => setLocalQuery(e.target.value)}
+            style={{ 
+              width: '100%', padding: '10px 12px 10px 40px', borderRadius: '8px', border: regexError ? '2px solid #fca5a5' : '2px solid #e2e8f0', 
+              fontSize: '1em', outline: 'none', transition: 'border-color 0.2s', boxSizing: 'border-box'
+            }}
+            onFocus={(e) => e.target.style.borderColor = regexError ? '#fca5a5' : '#3b82f6'}
+            onBlur={(e) => e.target.style.borderColor = regexError ? '#fca5a5' : '#e2e8f0'}
+          />
+          <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px' }}>
+              <input 
+                type="checkbox" 
+                checked={useRegex}
+                onChange={(e) => setUseRegex(e.target.checked)}
+                style={{ cursor: 'pointer' }}
+              />
+              <span style={{ fontSize: '0.75em', fontWeight: 'bold', color: '#475569' }}>REGEX</span>
+            </label>
+            {localQuery && (
+              <button onClick={() => setLocalQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '1.1em' }}>✕</button>
+            )}
+          </div>
+        </div>
+        
+        {regexError && (
+          <div style={{ color: '#ef4444', fontSize: '0.85em', fontWeight: '500', paddingLeft: '4px' }}>
+            ⚠️ {regexError}: Invalid Regex format.
+          </div>
+        )}
+
+        {/* Advanced Filters Panel */}
+        {showFilters && (
+          <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', marginTop: '4px', animation: 'fadeIn 0.2s' }}>
+            {/* Helper Tooltip */}
+            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '6px', padding: '10px', marginBottom: '12px', fontSize: '0.85em', color: '#1e40af' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>💡 Search Tips</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <span style={{ fontWeight: '600' }}>Regex:</span> <code>^</code>(시작), <code>$</code>(끝), <code>.*</code>(포함)
+                </div>
+                <div>
+                  <span style={{ fontWeight: '600' }}>Size:</span> <code>{'>'} 10MB</code>, <code>{'<'} 1GB</code>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+              {/* Type Filter */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>📂 File Type</label>
+                <select 
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                >
+                  {FILE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+
+              {/* Size Filter */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>⚖️ File Size</label>
+                <input 
+                  type="text" 
+                  placeholder="예: > 10MB"
+                  value={sizeQuery}
+                  onChange={(e) => setSizeQuery(e.target.value)}
+                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                />
+              </div>
+
+              {/* Date Filters */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>📅 Date Modified (After)</label>
+                <input 
+                  type="date" 
+                  value={dateAfter}
+                  onChange={(e) => setDateAfter(e.target.value)}
+                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>📅 Date Modified (Before)</label>
+                <input 
+                  type="date" 
+                  value={dateBefore}
+                  onChange={(e) => setDateBefore(e.target.value)}
+                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Context Specific Controls (Index Button or Folder Select) */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+          {searchMode === 'index' ? (
              <button 
               onClick={handleBuildIndex} 
               disabled={isIndexing}
               style={{ 
-                padding: '4px 12px', 
+                padding: '6px 12px', 
                 cursor: isIndexing ? 'wait' : 'pointer',
-                backgroundColor: isIndexing ? '#ccc' : (isIndexReady ? '#28a745' : '#007bff'),
+                backgroundColor: isIndexing ? '#ccc' : (isIndexReady ? '#10b981' : '#3b82f6'),
                 color: 'white',
                 border: 'none',
-                borderRadius: '4px',
-                fontSize: '0.9em'
+                borderRadius: '6px',
+                fontSize: '0.85em',
+                fontWeight: '600',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
               }}
             >
-              {isIndexing ? '인덱싱 중...' : (isIndexReady ? 'MFT 다시 인덱싱' : 'MFT 인덱싱 실행')}
+              {isIndexing ? '⏳ Indexing...' : (isIndexReady ? '🔄 Re-index MFT' : '🚀 Run MFT Indexing')}
             </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-            <input 
-              type="text" 
-              value={manualPath} 
-              readOnly 
-              placeholder="검색할 폴더를 선택하세요 (네트워크 드라이브 포함)" 
-              style={{ flex: 1, padding: '4px', fontSize: '0.9em', border: '1px solid #ccc', borderRadius: '4px', backgroundColor: '#f9f9f9' }} 
-            />
-            <button onClick={handleSelectFolder} style={{ padding: '4px 8px', cursor: 'pointer' }}>폴더 선택</button>
-          </div>
-        )}
+          ) : (
+            <div style={{ position: 'relative', width: '100%' }} ref={folderSelectRef}>
+              <div 
+                onClick={() => setIsFolderSelectOpen(!isFolderSelectOpen)}
+                style={{ 
+                  border: '1px solid #cbd5e1', 
+                  padding: '6px 10px', 
+                  borderRadius: '6px', 
+                  cursor: 'pointer',
+                  backgroundColor: '#fff',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '0.9em',
+                  color: '#334155'
+                }}
+              >
+                <span 
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={Array.from(directorySearchPaths).join('\n')}
+                >
+                  {directorySearchPaths.size === 0 
+                    ? '📂 Select folder to search (includes Quick Access)...' 
+                    : `📂 ${Array.from(directorySearchPaths).join(', ')}`}
+                </span>
+                <span style={{ fontSize: '0.8em', marginLeft: '5px' }}>{isFolderSelectOpen ? '▲' : '▼'}</span>
+              </div>
+              
+              {isFolderSelectOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, border: '1px solid #cbd5e1', borderTop: 'none', backgroundColor: '#fff', zIndex: 1000, maxHeight: '300px', overflowY: 'auto', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', borderRadius: '0 0 6px 6px' }}>
+                  {[...new Set([...quickAccess, ...directorySearchPaths])].sort().map(path => (
+                    <div key={path} style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                      <label title={path} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', width: '100%' }}>
+                        <input
+                          type="checkbox"
+                          checked={directorySearchPaths.has(path)}
+                          onChange={() => handleToggleDirectoryPath(path)}
+                          style={{ marginRight: '8px' }}
+                        />
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.9em', color: '#475569' }}>{path}</span>
+                      </label>
+                    </div>
+                  ))}
+                  <div style={{ padding: '8px', textAlign: 'center', backgroundColor: '#f8fafc' }}>
+                    <button onClick={handleSelectFolder} style={{ padding: '4px 10px', cursor: 'pointer', fontSize: '0.85em', color: '#2563eb', background: 'none', border: 'none', fontWeight: '600' }}>+ Browse other folders...</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-      <div style={{ flex: 1, overflow: 'hidden' }}>
-        <FileList
-          path={null}
-          filesOverride={results}
-          selectedFiles={selectedFiles}
-          onSelectFiles={setSelectedFiles}
-          onFocus={() => {}}
-          onNavigate={onNavigate}
-          onCopy={onCopy}
-          onCut={onCut}
-          onPaste={onPaste}
-          onDelete={onDelete}
-          onExtract={onExtract}
-          refreshTrigger={refreshTrigger}
-          searchQuery={searchQuery} // 하이라이팅 등을 위해 전달
-        />
+
+      {/* Results Area */}
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        {isSearching && (
+           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '4px', backgroundColor: '#e0f2fe', color: '#0369a1', fontSize: '0.8em', textAlign: 'center', zIndex: 10 }}>
+             Searching...
+           </div>
+        )}
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid #eee', backgroundColor: '#fff', fontSize: '0.9em', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+           <span>Search Results: <span style={{ fontWeight: 'bold', color: '#2563eb' }}>{filteredResults.length}</span> items</span>
+           {results.length !== filteredResults.length && (
+             <span style={{ fontSize: '0.85em' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
+           )}
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <FileList
+            path={null}
+            filesOverride={filteredResults}
+            selectedFiles={selectedFiles}
+            onSelectFiles={setSelectedFiles}
+            onFocus={handleFileListFocus}
+            onNavigate={onNavigate}
+            onCopy={onCopy}
+            onCut={onCut}
+            onPaste={onPaste}
+            onDelete={onDelete}
+            onExtract={onExtract}
+            refreshTrigger={refreshTrigger}
+            searchQuery={localQuery} // 하이라이팅 등을 위해 전달
+            enableAutoResize={true}
+          />
+        </div>
       </div>
     </div>
   );

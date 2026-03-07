@@ -9,6 +9,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import './App.css';
 
+export interface SearchConfig {
+  query: string;
+  useRegex: boolean;
+  sizeQuery: string;
+  type: string;
+  dateAfter: string;
+  dateBefore: string;
+  showFilters: boolean;
+  searchMode: 'index' | 'directory';
+  directorySearchPaths: string[];
+}
+
 interface AppConfig {
   defaultPath: string;
   quickAccess: string[];
@@ -18,6 +30,7 @@ interface AppConfig {
   view?: 'folder' | 'search';
   editableFolders?: string[];
   readonlyFolders?: string[];
+  search?: SearchConfig;
 }
 
 function App() {
@@ -44,6 +57,9 @@ function App() {
           if (parsed.defaultPath && !currentPath) {
             setCurrentPath(parsed.defaultPath);
           }
+          if (parsed.search && parsed.search.query) {
+            setSearchQuery(parsed.search.query);
+          }
         }
       } catch (e) {
         console.error('Failed to load config:', e);
@@ -66,8 +82,8 @@ function App() {
       const configPath = await join(configDir, 'config.json');
       // Log config path and contents when saving
       try {
-        console.log('Saving config.json to:', configPath);
-        console.log('config.json contents:', JSON.stringify(newConfig, null, 2));
+        // console.log('Saving config.json to:', configPath);
+        // console.log('config.json contents:', JSON.stringify(newConfig, null, 2));
       } catch (logErr) {
         console.error('Failed to log config save:', logErr);
       }

@@ -7,10 +7,11 @@ import FileList from "./FileList";
 import SearchView from "../SearchView/SearchView";
 import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOperations';
 import "./FileExplorer.css";
+import { SearchConfig } from "../App";
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[] };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[] }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   externalPath?: string;
@@ -66,7 +67,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       const name = path.split(/[/\\]/).filter(p => p).pop() || path;
       return { path, name };
     }
-    return { path: "My PC", name: "내 PC" };
+    return { path: "My PC", name: "My PC" };
   }, [filterQuickAccess, activeAllowedPaths]);
 
 
@@ -213,15 +214,20 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     setContextMenu({ x: e.clientX, y: e.clientY, path, source: 'quickAccess' });
   };
 
-  const handleCopy = (paths: string[]) => {
+  const handleCopy = async (paths: string[]) => {
     setClipboard({ paths, op: 'copy' });
+    try {
+      await invoke('copy_files_to_clipboard', { paths });
+    } catch (e) {
+      console.error('Failed to copy to system clipboard:', e);
+    }
   };
 
   const handleCut = (paths: string[]) => {
     // Check permission for source paths (need delete permission)
     for (const path of paths) {
       if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
-        confirm(`'${path}'에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        confirm(`You do not have permission to edit '${path}'.`, { title: 'Permission Error', kind: 'error' });
         return;
       }
     }
@@ -230,7 +236,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const handlePaste = async (targetDir: string) => {
     if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
-      await confirm(`'${targetDir}'에 대한 쓰기 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+      await confirm(`You do not have write permission for '${targetDir}'.`, { title: 'Permission Error', kind: 'error' });
       return;
     }
     if (!clipboard || !clipboard.paths.length) return;
@@ -245,7 +251,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const handleDelete = async (paths: string[]) => {
     for (const path of paths) {
       if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
-        await confirm(`'${path}'에 대한 삭제 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        await confirm(`You do not have permission to delete '${path}'.`, { title: 'Permission Error', kind: 'error' });
         return;
       }
     }
@@ -257,11 +263,11 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const handleMove = async (sourcePaths: string[], targetDir: string, op: 'move' | 'copy') => {
     if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
-      await confirm(`'${targetDir}'에 대한 쓰기 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+      await confirm(`You do not have write permission for '${targetDir}'.`, { title: 'Permission Error', kind: 'error' });
       return;
     }
     if (op === 'move' && !sourcePaths.every(p => checkPathPermission(p, config.editableFolders, config.readonlyFolders))) {
-      await confirm(`원본 파일에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+      await confirm(`You do not have permission to edit the source files.`, { title: 'Permission Error', kind: 'error' });
       return;
     }
     const success = await pasteFiles(sourcePaths, targetDir, op);
@@ -273,7 +279,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const handleExtract = async (path: string) => {
     try {
       if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
-        await confirm(`'${path}'에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        await confirm(`You do not have permission to edit '${path}'.`, { title: 'Permission Error', kind: 'error' });
         return;
       }
       const parentDir = await dirname(path);
@@ -376,7 +382,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   }, [activePane, filesSelected, selectedPaths, selected]);
 
   const searchViewElement = (
-    <div style={{ display: currentView === 'search' ? 'flex' : 'none', height: '100%' }}>
+    <div style={{ display: currentView === 'search' ? 'flex' : 'none', height: '100%', width: '100%', flexDirection: 'column' }}>
       <SearchView
         searchQuery={searchQuery || ''}
         onNavigate={(path) => {
@@ -390,6 +396,9 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         onDelete={handleDelete}
         onExtract={handleExtract}
         refreshTrigger={refreshTrigger}
+        quickAccess={config.quickAccess}
+        searchConfig={config.search}
+        onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
       />
     </div>
   );
@@ -514,29 +523,29 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
           <div className="context-menu" style={getMenuPosition()}>
             {contextMenu.source === 'quickAccess' ? (
               <div className="context-menu-item delete" onClick={() => handleRemoveQuickAccess(contextMenu.path)}>
-                <span>Quick Access에서 삭제</span>
+                <span>Remove from Quick Access</span>
               </div>
             ) : (
               <>
                 <div className="context-menu-item" onClick={() => handleCut(Array.from(selectedPaths))}>
-                  <span>잘라내기</span> <span className="shortcut">Ctrl+X</span>
+                  <span>Cut</span> <span className="shortcut">Ctrl+X</span>
                 </div>
                 <div className="context-menu-item" onClick={() => handleCopy(Array.from(selectedPaths))}>
-                  <span>복사</span> <span className="shortcut">Ctrl+C</span>
+                  <span>Copy</span> <span className="shortcut">Ctrl+C</span>
                 </div>
                 <div className="context-menu-item" onClick={() => handlePaste(contextMenu.path)}>
-                  <span>붙여넣기</span> <span className="shortcut">Ctrl+V</span>
+                  <span>Paste</span> <span className="shortcut">Ctrl+V</span>
                 </div>
                 <div className="context-menu-separator"></div>
                 <div className="context-menu-item delete" onClick={() => handleDelete(Array.from(selectedPaths))}>
-                  <span>삭제</span> <span className="shortcut">Del</span>
+                  <span>Delete</span> <span className="shortcut">Del</span>
                 </div>
                 <div className="context-menu-separator"></div>
                 {selectedPaths.size === 1 && (
-                  <div className="context-menu-item" onClick={() => handleSetDefault(contextMenu.path)}>기본 폴더로 지정</div>
+                  <div className="context-menu-item" onClick={() => handleSetDefault(contextMenu.path)}>Set as Default Folder</div>
                 )}
                 <div className="context-menu-item" onClick={() => Array.from(selectedPaths).forEach(p => handleAddToQuickAccess(p))}>
-                  Quick Access 추가
+                  Add to Quick Access
                 </div>
                 <div className="context-menu-separator"></div>
                 <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')}>Set as Editable</div>

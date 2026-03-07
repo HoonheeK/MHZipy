@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { join } from '@tauri-apps/api/path';
 import { invoke } from '@tauri-apps/api/core';
 
 interface FolderTreeProps {
@@ -113,17 +112,15 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
             return;
           }
 
-          const entries = await invoke<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }[]>('read_directory', { path });
+          const entries = await invoke<{ name: string; path: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }[]>('read_directory', { path });
           if (!isMounted) return;
 
-          let folders = await Promise.all(
-            entries
-              .filter((entry) => entry.isDirectory)
-              .map(async (entry) => ({
-                name: entry.name,
-                path: await join(path, entry.name),
-              }))
-          );
+          let folders = entries
+            .filter((entry) => entry.isDirectory)
+            .map((entry) => ({
+              name: entry.name,
+              path: entry.path,
+            }));
           if (!isMounted) return;
 
           // 이름순 정렬

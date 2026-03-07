@@ -7,7 +7,7 @@ interface ErrorDialogProps {
   onClose: () => void;
 }
 
-export default function ErrorDialog({ open, title = '알림', message = '', details, onClose }: ErrorDialogProps) {
+export default function ErrorDialog({ open, title = 'Notification', message = '', details, onClose }: ErrorDialogProps) {
   if (!open) return null;
 
   return (
@@ -21,7 +21,7 @@ export default function ErrorDialog({ open, title = '알림', message = '', deta
           )}
         </div>
         <div style={{ padding: '8px 12px', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button onClick={onClose} style={{ padding: '8px 12px', cursor: 'pointer' }}>닫기</button>
+          <button onClick={onClose} style={{ padding: '8px 12px', cursor: 'pointer' }}>Close</button>
         </div>
       </div>
     </div>

@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { stat, rename } from '@tauri-apps/plugin-fs';
+import { rename } from '@tauri-apps/plugin-fs';
 import { confirm } from '@tauri-apps/plugin-dialog';
 import ErrorDialog from './ErrorDialog';
-import { join, basename, dirname } from '@tauri-apps/api/path';
+import { basename, dirname, join } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
 
 interface FileListProps {
@@ -24,6 +24,7 @@ interface FileListProps {
   editableFolders?: string[];
   readonlyFolders?: string[];
   autoFitTrigger?: number;
+  enableAutoResize?: boolean;
 }
 
 interface FileData {
@@ -49,7 +50,7 @@ interface FilterConfig {
   unit: number; // for size multiplier
 }
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger }: FileListProps) {
+export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -66,7 +67,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'file' | 'container' } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'file' | 'container' | 'header' } | null>(null);
 
   // Zip Dialog State
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
@@ -85,7 +86,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   // Error dialog state
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
-  const [errorDialogTitle, setErrorDialogTitle] = useState('오류');
+  const [errorDialogTitle, setErrorDialogTitle] = useState('Error');
   const [errorDialogMessage, setErrorDialogMessage] = useState('');
   const [errorDialogDetails, setErrorDialogDetails] = useState<string | undefined>(undefined);
 
@@ -106,7 +107,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     mtime: 150,
     atime: 150
   });
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set([
+    'name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'
+  ]));
   const [resizingCol, setResizingCol] = useState<string | null>(null);
+  const columnWidthsRef = useRef(columnWidths);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
 
   // Drag Selection State
@@ -115,6 +120,40 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+
+  useEffect(() => {
+    columnWidthsRef.current = columnWidths;
+  }, [columnWidths]);
+
+  // Auto Resize Logic
+  useEffect(() => {
+    if (!enableAutoResize || !containerRef.current) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width;
+        if (width <= 0) continue;
+
+        const currentWidths = columnWidthsRef.current;
+        const cols = Object.keys(currentWidths).filter(key => visibleColumns.has(key));
+        const currentTotal = cols.reduce((acc, key) => acc + (currentWidths[key] || 0), 0);
+
+        if (currentTotal > 0 && Math.abs(width - currentTotal) > 5) {
+          const ratio = width / currentTotal;
+          setColumnWidths(prev => {
+            const next = { ...prev };
+            cols.forEach(key => {
+              next[key] = Math.max(50, Math.floor((prev[key] || 0) * ratio));
+            });
+            return next;
+          });
+        }
+      }
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [enableAutoResize, visibleColumns]);
 
   useEffect(() => {
     if (filesOverride) {
@@ -130,47 +169,27 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
     const loadFiles = async () => {
       try {
-        const entries = await invoke<{ name: string; isDirectory: boolean; isFile: boolean; isSymlink: boolean }[]>('read_directory', { path });
+        const entries = await invoke<any[]>('read_directory', { path });
         if (!isMounted) return;
 
-        const filesWithStats = await Promise.all(
-          entries.map(async (entry) => {
-            let fullPath = '';
-            try {
-              fullPath = await join(path, entry.name);
-              const metadata = await stat(fullPath);
-              const isDir = entry.isDirectory;
-              const extension = isDir ? '' : (entry.name.split('.').pop() || '');
-              const type = isDir ? 'File folder' : (extension ? `${extension.toUpperCase()} File` : 'File');
+        const filesWithStats = entries.map((entry) => {
+          const isDir = entry.isDirectory;
+          const extension = isDir ? '' : (entry.name.split('.').pop() || '');
+          const type = isDir ? 'File folder' : (extension ? `${extension.toUpperCase()} File` : 'File');
 
-              return {
-                name: entry.name,
-                path: fullPath,
-                size: metadata.size,
-                extension,
-                type,
-                mtime: metadata.mtime ? new Date(metadata.mtime) : null,
-                birthtime: metadata.birthtime ? new Date(metadata.birthtime) : null,
-                atime: metadata.atime ? new Date(metadata.atime) : null,
-                readonly: metadata.readonly,
-                isDirectory: isDir,
-              };
-            } catch (error) {
-              return {
-                name: entry.name,
-                path: fullPath,
-                size: 0,
-                extension: '',
-                type: '',
-                mtime: null,
-                birthtime: null,
-                atime: null,
-                readonly: false,
-                isDirectory: entry.isDirectory
-              };
-            }
-          })
-        );
+          return {
+            name: entry.name,
+            path: entry.path,
+            size: entry.size,
+            extension,
+            type,
+            mtime: entry.mtime ? new Date(entry.mtime) : null,
+            birthtime: entry.birthtime ? new Date(entry.birthtime) : null,
+            atime: entry.atime ? new Date(entry.atime) : null,
+            readonly: entry.readonly,
+            isDirectory: isDir,
+          };
+        });
 
         if (isMounted) {
           setFiles(filesWithStats);
@@ -284,7 +303,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (!containerRef.current) return;
     const containerWidth = containerRef.current.clientWidth;
     
-    const cols = ['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'];
+    const cols = ['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'].filter(c => visibleColumns.has(c));
     const currentTotal = cols.reduce((acc, key) => acc + (columnWidths[key] || 0), 0);
     
     if (currentTotal <= 0) return;
@@ -517,7 +536,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       return;
     }
     if (!checkPathPermission(renamingFile, editableFolders, readonlyFolders)) {
-      await confirm('이 파일에 대한 편집 권한이 없습니다.', { title: '권한 오류', kind: 'error' });
+      await confirm('You do not have permission to edit this file.', { title: 'Permission Error', kind: 'error' });
       setRenamingFile(null);
       return;
     }
@@ -538,7 +557,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     const fullPaths = Array.from(selectedFiles);
     for (const p of fullPaths) {
       if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
-        await confirm(`'${p}'에 대한 삭제 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        await confirm(`You do not have permission to delete '${p}'.`, { title: 'Permission Error', kind: 'error' });
         return;
       }
     }
@@ -557,7 +576,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (selectedFiles.size === 0) return;
     for (const p of Array.from(selectedFiles)) {
       if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
-        confirm(`'${p}'에 대한 편집 권한이 없습니다.`, { title: '권한 오류', kind: 'error' });
+        confirm(`You do not have permission to edit '${p}'.`, { title: 'Permission Error', kind: 'error' });
         return;
       }
     }
@@ -598,7 +617,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const performExtract = () => {
     if (selectedFiles.size !== 1) return;
     if (!checkPathPermission(Array.from(selectedFiles)[0], editableFolders, readonlyFolders)) {
-      confirm('이 위치에 압축을 풀 권한이 없습니다.', { title: '권한 오류', kind: 'error' });
+      confirm('You do not have permission to extract here.', { title: 'Permission Error', kind: 'error' });
       return;
     }
     const fullPath = Array.from(selectedFiles)[0];
@@ -621,6 +640,12 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       // 빈 공간 우클릭
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'container' });
     }
+  };
+
+  const handleHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'header' });
   };
 
   const openZipFile = async (file: FileData) => {
@@ -656,8 +681,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       setZipPath(file.path);
       setShowPassword(false);
       // also show detailed modal
-      setErrorDialogTitle('ZIP 목록 읽기 실패');
-      setErrorDialogMessage('ZIP 파일 내용을 읽는 동안 오류가 발생했습니다. 암호가 필요한 ZIP일 수 있습니다. 암호를 입력하고 다시 시도하세요.');
+      setErrorDialogTitle('Failed to read ZIP contents');
+      setErrorDialogMessage('An error occurred while reading the ZIP file content. It might be password protected. Please enter the password and try again.');
       setErrorDialogDetails(String(error));
       setErrorDialogOpen(true);
     }
@@ -799,7 +824,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   const executeZipExtraction = async (zipPath: string, files: string[] | null, targetDir: string, password?: string) => {
     console.log(`[Frontend] Extracting zip. Password provided: "${password || ''}"`);
-    setExtractProgress({ total: 0, processed: 0, filename: '준비 중...', startTime: Date.now() });
+    setExtractProgress({ total: 0, processed: 0, filename: 'Preparing...', startTime: Date.now() });
     let unlisten: UnlistenFn | undefined;
 
     try {
@@ -824,8 +849,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       const errStr = String(error);
       if (errStr === 'FILE_EXISTS') {
         const confirmed = await confirm(
-          '일부 파일이 이미 존재합니다. 덮어쓰시겠습니까?',
-          { title: '파일 덮어쓰기 확인', kind: 'warning' }
+          'Some files already exist. Do you want to overwrite them?',
+          { title: 'Confirm Overwrite', kind: 'warning' }
         );
         if (confirmed) {
           try {
@@ -843,8 +868,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             if (estr.includes('Password required') || estr.includes('Invalid password')) {
               setExtractError(estr);
             } else {
-              setErrorDialogTitle('압축 해제 실패');
-              setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+              setErrorDialogTitle('Extraction Failed');
+              setErrorDialogMessage('An error occurred during extraction. Please check the details below.');
               setErrorDialogDetails(estr);
               setErrorDialogOpen(true);
             }
@@ -855,8 +880,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         if (errStr.includes('Password required') || errStr.includes('Invalid password')) {
           setExtractError(errStr);
         } else {
-          setErrorDialogTitle('압축 해제 실패');
-          setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+          setErrorDialogTitle('Extraction Failed');
+          setErrorDialogMessage('An error occurred during extraction. Please check the details below.');
           setErrorDialogDetails(errStr);
           setErrorDialogOpen(true);
         }
@@ -875,7 +900,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (!dataString) return;
 
     if (path && !checkPathPermission(path, editableFolders, readonlyFolders)) {
-      await confirm('이 폴더에 대한 쓰기 권한이 없습니다.', { title: '권한 오류', kind: 'error' });
+      await confirm('You do not have write permission for this folder.', { title: 'Permission Error', kind: 'error' });
       return;
     }
     try {
@@ -891,7 +916,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const handleExtractSelectedClick = async () => {
     if (!zipPath || !path) return;
     if (selectedZipEntries.size === 0) {
-      await confirm('추출할 파일을 선택해주세요.', { title: '알림', kind: 'info' });
+      await confirm('Please select files to extract.', { title: 'Notification', kind: 'info' });
       return;
     }
     setExtractError(null);
@@ -905,8 +930,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         setZipDialogOpen(true);
       } else {
         // show modal for other errors
-        setErrorDialogTitle('압축 해제 실패');
-        setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+        setErrorDialogTitle('Extraction Failed');
+        setErrorDialogMessage('An error occurred during extraction. Please check the details below.');
         setErrorDialogDetails(err);
         setErrorDialogOpen(true);
       }
@@ -926,8 +951,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         setExtractError(err);
         setZipDialogOpen(true);
       } else {
-        setErrorDialogTitle('압축 해제 실패');
-        setErrorDialogMessage('압축 해제 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+        setErrorDialogTitle('Extraction Failed');
+        setErrorDialogMessage('An error occurred during extraction. Please check the details below.');
         setErrorDialogDetails(err);
         setErrorDialogOpen(true);
       }
@@ -937,7 +962,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const handleExecuteCompress = async () => {
     if (!path || !compressName) return;
 
-    setCompressProgress({ total: 0, processed: 0, filename: '준비 중...', startTime: Date.now() });
+    setCompressProgress({ total: 0, processed: 0, filename: 'Preparing...', startTime: Date.now() });
 
     let unlisten: UnlistenFn | undefined;
     try {
@@ -971,24 +996,24 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             const entries = await invoke<{ name: string; isDir: boolean; size: number; isEncrypted: boolean }[]>('list_zip_contents', { zipPath: targetZipPath });
             const hasEncrypted = entries.some(e => e.isEncrypted);
             if (!hasEncrypted) {
-              setErrorDialogTitle('압축 암호 확인 경고');
-              setErrorDialogMessage('압축에 암호를 넣었으나 생성된 ZIP에 암호화 표시가 없습니다. 복호화가 필요하면 암호가 적용되지 않았을 수 있습니다.');
+              setErrorDialogTitle('Compression Password Warning');
+              setErrorDialogMessage('A password was provided for compression, but the generated ZIP does not indicate encryption. If decryption is required, the password might not have been applied.');
               setErrorDialogDetails(`대상: ${targetZipPath}\n엔트리 수: ${entries.length}\n암호화된 엔트리: ${entries.filter(e=>e.isEncrypted).length}`);
               setErrorDialogOpen(true);
             }
           } catch (e) {
             console.error('Failed to verify zip contents:', e);
             // Non-fatal: show details so user can inspect
-            setErrorDialogTitle('압축 생성 확인 실패');
-            setErrorDialogMessage('생성된 ZIP 파일의 내용을 확인하는 중 오류가 발생했습니다.');
+            setErrorDialogTitle('Compression Verification Failed');
+            setErrorDialogMessage('An error occurred while verifying the generated ZIP file content.');
             setErrorDialogDetails(String(e));
             setErrorDialogOpen(true);
           }
         }
       } catch (error) {
         console.error('Compression failed:', error);
-        setErrorDialogTitle('압축 실패');
-        setErrorDialogMessage('파일 압축 중 오류가 발생했습니다. 자세한 오류는 아래를 확인하세요.');
+        setErrorDialogTitle('Compression Failed');
+        setErrorDialogMessage('An error occurred during file compression. Please check the details below.');
         setErrorDialogDetails(String(error));
         setErrorDialogOpen(true);
       } finally {
@@ -1068,26 +1093,36 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   };
 
   const handleDragStart = (e: React.DragEvent, file: FileData) => {
-    if (!path) return;
-    // If dragging a file not in selection, select it (optional, but standard behavior usually)
-    // If dragging selection, drag all.
     let filesToDrag = Array.from(selectedFiles);
     if (!selectedFiles.has(file.path)) {
       filesToDrag = [file.path];
     }
 
-    // We need full paths. Since we can't await, we construct them manually or hope receiver handles it.
-    // But FolderTree expects full paths.
-    // We can use a synchronous approximation or just the names and source dir?
-    // Let's try to send full paths assuming standard separator or just send names and source.
-    // But FolderTree logic uses `onMove(paths)`.
-    // Let's construct paths.
-    // Note: This might be OS specific separator issue if we hardcode.
-    // But we can't await `join` here.
-    // Let's use a trick: send the source dir and filenames, let receiver join?
-    // Or just hardcode separator based on navigator.platform?
-    // Let's try to use the `path` prop which is `C:\...`.
-    e.dataTransfer.setData('application/json', JSON.stringify({ paths: filesToDrag }));
+    const filesToDragObjects = files.filter(f => filesToDrag.includes(f.path));
+
+    e.dataTransfer.setData('application/json', JSON.stringify({ 
+      paths: filesToDrag,
+      files: filesToDragObjects 
+    }));
+    
+    // 다른 앱(메모장, VSCode 등)으로 드래그 시 경로 텍스트 전달
+    // 웹메일 등에서 파일 내용 대신 경로 텍스트가 입력되는 것을 방지하기 위해 text/plain 설정 제거
+    // e.dataTransfer.setData('text/plain', filesToDrag.join('\n'));
+
+    // 일부 앱(브라우저 등)을 위한 URI 리스트 전달
+    const uriList = filesToDrag.map(p => {
+      return 'file:///' + p.replace(/\\/g, '/');
+    }).join('\r\n');
+    e.dataTransfer.setData('text/uri-list', uriList);
+
+    // Windows Explorer 등에서 단일 파일 드래그 지원을 위한 DownloadURL 설정 (Chromium 기반 Webview)
+    if (filesToDrag.length === 1) {
+      const filePath = filesToDrag[0];
+      const fileName = filePath.split(/[/\\]/).pop() || 'file';
+      const url = 'file:///' + filePath.replace(/\\/g, '/');
+      e.dataTransfer.setData('DownloadURL', `application/octet-stream:${fileName}:${url}`);
+    }
+
     e.dataTransfer.effectAllowed = 'copyMove';
   };
 
@@ -1122,8 +1157,20 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     return style;
   };
 
+  const toggleColumn = (colKey: string) => {
+    setVisibleColumns(prev => {
+      const next = new Set(prev);
+      if (next.has(colKey)) {
+        if (next.size > 1) next.delete(colKey);
+      } else {
+        next.add(colKey);
+      }
+      return next;
+    });
+  };
+
   // path가 없고 filesOverride도 없으면 안내 메시지
-  if (!path && !filesOverride) return <div style={{ padding: '20px', color: '#888' }}>폴더를 선택하여 파일을 확인하세요.</div>;
+  if (!path && !filesOverride) return <div style={{ padding: '20px', color: '#888' }}>Select a folder to view files.</div>;
 
   const cellStyle = { padding: '0 8px', borderRight: '1px solid #eee', display: 'flex', alignItems: 'center', flexShrink: 0 } as const;
 
@@ -1255,7 +1302,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   return (
     <div
-      style={{ padding: '0', height: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', outline: 'none' }}
+      style={{ padding: '0', height: '100%', width: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', outline: 'none' }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       onContextMenu={(e) => handleContextMenu(e)}
@@ -1265,7 +1312,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     >
       <div
         ref={containerRef}
-        style={{ flex: 1, overflow: 'auto', position: 'relative', userSelect: 'none' }}
+        style={{ flex: 1, overflowY: 'auto', overflowX: enableAutoResize ? 'hidden' : 'auto', position: 'relative', userSelect: 'none' }}
         onMouseDown={handleMouseDown}
       >
         <div
@@ -1282,15 +1329,16 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             backgroundColor: 'white',
             zIndex: 20
           }}
+          onContextMenu={handleHeaderContextMenu}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          {renderHeaderCell('name', 'Name')}
-          {renderHeaderCell('size', 'Size', 'right')}
-          {renderHeaderCell('type', 'Type')}
-          {renderHeaderCell('birthtime', 'Date Created', 'center')}
-          {renderHeaderCell('mtime', 'Date Modified', 'center')}
-          {renderHeaderCell('atime', 'Date Accessed', 'center')}
-          {renderHeaderCell('path', 'Path')}
+          {visibleColumns.has('name') && renderHeaderCell('name', 'Name')}
+          {visibleColumns.has('size') && renderHeaderCell('size', 'Size', 'right')}
+          {visibleColumns.has('type') && renderHeaderCell('type', 'Type')}
+          {visibleColumns.has('birthtime') && renderHeaderCell('birthtime', 'Date Created', 'center')}
+          {visibleColumns.has('mtime') && renderHeaderCell('mtime', 'Date Modified', 'center')}
+          {visibleColumns.has('atime') && renderHeaderCell('atime', 'Date Accessed', 'center')}
+          {visibleColumns.has('path') && renderHeaderCell('path', 'Path')}
         </div>
 
         {selectionRect && (
@@ -1308,7 +1356,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         )}
         {sortedFiles.length === 0 ? (
           <div style={{ padding: '20px', color: '#888', textAlign: 'center' }}>
-            {files.length > 0 && searchQuery ? '검색 결과가 없습니다.' : '파일이 없습니다.'}
+            {files.length > 0 && searchQuery ? 'No search results found.' : 'No files found.'}
           </div>
         ) : (
           <ul style={{ listStyleType: 'none', padding: 0, margin: 0 }}>
@@ -1328,44 +1376,58 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   cursor: 'default', minWidth: 'fit-content'
                 }}
               >
-                <div style={{ ...cellStyle, width: columnWidths.name, display: 'flex', alignItems: 'center' }}>
-                  <span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : '📄'}</span>
-                  {renamingFile === file.path ? (
-                    <input
-                      autoFocus
-                      value={renameText}
-                      onChange={(e) => setRenameText(e.target.value)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === 'Enter') handleRename();
-                        if (e.key === 'Escape') setRenamingFile(null);
-                      }}
-                      onBlur={handleRename}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ flex: 1 }}
-                    />
-                  ) : (
-                    <span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.name}</span>
-                  )}
-                </div>
-                <div style={{ ...cellStyle, width: columnWidths.size, color: '#666' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>
-                </div>
-                <div style={{ ...cellStyle, width: columnWidths.type, color: '#666' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>
-                </div>
-                <div style={{ ...cellStyle, width: columnWidths.birthtime, color: '#666' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>
-                </div>
-                <div style={{ ...cellStyle, width: columnWidths.mtime, color: '#666' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.mtime)}</span>
-                </div>
-                <div style={{ ...cellStyle, width: columnWidths.atime, color: '#666' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.atime)}</span>
-                </div>
-                <div style={{ ...cellStyle, width: columnWidths.path, color: '#666' }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>
-                </div>
+                {visibleColumns.has('name') && (
+                  <div style={{ ...cellStyle, width: columnWidths.name, display: 'flex', alignItems: 'center' }}>
+                    <span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : '📄'}</span>
+                    {renamingFile === file.path ? (
+                      <input
+                        autoFocus
+                        value={renameText}
+                        onChange={(e) => setRenameText(e.target.value)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === 'Enter') handleRename();
+                          if (e.key === 'Escape') setRenamingFile(null);
+                        }}
+                        onBlur={handleRename}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ flex: 1 }}
+                      />
+                    ) : (
+                      <span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.name}</span>
+                    )}
+                  </div>
+                )}
+                {visibleColumns.has('size') && (
+                  <div style={{ ...cellStyle, width: columnWidths.size, color: '#666' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>
+                  </div>
+                )}
+                {visibleColumns.has('type') && (
+                  <div style={{ ...cellStyle, width: columnWidths.type, color: '#666' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>
+                  </div>
+                )}
+                {visibleColumns.has('birthtime') && (
+                  <div style={{ ...cellStyle, width: columnWidths.birthtime, color: '#666' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>
+                  </div>
+                )}
+                {visibleColumns.has('mtime') && (
+                  <div style={{ ...cellStyle, width: columnWidths.mtime, color: '#666' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.mtime)}</span>
+                  </div>
+                )}
+                {visibleColumns.has('atime') && (
+                  <div style={{ ...cellStyle, width: columnWidths.atime, color: '#666' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.atime)}</span>
+                  </div>
+                )}
+                {visibleColumns.has('path') && (
+                  <div style={{ ...cellStyle, width: columnWidths.path, color: '#666' }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -1377,10 +1439,10 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           {contextMenu.type === 'file' && (
             <>
               <div className="context-menu-item" onClick={performCut} style={{ padding: '4px 10px' }}>
-                <span>잘라내기</span> <span className="shortcut">Ctrl+X</span>
+                <span>Cut</span> <span className="shortcut">Ctrl+X</span>
               </div>
               <div className="context-menu-item" onClick={performCopy} style={{ padding: '4px 10px' }}>
-                <span>복사</span> <span className="shortcut">Ctrl+C</span>
+                <span>Copy</span> <span className="shortcut">Ctrl+C</span>
               </div>
               <div className="context-menu-item" onClick={() => {
                 if (selectedFiles.size === 1) {
@@ -1391,13 +1453,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   })();
                 }
               }} style={{ padding: '4px 10px' }}>
-                <span>이름 변경</span> <span className="shortcut">F2</span>
+                <span>Rename</span> <span className="shortcut">F2</span>
               </div>
               <div className="context-menu-item delete" onClick={performDelete} style={{ padding: '4px 10px' }}>
-                <span>삭제</span> <span className="shortcut">Del</span>
+                <span>Delete</span> <span className="shortcut">Del</span>
               </div>
               <div className="context-menu-item" onClick={performCompress} style={{ padding: '4px 10px' }}>
-                <span>압축하기</span>
+                <span>Compress</span>
               </div>
               <div className="context-menu-item" onClick={async () => {
                 if (selectedFiles.size === 0) return;
@@ -1410,21 +1472,40 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   console.error('Failed to open in File Explorer:', e);
                 }
               }} style={{ padding: '4px 10px' }}>
-                <span>File Explorer 로 열기</span>
+                <span>Open in File Explorer</span>
               </div>
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className="context-menu-item" onClick={performExtract} style={{ padding: '4px 10px' }}>
-                  <span>여기에 풀기</span>
+                  <span>Extract Here</span>
                 </div>
               )}
               <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
             </>
           )}
-          <div className="context-menu-item" onClick={() => {
-            if (path) onPaste(path);
-          }} style={{ padding: '4px 10px' }}>
-            <span>붙여넣기</span> <span className="shortcut">Ctrl+V</span>
-          </div>
+          {contextMenu.type === 'header' && (
+            <>
+              <div style={{ padding: '4px 10px', fontWeight: 'bold', color: '#666', fontSize: '0.85em' }}>Visible Columns</div>
+              {['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'].map(col => (
+                <div
+                  key={col}
+                  className="context-menu-item"
+                  onClick={() => toggleColumn(col)}
+                  style={{ padding: '4px 10px', display: 'flex', alignItems: 'center' }}
+                >
+                  <input type="checkbox" checked={visibleColumns.has(col)} readOnly style={{ marginRight: '8px', pointerEvents: 'none' }} />
+                  <span>{col.charAt(0).toUpperCase() + col.slice(1)}</span>
+                </div>
+              ))}
+              <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
+            </>
+          )}
+          {contextMenu.type !== 'header' && path && (
+            <div className="context-menu-item" onClick={() => {
+              onPaste(path);
+            }} style={{ padding: '4px 10px' }}>
+              <span>Paste</span> <span className="shortcut">Ctrl+V</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1446,7 +1527,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             }}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-              ZIP 내용: {zipPath?.split(/[/\\]/).pop()}
+              ZIP Content: {zipPath?.split(/[/\\]/).pop()}
             </span>
             <button
               onClick={() => setZipDialogOpen(false)}
@@ -1456,7 +1537,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           </div>
           <div style={{ padding: '10px', borderBottom: '1px solid #eee', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>풀릴 위치:</label>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Extract to:</label>
               <input
                 type="text"
                 value={extractPath}
@@ -1478,7 +1559,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                     }
                   }}
                   disabled={!isZipEncrypted}
-                  placeholder={isZipEncrypted ? "암호를 입력하세요" : "암호 없음"}
+                  placeholder={isZipEncrypted ? "Enter password" : "No password"}
                   style={{ width: '100%', padding: '4px', paddingRight: '30px', fontSize: '0.9em', backgroundColor: isZipEncrypted ? 'white' : '#f0f0f0', boxSizing: 'border-box' }}
                 />
                 {isZipEncrypted && (
@@ -1498,7 +1579,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                       justifyContent: 'center'
                     }}
                     tabIndex={-1}
-                    title={showPassword ? "암호 숨기기" : "암호 보이기"}
+                    title={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? '🔒' : '👁️'}
                   </button>
@@ -1537,7 +1618,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           </div>
           <div style={{ padding: '10px', borderTop: '1px solid #eee', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.85em', color: '#666', flex: 1 }}>
-              드래그하거나 버튼을 눌러 추출하세요.
+              Drag or click buttons to extract.
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
@@ -1547,7 +1628,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   border: 'none', borderRadius: '4px', fontSize: '0.9em'
                 }}
               >
-                모든 항목 추출
+                Extract All
               </button>
               <button
                 onClick={handleExtractSelectedClick}
@@ -1556,7 +1637,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   border: 'none', borderRadius: '4px', fontSize: '0.9em'
                 }}
               >
-                선택 항목 추출
+                Extract Selected
               </button>
             </div>
           </div>
@@ -1586,14 +1667,14 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             display: 'flex', flexDirection: 'column', gap: '15px'
           }} onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
-            <h3 style={{ margin: 0 }}>압축 설정</h3>
+            <h3 style={{ margin: 0 }}>Compression Settings</h3>
 
             {compressProgress ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px 0' }}>
                 <div style={{ fontSize: '0.9em', color: '#333' }}>
                   {compressProgress.total > 0
-                    ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% 완료`
-                    : '준비 중...'}
+                    ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% completed`
+                    : 'Preparing...'}
                 </div>
                 <progress
                   value={compressProgress.processed}
@@ -1601,24 +1682,24 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   style={{ width: '100%', height: '20px' }}
                 />
                 <div style={{ fontSize: '0.8em', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  처리 중: {compressProgress.filename}
+                  Processing: {compressProgress.filename}
                 </div>
                 <div style={{ fontSize: '0.8em', color: '#666', textAlign: 'right' }}>
                   {(() => {
-                    if (compressProgress.processed === 0 || compressProgress.total === 0) return '계산 중...';
+                    if (compressProgress.processed === 0 || compressProgress.total === 0) return 'Calculating...';
                     const elapsed = (Date.now() - compressProgress.startTime) / 1000;
                     const speed = compressProgress.processed / elapsed; // bytes per second
                     const remainingBytes = compressProgress.total - compressProgress.processed;
                     const remainingSeconds = remainingBytes / speed;
-                    if (!isFinite(remainingSeconds)) return '계산 중...';
-                    return `남은 시간: 약 ${Math.ceil(remainingSeconds)}초`;
+                    if (!isFinite(remainingSeconds)) return 'Calculating...';
+                    return `Time remaining: approx ${Math.ceil(remainingSeconds)}s`;
                   })()}
                 </div>
               </div>
             ) : (
               <>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>압축 파일 이름</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Archive Name</label>
                   <input
                     type="text"
                     value={compressName}
@@ -1629,36 +1710,36 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>압축 방식</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Compression Method</label>
                   <select
                     value={compressMethod}
                     onChange={(e) => setCompressMethod(e.target.value)}
                     style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
                   >
-                    <option value="deflated">Deflate (표준)</option>
-                    <option value="stored">Store (압축 안 함)</option>
+                    <option value="deflated">Deflate (Standard)</option>
+                    <option value="stored">Store (No Compression)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>암호 (선택 사항)</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Password (Optional)</label>
                   <input
                     type="password"
                     value={compressPassword}
                     onChange={(e) => setCompressPassword(e.target.value)}
                     style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                    placeholder="암호를 입력하면 파일이 암호화됩니다"
+                    placeholder="Enter password to encrypt files"
                   />
                 </div>
 
                 <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid #eee', padding: '5px', fontSize: '0.85em', color: '#666' }}>
-                  <div>대상 파일 ({selectedFiles.size}개):</div>
+                  <div>Target files ({selectedFiles.size}):</div>
                   {Array.from(selectedFiles).map(f => <div key={f}>{f}</div>)}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>취소</button>
-                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>압축하기</button>
+                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
+                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>Compress</button>
                 </div>
               </>
             )}
@@ -1676,11 +1757,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           display: 'flex', flexDirection: 'column', gap: '10px',
           cursor: 'move'
         }} onMouseDown={handleExtractProgressMouseDown}>
-          <h4 style={{ margin: 0, fontSize: '1em' }}>압축 해제 중...</h4>
+          <h4 style={{ margin: 0, fontSize: '1em' }}>Extracting...</h4>
           <div style={{ fontSize: '0.9em', color: '#333' }}>
             {extractProgress.total > 0
-              ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% 완료`
-              : '준비 중...'}
+              ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% completed`
+              : 'Preparing...'}
           </div>
           <progress
             value={extractProgress.processed}
@@ -1692,13 +1773,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           </div>
           <div style={{ fontSize: '0.8em', color: '#666', textAlign: 'right' }}>
             {(() => {
-              if (extractProgress.processed === 0 || extractProgress.total === 0) return '계산 중...';
+              if (extractProgress.processed === 0 || extractProgress.total === 0) return 'Calculating...';
               const elapsed = (Date.now() - extractProgress.startTime) / 1000;
               const speed = extractProgress.processed / elapsed;
               const remainingBytes = extractProgress.total - extractProgress.processed;
               const remainingSeconds = remainingBytes / speed;
-              if (!isFinite(remainingSeconds)) return '계산 중...';
-              return `남은 시간: 약 ${Math.ceil(remainingSeconds)}초`;
+              if (!isFinite(remainingSeconds)) return 'Calculating...';
+              return `Time remaining: approx ${Math.ceil(remainingSeconds)}s`;
             })()}
           </div>
         </div>

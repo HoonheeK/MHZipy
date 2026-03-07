@@ -3,11 +3,11 @@ use std::fs::{self, File};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
+use sysinfo::Disks;
 use tauri::{AppHandle, Emitter, Manager, Window};
 use walkdir::WalkDir;
 use zip::write::FileOptions;
-use sysinfo::Disks;
 
 mod mft;
 use mft::MftIndex;
@@ -32,12 +32,25 @@ struct ProgressPayload {
 #[derive(serde::Serialize)]
 struct DirectoryEntry {
     name: String,
+    path: String,
     #[serde(rename = "isDirectory")]
     is_directory: bool,
     #[serde(rename = "isFile")]
     is_file: bool,
     #[serde(rename = "isSymlink")]
     is_symlink: bool,
+    size: u64,
+    mtime: Option<u64>,
+    birthtime: Option<u64>,
+    atime: Option<u64>,
+    readonly: bool,
+}
+
+// Helper to convert SystemTime to millis
+fn to_millis(time: std::io::Result<SystemTime>) -> Option<u64> {
+    time.ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
 }
 
 // 앱 상태 관리
@@ -47,12 +60,14 @@ struct AppState {
 
 /// 앱 데이터 디렉터리에 인덱스 파일 경로를 가져옵니다.
 fn get_index_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path()
+    let dir = app
+        .path()
         .app_config_dir()
         .map_err(|e| format!("Failed to get app config directory: {}", e))?;
 
     if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create app config directory: {}", e))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("Failed to create app config directory: {}", e))?;
     }
     Ok(dir.join("mft_index.bin"))
 }
@@ -92,10 +107,16 @@ async fn build_mft_index(
 }
 
 #[tauri::command]
-async fn search_mft(state: tauri::State<'_, AppState>, query: String) -> Result<Vec<String>, String> {
+async fn search_mft(
+    state: tauri::State<'_, AppState>,
+    query: String,
+) -> Result<Vec<String>, String> {
     let paths = state.mft.search(&query);
     // PathBuf를 String으로 변환하여 반환
-    Ok(paths.into_iter().map(|p| p.to_string_lossy().into_owned()).collect())
+    Ok(paths
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
 }
 
 // 압축 명령어
@@ -347,7 +368,10 @@ fn extract_zip_files(
     let mut indices = Vec::new();
     let mut total_size = 0u64;
     for i in 0..archive.len() {
-        let name = names.get(i).cloned().unwrap_or_else(|| format!("Unknown_{}", i));
+        let name = names
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| format!("Unknown_{}", i));
 
         // Determine whether this entry is targeted
         let is_target = if let Some(ref target_files) = files {
@@ -402,7 +426,9 @@ fn extract_zip_files(
     if !overwrite {
         for &i in &indices {
             let file = if let Some(ref p) = password {
-                archive.by_index_decrypt(i, p.as_bytes()).map_err(|e| e.to_string())?
+                archive
+                    .by_index_decrypt(i, p.as_bytes())
+                    .map_err(|e| e.to_string())?
             } else {
                 archive.by_index(i).map_err(|e| e.to_string())?
             };
@@ -502,11 +528,20 @@ fn delete_to_trash(paths: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 fn get_available_drives() -> Vec<String> {
     let disks = Disks::new_with_refreshed_list();
-    let mut drives: Vec<String> = disks.iter()
+    let mut drives: Vec<String> = disks
+        .iter()
         .map(|disk| disk.mount_point().to_string_lossy().to_string())
         .collect();
 
-    for key in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial", "Google Drive", "Dropbox"].iter() {
+    for key in [
+        "OneDrive",
+        "OneDriveConsumer",
+        "OneDriveCommercial",
+        "Google Drive",
+        "Dropbox",
+    ]
+    .iter()
+    {
         if let Ok(path) = std::env::var(key) {
             if !drives.contains(&path) {
                 drives.push(path);
@@ -518,19 +553,40 @@ fn get_available_drives() -> Vec<String> {
 
 #[tauri::command]
 async fn read_directory(path: String) -> Result<Vec<DirectoryEntry>, String> {
-    let entries = fs::read_dir(&path).map_err(|e| e.to_string())?;
-    let mut result = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let file_type = entry.file_type().map_err(|e| e.to_string())?;
-        result.push(DirectoryEntry {
-            name: entry.file_name().to_string_lossy().to_string(),
-            is_directory: file_type.is_dir(),
-            is_file: file_type.is_file(),
-            is_symlink: file_type.is_symlink(),
-        });
-    }
-    Ok(result)
+    let path_buf = PathBuf::from(&path);
+    let entries = tauri::async_runtime::spawn_blocking(move || {
+        let mut result = Vec::new();
+        if let Ok(read_dir) = fs::read_dir(&path_buf) {
+            for entry in read_dir.filter_map(|e| e.ok()) {
+                let metadata = entry.metadata().ok();
+                let file_type = entry.file_type().ok();
+
+                result.push(DirectoryEntry {
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    path: entry.path().to_string_lossy().to_string(),
+                    is_directory: file_type.as_ref().map(|ft| ft.is_dir()).unwrap_or(false),
+                    is_file: file_type.as_ref().map(|ft| ft.is_file()).unwrap_or(false),
+                    is_symlink: file_type
+                        .as_ref()
+                        .map(|ft| ft.is_symlink())
+                        .unwrap_or(false),
+                    size: metadata.as_ref().map(|m| m.len()).unwrap_or(0),
+                    mtime: metadata.as_ref().and_then(|m| to_millis(m.modified())),
+                    birthtime: metadata.as_ref().and_then(|m| to_millis(m.created())),
+                    atime: metadata.as_ref().and_then(|m| to_millis(m.accessed())),
+                    readonly: metadata
+                        .as_ref()
+                        .map(|m| m.permissions().readonly())
+                        .unwrap_or(false),
+                });
+            }
+        }
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -543,15 +599,88 @@ async fn search_directory(path: String, query: String) -> Result<Vec<String>, St
             let name = entry.file_name().to_string_lossy().to_lowercase();
             if name.contains(&query) {
                 matches.push(entry.path().to_string_lossy().to_string());
-                if matches.len() >= 1000 { // 결과 너무 많으면 제한
+                if matches.len() >= 1000 {
+                    // 결과 너무 많으면 제한
                     break;
                 }
             }
         }
         matches
-    }).await.map_err(|e| e.to_string())?;
-    
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
     Ok(results)
+}
+
+#[tauri::command]
+fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::OsStr;
+        use std::mem;
+        use std::os::windows::ffi::OsStrExt;
+        use std::ptr;
+        // HWND와 HANDLE 생성 방식을 수정합니다.
+        use windows::Win32::Foundation::{HANDLE, HWND, POINT};
+        use windows::Win32::System::DataExchange::{
+            CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+        };
+        use windows::Win32::System::Memory::{
+            GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+        };
+        use windows::Win32::UI::Shell::DROPFILES;
+
+        let mut wide_paths = Vec::new();
+        for path in paths {
+            wide_paths.extend(OsStr::new(&path).encode_wide());
+            wide_paths.push(0);
+        }
+        wide_paths.push(0);
+
+        let dropfiles_size = mem::size_of::<DROPFILES>();
+        let paths_size = wide_paths.len() * 2;
+        let total_size = dropfiles_size + paths_size;
+
+        unsafe {
+            let h_global = GlobalAlloc(GMEM_MOVEABLE, total_size).map_err(|e| e.to_string())?;
+            let ptr = GlobalLock(h_global);
+            if ptr.is_null() {
+                return Err("GlobalLock failed".to_string());
+            }
+
+            // --- 데이터를 쓰는 동안은 Lock 상태 유지 ---
+            let dropfiles = ptr as *mut DROPFILES;
+            (*dropfiles).pFiles = dropfiles_size as u32;
+            (*dropfiles).pt = POINT { x: 0, y: 0 };
+            (*dropfiles).fNC = false.into();
+            (*dropfiles).fWide = true.into();
+
+            let paths_ptr = (ptr as *mut u8).add(dropfiles_size) as *mut u16;
+            ptr::copy_nonoverlapping(wide_paths.as_ptr(), paths_ptr, wide_paths.len());
+            // ---------------------------------------
+
+            // 데이터 복사가 끝났으므로 이제 Unlock
+            let _ = GlobalUnlock(h_global);
+
+            if OpenClipboard(HWND::default()).is_ok() {
+                let _ = EmptyClipboard();
+                let handle = HANDLE(h_global.0 as isize);
+
+                // SetClipboardData에 핸들을 넘기면, 이후 해당 메모리의 소유권은 시스템이 가집니다.
+                if let Err(e) = SetClipboardData(15, handle) {
+                    let _ = CloseClipboard();
+                    return Err(format!("SetClipboardData failed: {}", e));
+                }
+                let _ = CloseClipboard();
+            } else {
+                // 클립보드 열기 실패 시 메모리 해제 고려가 필요할 수 있으나,
+                // 일반적으로 GlobalAlloc된 핸들은 시스템에 등록되지 않으면 직접 해제해야 합니다.
+                return Err("OpenClipboard failed".to_string());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -565,7 +694,8 @@ pub fn run() {
             // 앱 시작 시 인덱스 로드 및 모니터링 시작
             let index_clone = state.mft.clone();
             let app_handle = app.handle().clone();
-            let index_path = get_index_path(&app_handle).expect("Failed to get index path on setup");
+            let index_path =
+                get_index_path(&app_handle).expect("Failed to get index path on setup");
 
             // 파일 로드는 I/O 작업이므로 별도 스레드에서 처리
             std::thread::spawn(move || {
@@ -611,7 +741,8 @@ pub fn run() {
             delete_to_trash,
             get_available_drives,
             read_directory,
-            search_directory
+            search_directory,
+            copy_files_to_clipboard
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
