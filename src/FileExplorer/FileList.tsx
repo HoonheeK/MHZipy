@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef,useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { rename } from '@tauri-apps/plugin-fs';
+import { rename, mkdir } from '@tauri-apps/plugin-fs';
 import { confirm } from '@tauri-apps/plugin-dialog';
 import ErrorDialog from './ErrorDialog';
 import { basename, dirname, join } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
+import { openPdfInWindow } from '../PDFViewer/PDFViewer';
+import MessageDialog from '../common/MessageDialog';
 
 interface FileListProps {
   path: string | null;
@@ -18,6 +20,7 @@ interface FileListProps {
   onPaste: (targetDir: string) => void;
   onDelete: (paths: string[]) => void;
   onExtract: (path: string) => void;
+  onOpenInExplorer: (path: string, isDirectory?: boolean) => void;
   refreshTrigger?: number;
   searchQuery?: string;
   filesOverride?: FileData[];
@@ -50,7 +53,7 @@ interface FilterConfig {
   unit: number; // for size multiplier
 }
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false }: FileListProps) {
+export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, onOpenInExplorer, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -96,6 +99,17 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const [compressMethod, setCompressMethod] = useState('deflated');
   const [compressPassword, setCompressPassword] = useState('');
   const [compressProgress, setCompressProgress] = useState<{ total: number; processed: number; filename: string; startTime: number } | null>(null);
+
+  // Permission/Message Dialog State
+  const [msgDialogOpen, setMsgDialogOpen] = useState(false);
+  const [msgDialogTitle, setMsgDialogTitle] = useState('');
+  const [msgDialogMessage, setMsgDialogMessage] = useState('');
+
+  const showMessage = (title: string, message: string) => {
+    setMsgDialogTitle(title);
+    setMsgDialogMessage(message);
+    setMsgDialogOpen(true);
+  };
 
   // Column Resizing State
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({
@@ -536,7 +550,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       return;
     }
     if (!checkPathPermission(renamingFile, editableFolders, readonlyFolders)) {
-      await confirm('You do not have permission to edit this file.', { title: 'Permission Error', kind: 'error' });
+      showMessage('Permission Error', 'You do not have permission to edit this file.');
       setRenamingFile(null);
       return;
     }
@@ -552,12 +566,64 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
   };
 
+  const handleCreateFolder = async () => {
+    if (!path) return;
+    if (!checkPathPermission(path, editableFolders, readonlyFolders)) {
+      showMessage('Permission Error', 'You do not have permission to create folders here.');
+      return;
+    }
+    setContextMenu(null);
+
+    let baseName = "New Folder";
+    let newName = baseName;
+    let counter = 2;
+    
+    const existingNames = new Set(files.map(f => f.name));
+    while (existingNames.has(newName)) {
+      newName = `${baseName} (${counter})`;
+      counter++;
+    }
+
+    try {
+      const newPath = await join(path, newName);
+      await mkdir(newPath);
+      setVersion(v => v + 1); // Trigger refresh
+      // Auto-select and enter rename mode for the new folder
+      setRenamingFile(newPath);
+      setRenameText(newName);
+      onSelectFiles(new Set([newPath]));
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+      setErrorDialogTitle('Create Folder Failed');
+      setErrorDialogMessage('Could not create folder.');
+      setErrorDialogDetails(String(error));
+      setErrorDialogOpen(true);
+    }
+  };
+
+  const canWriteToCurrentPath = useMemo(() => {
+    if (!path) return false; // Disable in search view
+    return checkPathPermission(path, editableFolders, readonlyFolders);
+  }, [path, editableFolders, readonlyFolders]);
+
+  const canExtractHere = useMemo(() => {
+    if (selectedFiles.size !== 1 || !path) return false;
+    const filePath = Array.from(selectedFiles)[0];
+    if (!filePath.toLowerCase().endsWith('.zip')) return false;
+    return checkPathPermission(path, editableFolders, readonlyFolders);
+  }, [selectedFiles, path, editableFolders, readonlyFolders]);
+
+  const canCompress = useMemo(() => {
+    if (selectedFiles.size === 0 || !path) return false;
+    return checkPathPermission(path, editableFolders, readonlyFolders);
+  }, [selectedFiles, path, editableFolders, readonlyFolders]);
+
   const performDelete = async () => {
     if (selectedFiles.size === 0) return;
     const fullPaths = Array.from(selectedFiles);
     for (const p of fullPaths) {
       if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
-        await confirm(`You do not have permission to delete '${p}'.`, { title: 'Permission Error', kind: 'error' });
+        showMessage('Permission Error', `You do not have permission to delete '${p}'.`);
         return;
       }
     }
@@ -576,7 +642,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (selectedFiles.size === 0) return;
     for (const p of Array.from(selectedFiles)) {
       if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
-        confirm(`You do not have permission to edit '${p}'.`, { title: 'Permission Error', kind: 'error' });
+        showMessage('Permission Error', `You do not have permission to edit '${p}'.`);
         return;
       }
     }
@@ -617,7 +683,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const performExtract = () => {
     if (selectedFiles.size !== 1) return;
     if (!checkPathPermission(Array.from(selectedFiles)[0], editableFolders, readonlyFolders)) {
-      confirm('You do not have permission to extract here.', { title: 'Permission Error', kind: 'error' });
+      showMessage('Permission Error', 'You do not have permission to extract here.');
       return;
     }
     const fullPath = Array.from(selectedFiles)[0];
@@ -695,6 +761,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
     if (file.name.toLowerCase().endsWith('.zip')) {
       await openZipFile(file);
+    } else if (file.name.toLowerCase().endsWith('.pdf')) {
+      await openPdfInWindow({ path: file.path, name: file.name });
     } else {
       // console.log('Opening file:', file.path);
       await invoke('open_file', { path: file.path });
@@ -710,6 +778,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       if (item.isDirectory) continue;
       if (item.name.toLowerCase().endsWith('.zip')) {
         await openZipFile(item);
+      } else if (item.name.toLowerCase().endsWith('.pdf')) {
+        await openPdfInWindow({ path: item.path, name: item.name });
       } else {
         // console.log('Opening file:', item.path);
         await invoke('open_file', { path: item.path });
@@ -1049,9 +1119,14 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
 
     if (e.key === 'F2' && selectedFiles.size === 1) {
-      const fileName = Array.from(selectedFiles)[0];
-      setRenamingFile(fileName);
-      basename(fileName).then(name => setRenameText(name));
+      const filePath = Array.from(selectedFiles)[0];
+      if (!checkPathPermission(filePath, editableFolders, readonlyFolders)) {
+        e.preventDefault();
+        showMessage('Permission Error', 'You do not have permission to rename this item.');
+        return;
+      }
+      setRenamingFile(filePath);
+      basename(filePath).then(name => setRenameText(name));
       return;
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
       e.preventDefault();
@@ -1129,31 +1204,27 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const getMenuPosition = () => {
     if (!contextMenu) return {};
     const { x, y } = contextMenu;
-    const width = 200;
-    const height = 300;
-
-    const style = {
-      top: y,
-      left: x,
-      width: '200px',
-      fontSize: '14px',
-      transform: 'none'
+    
+    const style: any = {
+      position: 'fixed',
+      width: '180px',
+      fontSize: '12px',
+      zIndex: 1000,
     };
-
-    let tx = '0';
-    let ty = '0';
-
-    if (x + width > window.innerWidth) {
-      tx = '-100%';
+    
+    // 화면 오른쪽/아래쪽 경계를 넘어가면 반대 방향으로 펼침
+    if (x + 180 > window.innerWidth) {
+      style.right = window.innerWidth - x;
+    } else {
+      style.left = x;
     }
-    if (y + height > window.innerHeight) {
-      ty = '-100%';
+    
+    if (y + 250 > window.innerHeight) {
+      style.bottom = window.innerHeight - y;
+    } else {
+      style.top = y;
     }
-
-    if (tx !== '0' || ty !== '0') {
-      style.transform = `translate(${tx}, ${ty})`;
-    }
-
+    
     return style;
   };
 
@@ -1438,44 +1509,45 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         <div className="context-menu" style={getMenuPosition()}>
           {contextMenu.type === 'file' && (
             <>
-              <div className="context-menu-item" onClick={performCut} style={{ padding: '4px 10px' }}>
+              <div className="context-menu-item" onClick={performCut} style={{ padding: '2px 10px' }}>
                 <span>Cut</span> <span className="shortcut">Ctrl+X</span>
               </div>
-              <div className="context-menu-item" onClick={performCopy} style={{ padding: '4px 10px' }}>
+              <div className="context-menu-item" onClick={performCopy} style={{ padding: '2px 10px' }}>
                 <span>Copy</span> <span className="shortcut">Ctrl+C</span>
               </div>
-              <div className="context-menu-item" onClick={() => {
+              <div className={`context-menu-item ${selectedFiles.size !== 1 ? 'disabled' : ''}`} onClick={() => {
                 if (selectedFiles.size === 1) {
                   const filePath = Array.from(selectedFiles)[0];
-                  (async () => {
-                    setRenamingFile(filePath);
-                    setRenameText(await basename(filePath));
-                  })();
+                  if (checkPathPermission(filePath, editableFolders, readonlyFolders)) {
+                    (async () => {
+                      setRenamingFile(filePath);
+                      setRenameText(await basename(filePath));
+                    })();
+                  } else {
+                    showMessage('Permission Error', 'You do not have permission to rename this item.');
+                  }
                 }
-              }} style={{ padding: '4px 10px' }}>
+              }} style={{ padding: '2px 10px' }}>
                 <span>Rename</span> <span className="shortcut">F2</span>
               </div>
-              <div className="context-menu-item delete" onClick={performDelete} style={{ padding: '4px 10px' }}>
+              <div className="context-menu-item delete" onClick={performDelete} style={{ padding: '2px 10px' }}>
                 <span>Delete</span> <span className="shortcut">Del</span>
               </div>
-              <div className="context-menu-item" onClick={performCompress} style={{ padding: '4px 10px' }}>
+              <div className={`context-menu-item ${!canCompress ? 'disabled' : ''}`} onClick={canCompress ? performCompress : undefined} style={{ padding: '2px 10px' }}>
                 <span>Compress</span>
               </div>
-              <div className="context-menu-item" onClick={async () => {
-                if (selectedFiles.size === 0) return;
-                const first = Array.from(selectedFiles)[0];
-                try {
-                  const parent = await dirname(first);
-                  setContextMenu(null);
-                  onNavigate(parent);
-                } catch (e) {
-                  console.error('Failed to open in File Explorer:', e);
+              <div className="context-menu-item" onClick={() => {
+                if (selectedFiles.size > 0) {
+                  const firstPath = Array.from(selectedFiles)[0];
+                  const fileData = sortedFiles.find(f => f.path === firstPath);
+                  onOpenInExplorer(firstPath, fileData?.isDirectory);
                 }
-              }} style={{ padding: '4px 10px' }}>
+                setContextMenu(null);
+              }} style={{ padding: '2px 10px' }}>
                 <span>Open in File Explorer</span>
               </div>
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
-                <div className="context-menu-item" onClick={performExtract} style={{ padding: '4px 10px' }}>
+                <div className={`context-menu-item ${!canExtractHere ? 'disabled' : ''}`} onClick={canExtractHere ? performExtract : undefined} style={{ padding: '2px 10px' }}>
                   <span>Extract Here</span>
                 </div>
               )}
@@ -1484,13 +1556,13 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           )}
           {contextMenu.type === 'header' && (
             <>
-              <div style={{ padding: '4px 10px', fontWeight: 'bold', color: '#666', fontSize: '0.85em' }}>Visible Columns</div>
+              <div style={{ padding: '2px 10px', fontWeight: 'bold', color: '#666', fontSize: '0.85em' }}>Visible Columns</div>
               {['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'].map(col => (
                 <div
                   key={col}
                   className="context-menu-item"
                   onClick={() => toggleColumn(col)}
-                  style={{ padding: '4px 10px', display: 'flex', alignItems: 'center' }}
+                  style={{ padding: '2px 10px', display: 'flex', alignItems: 'center' }}
                 >
                   <input type="checkbox" checked={visibleColumns.has(col)} readOnly style={{ marginRight: '8px', pointerEvents: 'none' }} />
                   <span>{col.charAt(0).toUpperCase() + col.slice(1)}</span>
@@ -1500,11 +1572,16 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             </>
           )}
           {contextMenu.type !== 'header' && path && (
-            <div className="context-menu-item" onClick={() => {
-              onPaste(path);
-            }} style={{ padding: '4px 10px' }}>
-              <span>Paste</span> <span className="shortcut">Ctrl+V</span>
-            </div>
+            <>
+              <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={canWriteToCurrentPath ? handleCreateFolder : undefined} style={{ padding: '2px 10px' }}>
+                <span>Create Folder</span>
+              </div>
+              <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={() => {
+                if (canWriteToCurrentPath) onPaste(path);
+              }} style={{ padding: '2px 10px' }}>
+                <span>Paste</span> <span className="shortcut">Ctrl+V</span>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -1793,6 +1870,12 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           setErrorDialogOpen(false);
           setErrorDialogDetails(undefined);
         }}
+      />
+      <MessageDialog
+        open={msgDialogOpen}
+        title={msgDialogTitle}
+        message={msgDialogMessage}
+        onClose={() => setMsgDialogOpen(false)}
       />
     </div>
   );

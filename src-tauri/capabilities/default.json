@@ -15,6 +15,7 @@
     "dialog:default",
     "opener:default",
     "shell:allow-open",
+    "core:webview:allow-create-webview-window",
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
@@ -94,5 +95,16 @@
       ]
     },
     "shell:default"
-  ]
+  ],
+  "app": {
+    "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$RESOURCE/*",
+          "**/*"
+        ]
+      }
+    }
+  }
 }

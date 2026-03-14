@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { dirname } from '@tauri-apps/api/path';
+import { dirname, join } from '@tauri-apps/api/path';
+import { mkdir, rename } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 import FolderTree from "./FolderTree";
 import FileList from "./FileList";
 import SearchView from "../SearchView/SearchView";
 import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOperations';
+import MessageDialog from "../common/MessageDialog";
 import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
@@ -33,6 +35,8 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const [isResizingQuickAccess, setIsResizingQuickAccess] = useState(false);
   const [filterQuickAccess, setFilterQuickAccess] = useState(false);
   const [draggedQAIndex, setDraggedQAIndex] = useState<number | null>(null);
+  const [renamingTreePath, setRenamingTreePath] = useState<string | null>(null);
+  const [renameTreeText, setRenameTreeText] = useState('');
 
   const sidebarWidthRef = useRef(sidebarWidth);
   const quickAccessHeightRef = useRef(quickAccessHeight);
@@ -40,6 +44,17 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
   useEffect(() => { quickAccessHeightRef.current = quickAccessHeight; }, [quickAccessHeight]);
+
+  // Message Dialog State
+  const [msgDialogOpen, setMsgDialogOpen] = useState(false);
+  const [msgDialogTitle, setMsgDialogTitle] = useState('');
+  const [msgDialogMessage, setMsgDialogMessage] = useState('');
+
+  const showMessage = (title: string, message: string) => {
+    setMsgDialogTitle(title);
+    setMsgDialogMessage(message);
+    setMsgDialogOpen(true);
+  };
 
   const activeAllowedPaths = useMemo(() => {
     if (!filterQuickAccess) return undefined;
@@ -227,7 +242,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     // Check permission for source paths (need delete permission)
     for (const path of paths) {
       if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
-        confirm(`You do not have permission to edit '${path}'.`, { title: 'Permission Error', kind: 'error' });
+        showMessage('Permission Error', `You do not have permission to edit '${path}'.`);
         return;
       }
     }
@@ -236,7 +251,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const handlePaste = async (targetDir: string) => {
     if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
-      await confirm(`You do not have write permission for '${targetDir}'.`, { title: 'Permission Error', kind: 'error' });
+      showMessage('Permission Error', `You do not have write permission for '${targetDir}'.`);
       return;
     }
     if (!clipboard || !clipboard.paths.length) return;
@@ -251,7 +266,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const handleDelete = async (paths: string[]) => {
     for (const path of paths) {
       if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
-        await confirm(`You do not have permission to delete '${path}'.`, { title: 'Permission Error', kind: 'error' });
+        showMessage('Permission Error', `You do not have permission to delete '${path}'.`);
         return;
       }
     }
@@ -263,11 +278,11 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const handleMove = async (sourcePaths: string[], targetDir: string, op: 'move' | 'copy') => {
     if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
-      await confirm(`You do not have write permission for '${targetDir}'.`, { title: 'Permission Error', kind: 'error' });
+      showMessage('Permission Error', `You do not have write permission for '${targetDir}'.`);
       return;
     }
     if (op === 'move' && !sourcePaths.every(p => checkPathPermission(p, config.editableFolders, config.readonlyFolders))) {
-      await confirm(`You do not have permission to edit the source files.`, { title: 'Permission Error', kind: 'error' });
+      showMessage('Permission Error', `You do not have permission to edit the source files.`);
       return;
     }
     const success = await pasteFiles(sourcePaths, targetDir, op);
@@ -276,13 +291,51 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
   };
 
+  const handleStartTreeRename = (path: string, name: string) => {
+    setRenamingTreePath(path);
+    setRenameTreeText(name);
+  };
+
+  const handleCancelTreeRename = () => {
+    setRenamingTreePath(null);
+    setRenameTreeText('');
+  };
+
+  const handleFinishTreeRename = async () => {
+    if (!renamingTreePath) {
+      handleCancelTreeRename();
+      return;
+    }
+
+    if (renameTreeText === '' || renameTreeText.includes('/') || renameTreeText.includes('\\')) {
+      showMessage('Invalid Name', 'The folder name cannot be empty or contain slashes.');
+      handleCancelTreeRename();
+      return;
+    }
+
+    try {
+      const oldPath = renamingTreePath;
+      const newPath = await join(await dirname(oldPath), renameTreeText);
+
+      if (oldPath.toLowerCase() !== newPath.toLowerCase()) {
+        await rename(oldPath, newPath);
+        setRefreshTrigger(p => p + 1);
+      }
+    } catch (error) {
+      console.error('Failed to rename:', error);
+      showMessage('Rename Failed', String(error));
+    } finally {
+      handleCancelTreeRename();
+    }
+  };
+
   const handleExtract = async (path: string) => {
     try {
-      if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
-        await confirm(`You do not have permission to edit '${path}'.`, { title: 'Permission Error', kind: 'error' });
+      const parentDir = await dirname(path);
+      if (!checkPathPermission(parentDir, config.editableFolders, config.readonlyFolders)) {
+        showMessage('Permission Error', `You do not have permission to extract files into '${parentDir}'.`);
         return;
       }
-      const parentDir = await dirname(path);
       await invoke('extract_zip', { zipPath: path, targetDir: parentDir });
       setRefreshTrigger(p => p + 1);
     } catch (error) {
@@ -290,34 +343,67 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
   };
 
+  const handleCreateFolder = async (parentPath: string) => {
+    if (!checkPathPermission(parentPath, config.editableFolders, config.readonlyFolders)) {
+      showMessage('Permission Error', `You do not have permission to create folders in '${parentPath}'.`);
+      return;
+    }
+    setContextMenu(null);
+
+    try {
+      const entries = await invoke<any[]>('read_directory', { path: parentPath });
+      const existingNames = new Set(entries.map((e: any) => e.name));
+      
+      let baseName = "New Folder";
+      let newName = baseName;
+      let counter = 2;
+      
+      while (existingNames.has(newName)) {
+        newName = `${baseName} (${counter})`;
+        counter++;
+      }
+
+      const newPath = await join(parentPath, newName);
+      await mkdir(newPath);
+      setRefreshTrigger(p => p + 1);
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+    }
+  };
+
+  const canWriteToSelectedPaths = useMemo(() => {
+    if (selectedPaths.size === 0) return false;
+    return Array.from(selectedPaths).every(p => checkPathPermission(p, config.editableFolders, config.readonlyFolders));
+  }, [selectedPaths, config.editableFolders, config.readonlyFolders]);
+
+  const canWriteToContextMenuPath = useMemo(() => {
+    if (!contextMenu) return false;
+    return checkPathPermission(contextMenu.path, config.editableFolders, config.readonlyFolders);
+  }, [contextMenu, config.editableFolders, config.readonlyFolders]);
+
   const getMenuPosition = () => {
     if (!contextMenu) return {};
     const { x, y } = contextMenu;
-    const width = 200;
-    const height = 250;
-
-    const style = {
-      top: y,
-      left: x,
-      width: '200px',
-      fontSize: '14px',
-      transform: 'none'
+    
+    const style: any = {
+      position: 'fixed',
+      width: '180px',
+      fontSize: '12px',
+      zIndex: 1000,
     };
-
-    let tx = '0';
-    let ty = '0';
-
-    if (x + width > window.innerWidth) {
-      tx = '-100%';
+    
+    if (x + 180 > window.innerWidth) {
+      style.right = window.innerWidth - x;
+    } else {
+      style.left = x;
     }
-    if (y + height > window.innerHeight) {
-      ty = '-100%';
+    
+    if (y + 250 > window.innerHeight) {
+      style.bottom = window.innerHeight - y;
+    } else {
+      style.top = y;
     }
-
-    if (tx !== '0' || ty !== '0') {
-      style.transform = `translate(${tx}, ${ty})`;
-    }
-
+    
     return style;
   };
 
@@ -346,32 +432,36 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   useEffect(() => {
     const handleGlobalKeyDown = async (e: KeyboardEvent) => {
-      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) {
+      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || contextMenu) {
         return;
       }
 
-      if (e.ctrlKey && e.key === 'c') {
+      const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+      if (isCtrlOrMeta && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
         if (activePane === 'list' && filesSelected.size > 0) {
           const paths = Array.from(filesSelected);
           handleCopy(paths);
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
           handleCopy(Array.from(selectedPaths));
         }
-      } else if (e.ctrlKey && e.key === 'x') {
+      } else if (isCtrlOrMeta && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
         if (activePane === 'list' && filesSelected.size > 0) {
           const paths = Array.from(filesSelected);
           handleCut(paths);
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
-          handleCut(Array.from(selectedPaths));
+          const paths = Array.from(selectedPaths);
+          handleCut(paths);
         }
-      } else if (e.ctrlKey && e.key === 'v') {
-        if (activePane === 'list' || activePane === 'tree') {
-          handlePaste(selected);
-        }
+      } else if (isCtrlOrMeta && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        handlePaste(selected);
       } else if (e.key === 'Delete') {
+        e.preventDefault();
         if (activePane === 'list' && filesSelected.size > 0) {
-          const paths = Array.from(filesSelected);
-          handleDelete(paths);
+          handleDelete(Array.from(filesSelected));
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
           handleDelete(Array.from(selectedPaths));
         }
@@ -379,7 +469,21 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [activePane, filesSelected, selectedPaths, selected]);
+  }, [activePane, filesSelected, selectedPaths, selected, clipboard, config.editableFolders, config.readonlyFolders, contextMenu]);
+
+  const handleOpenInExplorer = async (path: string, isDirectory?: boolean) => {
+    try {
+      if (isDirectory) {
+        // For directories, open them directly in the file explorer.
+        await invoke('open_file', { path });
+      } else {
+        // For files, open the parent folder and select the file.
+        await invoke('open_in_explorer', { path });
+      }
+    } catch (e) {
+      console.error('Failed to open in explorer:', e);
+    }
+  };
 
   const searchViewElement = (
     <div style={{ display: currentView === 'search' ? 'flex' : 'none', height: '100%', width: '100%', flexDirection: 'column' }}>
@@ -395,6 +499,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         onPaste={handlePaste}
         onDelete={handleDelete}
         onExtract={handleExtract}
+        onOpenInExplorer={handleOpenInExplorer}
         refreshTrigger={refreshTrigger}
         quickAccess={config.quickAccess}
         searchConfig={config.search}
@@ -484,7 +589,16 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
               onContextMenu={handleTreeContextMenu}
               refreshTrigger={refreshTrigger}
               editableFolders={config.editableFolders}
+              readonlyFolders={config.readonlyFolders}
               allowedPaths={activeAllowedPaths}
+              clipboard={clipboard}
+              renamingPath={renamingTreePath}
+              renameText={renameTreeText}
+              onRenameTextChange={setRenameTreeText}
+              onStartRename={handleStartTreeRename}
+              onFinishRename={handleFinishTreeRename}
+              onCancelRename={handleCancelTreeRename}
+              showMessage={showMessage}
             />
           </div>
         </aside>
@@ -513,6 +627,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             onPaste={() => handlePaste(selected)}
             onDelete={handleDelete}
             onExtract={handleExtract}
+            onOpenInExplorer={handleOpenInExplorer}
             refreshTrigger={refreshTrigger}
             searchQuery={searchQuery}
             editableFolders={config.editableFolders}
@@ -527,34 +642,47 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
               </div>
             ) : (
               <>
-                <div className="context-menu-item" onClick={() => handleCut(Array.from(selectedPaths))}>
+                <div className={`context-menu-item ${!canWriteToSelectedPaths ? 'disabled' : ''}`} onClick={canWriteToSelectedPaths ? () => handleCut(Array.from(selectedPaths)) : undefined} style={{ padding: '2px 10px' }}>
                   <span>Cut</span> <span className="shortcut">Ctrl+X</span>
                 </div>
-                <div className="context-menu-item" onClick={() => handleCopy(Array.from(selectedPaths))}>
+                <div className="context-menu-item" onClick={() => handleCopy(Array.from(selectedPaths))} style={{ padding: '2px 10px' }}>
                   <span>Copy</span> <span className="shortcut">Ctrl+C</span>
                 </div>
-                <div className="context-menu-item" onClick={() => handlePaste(contextMenu.path)}>
+                <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handleCreateFolder(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
+                  <span>Create Folder</span>
+                </div>
+                <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handlePaste(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
                   <span>Paste</span> <span className="shortcut">Ctrl+V</span>
                 </div>
                 <div className="context-menu-separator"></div>
-                <div className="context-menu-item delete" onClick={() => handleDelete(Array.from(selectedPaths))}>
+                <div className="context-menu-item" onClick={() => handleOpenInExplorer(contextMenu.path, true)} style={{ padding: '2px 10px' }}>
+                  Open in File Explorer
+                </div>
+                <div className="context-menu-separator"></div>
+                <div className={`context-menu-item delete ${!canWriteToSelectedPaths ? 'disabled' : ''}`} onClick={canWriteToSelectedPaths ? () => handleDelete(Array.from(selectedPaths)) : undefined} style={{ padding: '2px 10px' }}>
                   <span>Delete</span> <span className="shortcut">Del</span>
                 </div>
                 <div className="context-menu-separator"></div>
                 {selectedPaths.size === 1 && (
-                  <div className="context-menu-item" onClick={() => handleSetDefault(contextMenu.path)}>Set as Default Folder</div>
+                  <div className="context-menu-item" onClick={() => handleSetDefault(contextMenu.path)} style={{ padding: '2px 10px' }}>Set as Default Folder</div>
                 )}
-                <div className="context-menu-item" onClick={() => Array.from(selectedPaths).forEach(p => handleAddToQuickAccess(p))}>
+                <div className="context-menu-item" onClick={() => Array.from(selectedPaths).forEach(p => handleAddToQuickAccess(p))} style={{ padding: '2px 10px' }}>
                   Add to Quick Access
                 </div>
                 <div className="context-menu-separator"></div>
-                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')}>Set as Editable</div>
-                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'readonly')}>Set as Read-only</div>
-                <div className="context-menu-item" onClick={() => handleClearPermission(contextMenu.path)}>Clear Permission</div>
+                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')} style={{ padding: '2px 10px' }}>Set as Editable</div>
+                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'readonly')} style={{ padding: '2px 10px' }}>Set as Read-only</div>
+                <div className="context-menu-item" onClick={() => handleClearPermission(contextMenu.path)} style={{ padding: '2px 10px' }}>Clear Permission</div>
               </>
             )}
           </div>
         )}
+        <MessageDialog
+          open={msgDialogOpen}
+          title={msgDialogTitle}
+          message={msgDialogMessage}
+          onClose={() => setMsgDialogOpen(false)}
+        />
       </div>
     </>
   );

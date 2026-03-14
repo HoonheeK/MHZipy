@@ -14,6 +14,11 @@ export const checkPathPermission = (
   editableFolders: string[] = [],
   readonlyFolders: string[] = []
 ): boolean => {
+  // If no rules are defined at all, allow by default for better usability.
+  if (editableFolders.length === 0 && readonlyFolders.length === 0) {
+    return true;
+  }
+
   let closestRule: { path: string; type: 'allow' | 'deny' } | null = null;
 
   for (const rule of editableFolders) {

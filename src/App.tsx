@@ -40,6 +40,7 @@ function App() {
   const [currentView, setCurrentView] = useState<'folder' | 'search'>('folder');
   const [searchQuery, setSearchQuery] = useState('');
   const [history, setHistory] = useState<string[]>([]);
+  const [forwardHistory, setForwardHistory] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState<string>('');
   const [requestedPath, setRequestedPath] = useState<string | undefined>(undefined);
 
@@ -133,14 +134,24 @@ function App() {
     if (currentPath) {
       setHistory(prev => [...prev, currentPath]);
     }
+    setForwardHistory([]);
     setCurrentPath(path);
   };
 
   const handleBack = () => {
     if (history.length === 0) return;
+    setForwardHistory(prev => [...prev, currentPath]);
     const prevPath = history[history.length - 1];
     setHistory(prev => prev.slice(0, -1));
     setRequestedPath(prevPath);
+  };
+
+  const handleNext = () => {
+    if (forwardHistory.length === 0) return;
+    setHistory(prev => [...prev, currentPath]);
+    const nextPath = forwardHistory[forwardHistory.length - 1];
+    setForwardHistory(prev => prev.slice(0, -1));
+    setRequestedPath(nextPath);
   };
 
   if (!configLoaded) return null;
@@ -154,6 +165,9 @@ function App() {
         onSearch={setSearchQuery}
         onBack={handleBack}
         canGoBack={history.length > 0}
+        onNext={handleNext}
+        canGoForward={forwardHistory.length > 0}
+        searchQuery={searchQuery}
       />
       <FileExplorer
         config={config}

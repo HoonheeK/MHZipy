@@ -683,6 +683,48 @@ fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_in_explorer(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::{Command, Stdio};
+        println!("[DEBUG] Attempting to open in explorer: {}", path);
+
+        // explorer.exe는 GUI 애플리케이션이므로, 부모 프로세스의 stdio를 상속하면
+        // 예기치 않은 동작을 유발할 수 있습니다. stdio를 null로 리디렉션하여
+        // 자식 프로세스를 완전히 분리하는 것이 안정적입니다.
+        let result = Command::new("explorer")
+            .arg("/select,")
+            .arg(&path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        if let Err(e) = result {
+            let error_message = format!("Failed to spawn explorer.exe for path '{}': {}", path, e);
+            println!("[ERROR] {}", error_message);
+            return Err(error_message);
+        }
+        
+        println!("[DEBUG] Successfully spawned explorer.exe for path: {}", path);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let path_buf = std::path::PathBuf::from(path);
+        if path_buf.is_file() {
+            if let Some(parent) = path_buf.parent() {
+                open::that(parent).map_err(|e| e.to_string())?;
+            }
+        } else {
+            open::that(path_buf).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -742,7 +784,8 @@ pub fn run() {
             get_available_drives,
             read_directory,
             search_directory,
-            copy_files_to_clipboard
+            copy_files_to_clipboard,
+            open_in_explorer
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

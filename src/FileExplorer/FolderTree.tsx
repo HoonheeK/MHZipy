@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { checkPathPermission } from '../command/fileOperations';
 
 interface FolderTreeProps {
   path: string;
@@ -12,11 +13,20 @@ interface FolderTreeProps {
   onMove: (sourcePaths: string[], targetDir: string, op: 'move' | 'copy') => void;
   refreshTrigger?: number;
   onContextMenu?: (e: React.MouseEvent, path: string) => void;
+  clipboard?: { paths: string[]; op: 'copy' | 'move' } | null;
   editableFolders?: string[];
+  readonlyFolders?: string[];
   allowedPaths?: string[];
+  renamingPath?: string | null;
+  onStartRename?: (path: string, currentName: string) => void;
+  onFinishRename?: () => void;
+  onCancelRename?: () => void;
+  renameText?: string;
+  onRenameTextChange?: (text: string) => void;
+  showMessage?: (title: string, message: string) => void;
 }
 
-export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, editableFolders, allowedPaths }: FolderTreeProps) {
+export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage }: FolderTreeProps) {
   const isAncestorOf = (ancestor: string, descendant: string) => {
     if (!descendant.startsWith(ancestor)) return false;
     if (descendant.length === ancestor.length) return true;
@@ -38,22 +48,8 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
 
   const isExpanded = expandedPaths.has(path);
   const isSelected = selectedPaths.has(path);
-
-  // Determine if this path is editable. If `editableFolders` is provided and non-empty,
-  // only folders listed (and their descendants) are considered editable. Otherwise
-  // everything is editable.
-  const isEditable = (() => {
-    if (!Array.isArray(editableFolders) || editableFolders.length === 0) return true;
-    if (path === 'My PC') return true;
-    return editableFolders.some(allowed => {
-      if (path === allowed) return true;
-      if (path.startsWith(allowed)) {
-        const char = path[allowed.length];
-        return char === '\\' || char === '/';
-      }
-      return false;
-    });
-  })();
+  const isEditable = checkPathPermission(path, editableFolders, readonlyFolders);
+  const isCut = clipboard?.op === 'move' && clipboard.paths.includes(path);
 
   useEffect(() => {
     if (isSelected && nodeRef.current) {
@@ -151,7 +147,30 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
     return nodes.slice(low, high + 1).map(n => n.dataset.path!).filter(Boolean);
   };
 
+  const handleRenameInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation(); // Prevent tree navigation while renaming
+    if (e.key === 'Enter') {
+      onFinishRename?.();
+    } else if (e.key === 'Escape') {
+      onCancelRename?.();
+    }
+  };
+
   const handleKeyDown = async (e: React.KeyboardEvent) => {
+    if (renamingPath) return; // Disable navigation if any item is being renamed.
+
+    if (e.key === 'F2') {
+      e.stopPropagation();
+      if (selectedPaths.size === 1 && selectedPaths.has(path)) {
+        if (isEditable) {
+          onStartRename?.(path, name);
+        } else {
+          showMessage?.('Permission Error', 'You do not have permission to rename this item.');
+        }
+      }
+      return;
+    }
+
     if (e.key === 'ArrowRight') {
       e.stopPropagation();
       if (!isExpanded) onToggleExpand(path);
@@ -258,11 +277,31 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
           border: '1px solid transparent',
           backgroundColor: isSelected ? '#cce8ff' : 'transparent',
           // Gray out folders that are NOT editable (and their descendants)
-          color: !isEditable ? 'gray' : 'inherit'
+          color: !isEditable ? 'gray' : 'inherit',
+          opacity: isCut ? 0.5 : 1,
         }}
       >
-        <span style={{ marginRight: '4px' }}>{isExpanded ? '📂' : '📁'}</span>
-        <span>{name}</span>
+        {renamingPath === path ? (
+          <>
+            <span style={{ marginRight: '4px' }}>{isExpanded ? '📂' : '📁'}</span>
+            <input
+              type="text"
+              value={renameText}
+              onChange={e => onRenameTextChange?.(e.target.value)}
+              onKeyDown={handleRenameInputKeyDown}
+              onBlur={() => onFinishRename?.()}
+              onClick={e => e.stopPropagation()}
+              onFocus={e => e.target.select()}
+              autoFocus
+              style={{ outline: 'none', border: '1px solid #007bff', padding: '1px', flex: 1, marginRight: '4px', height: '1.5em' }}
+            />
+          </>
+        ) : (
+          <>
+            <span style={{ marginRight: '4px' }}>{isExpanded ? '📂' : '📁'}</span>
+            <span>{name}</span>
+          </>
+        )}
       </div>
       {isExpanded && (
         <div>
@@ -280,6 +319,15 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
               refreshTrigger={refreshTrigger}
               onContextMenu={onContextMenu}
               editableFolders={editableFolders}
+              readonlyFolders={readonlyFolders}
+              clipboard={clipboard}
+              renamingPath={renamingPath}
+              renameText={renameText}
+              onRenameTextChange={onRenameTextChange}
+              onStartRename={onStartRename}
+              onFinishRename={onFinishRename}
+              onCancelRename={onCancelRename}
+              showMessage={showMessage}
             />
           ))}
         </div>

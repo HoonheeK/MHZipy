@@ -18,6 +18,7 @@ interface SearchViewProps {
   quickAccess?: string[];
   searchConfig?: SearchConfig;
   onSaveSearchConfig?: (config: SearchConfig) => void;
+  onOpenInExplorer?: (path: string) => void;
 }
 
 interface FileData {
@@ -67,7 +68,7 @@ const parseSizeQuery = (input: string) => {
 
 const FILE_TYPES = ['All', 'Folder', 'Image', 'Video', 'Audio', 'Archive', 'Document', 'Code'];
 
-export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger, quickAccess = [], searchConfig, onSaveSearchConfig }: SearchViewProps) {
+export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger, quickAccess = [], searchConfig, onSaveSearchConfig, onOpenInExplorer }: SearchViewProps) {
   const [results, setResults] = useState<FileData[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
@@ -640,6 +641,7 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
             refreshTrigger={refreshTrigger}
             searchQuery={localQuery} // 하이라이팅 등을 위해 전달
             enableAutoResize={true}
+            onOpenInExplorer={onOpenInExplorer || (() => {})}
           />
         </div>
       </div>
