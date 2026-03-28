@@ -53,7 +53,7 @@ interface FilterConfig {
   unit: number; // for size multiplier
 }
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onExtract, onOpenInExplorer, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false }: FileListProps) {
+export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onOpenInExplorer, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -98,6 +98,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const [compressName, setCompressName] = useState('');
   const [compressMethod, setCompressMethod] = useState('deflated');
   const [compressPassword, setCompressPassword] = useState('');
+  const [compressEncryption, setCompressEncryption] = useState('zipcrypto');
   const [compressProgress, setCompressProgress] = useState<{ total: number; processed: number; filename: string; startTime: number } | null>(null);
 
   // Permission/Message Dialog State
@@ -675,19 +676,44 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       setCompressName(defaultName);
       setCompressMethod('deflated');
       setCompressPassword('');
+      setCompressEncryption('zipcrypto');
       setCompressProgress(null);
       setCompressDialogOpen(true);
     })();
   };
 
-  const performExtract = () => {
+  const performExtract = async () => {
     if (selectedFiles.size !== 1) return;
-    if (!checkPathPermission(Array.from(selectedFiles)[0], editableFolders, readonlyFolders)) {
+    const fullPath = Array.from(selectedFiles)[0];
+    
+    // Find file data in current list or search results
+    const fileData = files.find(f => f.path === fullPath) || filesOverride?.find(f => f.path === fullPath);
+    if (!fileData) return;
+
+    if (!checkPathPermission(fullPath, editableFolders, readonlyFolders)) {
       showMessage('Permission Error', 'You do not have permission to extract here.');
       return;
     }
-    const fullPath = Array.from(selectedFiles)[0];
-    onExtract(fullPath);
+
+    try {
+      // Check if ZIP requires a password
+      const entries = await invoke<{ isEncrypted: boolean }[]>('list_zip_contents', { zipPath: fullPath });
+      const isEncrypted = entries.some(e => e.isEncrypted);
+
+      if (isEncrypted) {
+        // If encrypted, open the Zip Content Dialog to handle password entry
+        await openZipFile(fileData);
+      } else {
+        // If not encrypted, extract to the current directory in background
+        const targetDir = await dirname(fullPath);
+        await executeZipExtraction(fullPath, null, targetDir);
+      }
+    } catch (error) {
+      // If metadata reading fails (e.g. encrypted headers), fallback to dialog
+      await openZipFile(fileData);
+    }
+
+    setContextMenu(null);
   };
 
   const handleContextMenu = (e: React.MouseEvent, file?: FileData, index?: number) => {
@@ -1054,7 +1080,8 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           paths: fullPaths,
           targetZipPath,
           method: compressMethod,
-          password: compressPassword || null
+          password: compressPassword || null,
+          encryptionMode: compressEncryption
         });
 
         setCompressDialogOpen(false);
@@ -1807,6 +1834,28 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                     style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
                     placeholder="Enter password to encrypt files"
                   />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Encryption Method</label>
+                  <select
+                    value={compressEncryption}
+                    onChange={(e) => setCompressEncryption(e.target.value)}
+                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    disabled={!compressPassword}
+                  >
+                    <option value="zipcrypto">ZipCrypto (Windows 기본 호환용)</option>
+                    <option value="aes256">AES-256 (보안 강화)</option>
+                  </select>
+                  {compressPassword && (
+                    <div style={{ fontSize: '0.75em', color: '#e11d48', marginTop: '4px', lineHeight: '1.4' }}>
+                      {compressEncryption === 'zipcrypto' ? (
+                        <span style={{ color: '#059669' }}>✔️ ZipCrypto is compatible with Windows standard Zip extractor.</span>
+                      ) : (
+                        <span>⚠️ AES-256 is more secure but incompatible with Windows built-in extractor. (Use 7-Zip/BandiZip)</span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid #eee', padding: '5px', fontSize: '0.85em', color: '#666' }}>

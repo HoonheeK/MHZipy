@@ -409,7 +409,7 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <h2 style={{ margin: 0, fontSize: '1.2em', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              🔍 <span style={{ fontWeight: '800', color: '#2563eb' }}>EVERYTHING WEB</span>
+              🔍 <span style={{ fontWeight: '800', color: '#2563eb' }}>Quick Access Folder Search</span>
             </h2>
             <span style={{ fontSize: '0.85em', color: '#666', fontWeight: '500' }}>Intelligent File Search</span>
           </div>
@@ -483,7 +483,7 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
               <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>💡 Search Tips</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
-                  <span style={{ fontWeight: '600' }}>Regex:</span> <code>^</code>(시작), <code>$</code>(끝), <code>.*</code>(포함)
+                  <span style={{ fontWeight: '600' }}>Regex:</span> <code>^</code>(Start), <code>$</code>(End), <code>.*</code>(Contains)
                 </div>
                 <div>
                   <span style={{ fontWeight: '600' }}>Size:</span> <code>{'>'} 10MB</code>, <code>{'<'} 1GB</code>
@@ -509,7 +509,7 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
                 <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>⚖️ File Size</label>
                 <input 
                   type="text" 
-                  placeholder="예: > 10MB"
+                  placeholder="e.g. > 10MB"
                   value={sizeQuery}
                   onChange={(e) => setSizeQuery(e.target.value)}
                   style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}

@@ -8,6 +8,7 @@ use sysinfo::Disks;
 use tauri::{AppHandle, Emitter, Manager, Window};
 use walkdir::WalkDir;
 use zip::write::FileOptions;
+use zip::unstable::write::FileOptionsExt;
 
 mod mft;
 use mft::MftIndex;
@@ -127,6 +128,7 @@ fn compress_files(
     target_zip_path: String,
     method: Option<String>,
     password: Option<String>,
+    encryption_mode: Option<String>,
 ) -> Result<(), String> {
     let path = Path::new(&target_zip_path);
     let file = File::create(&path).map_err(|e| e.to_string())?;
@@ -143,7 +145,11 @@ fn compress_files(
         .unix_permissions(0o755);
 
     if let Some(ref pass) = password {
-        options = options.with_aes_encryption(zip::AesMode::Aes128, pass);
+        if encryption_mode.as_deref() == Some("aes256") {
+            options = options.with_aes_encryption(zip::AesMode::Aes256, pass);
+        } else {
+            options = options.with_deprecated_encryption(pass.as_bytes());
+        }
     }
 
     // 1. 전체 크기 계산 (진행률 표시용)
@@ -507,7 +513,7 @@ fn extract_zip_files(
             ProgressPayload {
                 total: total_size,
                 processed: total_size,
-                filename: "완료".to_string(),
+                filename: "Complete".to_string(),
             },
         )
         .map_err(|e| e.to_string())?;
