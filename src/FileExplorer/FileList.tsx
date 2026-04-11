@@ -28,6 +28,9 @@ interface FileListProps {
   readonlyFolders?: string[];
   autoFitTrigger?: number;
   enableAutoResize?: boolean;
+  columnSettings?: { key: string; visible: boolean }[];
+  canPaste?: boolean;
+  onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
 }
 
 interface FileData {
@@ -53,7 +56,17 @@ interface FilterConfig {
   unit: number; // for size multiplier
 }
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onOpenInExplorer, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false }: FileListProps) {
+const COLUMN_LABELS: Record<string, string> = { 
+  name: 'Name', 
+  size: 'Size', 
+  type: 'Type', 
+  birthtime: 'Date Created', 
+  mtime: 'Date Modified', 
+  atime: 'Date Accessed', 
+  path: 'Path' 
+};
+
+export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onOpenInExplorer, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false, columnSettings, canPaste, onColumnSettingsChange }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -122,9 +135,19 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     mtime: 150,
     atime: 150
   });
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set([
-    'name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'
-  ]));
+
+  const defaultSettings = useMemo(() => [
+    { key: 'name', visible: true },
+    { key: 'size', visible: true },
+    { key: 'type', visible: true },
+    { key: 'birthtime', visible: true },
+    { key: 'mtime', visible: true },
+    { key: 'atime', visible: true },
+    { key: 'path', visible: true },
+  ], []);
+
+  const activeColumnSettings = (columnSettings && columnSettings.length > 0) ? columnSettings : defaultSettings;
+
   const [resizingCol, setResizingCol] = useState<string | null>(null);
   const columnWidthsRef = useRef(columnWidths);
   const resizeStartRef = useRef<{ x: number; width: number } | null>(null);
@@ -150,7 +173,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
         if (width <= 0) continue;
 
         const currentWidths = columnWidthsRef.current;
-        const cols = Object.keys(currentWidths).filter(key => visibleColumns.has(key));
+        const cols = activeColumnSettings.filter(c => c.visible).map(c => c.key);
         const currentTotal = cols.reduce((acc, key) => acc + (currentWidths[key] || 0), 0);
 
         if (currentTotal > 0 && Math.abs(width - currentTotal) > 5) {
@@ -168,7 +191,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [enableAutoResize, visibleColumns]);
+  }, [enableAutoResize, activeColumnSettings]);
 
   useEffect(() => {
     if (filesOverride) {
@@ -259,6 +282,34 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     };
   }, [resizingCol]);
 
+  const handleHeaderContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, type: 'header' });
+  };
+
+  const toggleColumnVisibility = (key: string) => {
+    const newSettings = activeColumnSettings.map(col =>
+      col.key === key ? { ...col, visible: !col.visible } : col
+    );
+    if (newSettings.some(c => c.visible)) {
+      onColumnSettingsChange?.(newSettings);
+    }
+  };
+
+  const handleColumnReorder = (sourceKey: string, targetKey: string) => {
+    const newSettings = [...activeColumnSettings];
+    const sourceIdx = newSettings.findIndex(c => c.key === sourceKey);
+    const targetIdx = newSettings.findIndex(c => c.key === targetKey);
+
+    if (sourceIdx === -1 || targetIdx === -1 || sourceIdx === targetIdx) return;
+
+    const [moved] = newSettings.splice(sourceIdx, 1);
+    newSettings.splice(targetIdx, 0, moved);
+
+    onColumnSettingsChange?.(newSettings);
+  };
+
   const handleOpenFilter = (e: React.MouseEvent, colKey: string) => {
     e.stopPropagation();
     const isOpen = openFilter === colKey;
@@ -318,7 +369,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (!containerRef.current) return;
     const containerWidth = containerRef.current.clientWidth;
     
-    const cols = ['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'].filter(c => visibleColumns.has(c));
+    const cols = activeColumnSettings.filter(c => c.visible).map(c => c.key);
     const currentTotal = cols.reduce((acc, key) => acc + (columnWidths[key] || 0), 0);
     
     if (currentTotal <= 0) return;
@@ -732,12 +783,6 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       // 빈 공간 우클릭
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'container' });
     }
-  };
-
-  const handleHeaderContextMenu = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY, type: 'header' });
   };
 
   const openZipFile = async (file: FileData) => {
@@ -1255,18 +1300,6 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     return style;
   };
 
-  const toggleColumn = (colKey: string) => {
-    setVisibleColumns(prev => {
-      const next = new Set(prev);
-      if (next.has(colKey)) {
-        if (next.size > 1) next.delete(colKey);
-      } else {
-        next.add(colKey);
-      }
-      return next;
-    });
-  };
-
   // path가 없고 filesOverride도 없으면 안내 메시지
   if (!path && !filesOverride) return <div style={{ padding: '20px', color: '#888' }}>Select a folder to view files.</div>;
 
@@ -1377,11 +1410,26 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     );
   };
 
-  const renderHeaderCell = (colKey: string, label: string, align: 'left' | 'center' | 'right' = 'left') => (
+  const renderHeaderCell = (colKey: string, label: string, align: 'left' | 'center' | 'right' = 'left') => {
+    return (
     <div
+      key={colKey}
       style={{ ...cellStyle, width: columnWidths[colKey], cursor: 'pointer', position: 'relative', overflow: 'visible' }}
       onClick={() => handleSort(colKey as SortKey)}
       onDoubleClick={() => handleAutoFit(colKey)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData('columnKey', colKey);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        const sourceKey = e.dataTransfer.getData('columnKey');
+        if (sourceKey && sourceKey !== colKey) {
+          handleColumnReorder(sourceKey, colKey);
+        }
+      }}
+      onContextMenu={handleHeaderContextMenu}
     >
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: align }}>
         {label} {sortConfig.key === colKey && (sortConfig.direction === 'asc' ? '▲' : '▼')}
@@ -1396,7 +1444,21 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
       {renderResizer(colKey)}
       {openFilter === colKey && renderFilterPopup(colKey)}
     </div>
-  );
+    );
+  };
+
+  const renderCell = (file: FileData, colKey: string) => {
+    switch (colKey) {
+      case 'name': return <><span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : '📄'}</span><span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.name}</span></>;
+      case 'size': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>;
+      case 'type': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>;
+      case 'birthtime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>;
+      case 'mtime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.mtime)}</span>;
+      case 'atime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.atime)}</span>;
+      case 'path': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>;
+      default: return null;
+    }
+  };
 
   return (
     <div
@@ -1427,16 +1489,14 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             backgroundColor: 'white',
             zIndex: 20
           }}
-          onContextMenu={handleHeaderContextMenu}
           onMouseDown={(e) => e.stopPropagation()}
+          onContextMenu={handleHeaderContextMenu}
         >
-          {visibleColumns.has('name') && renderHeaderCell('name', 'Name')}
-          {visibleColumns.has('size') && renderHeaderCell('size', 'Size', 'right')}
-          {visibleColumns.has('type') && renderHeaderCell('type', 'Type')}
-          {visibleColumns.has('birthtime') && renderHeaderCell('birthtime', 'Date Created', 'center')}
-          {visibleColumns.has('mtime') && renderHeaderCell('mtime', 'Date Modified', 'center')}
-          {visibleColumns.has('atime') && renderHeaderCell('atime', 'Date Accessed', 'center')}
-          {visibleColumns.has('path') && renderHeaderCell('path', 'Path')}
+          {activeColumnSettings.map(col =>
+            col.visible && renderHeaderCell(col.key, COLUMN_LABELS[col.key], 
+              col.key === 'size' ? 'right' : (['birthtime', 'mtime', 'atime'].includes(col.key) ? 'center' : 'left')
+            )
+          )}
         </div>
 
         {selectionRect && (
@@ -1474,58 +1534,16 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                   cursor: 'default', minWidth: 'fit-content'
                 }}
               >
-                {visibleColumns.has('name') && (
-                  <div style={{ ...cellStyle, width: columnWidths.name, display: 'flex', alignItems: 'center' }}>
-                    <span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : '📄'}</span>
-                    {renamingFile === file.path ? (
-                      <input
-                        autoFocus
-                        value={renameText}
-                        onChange={(e) => setRenameText(e.target.value)}
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          if (e.key === 'Enter') handleRename();
-                          if (e.key === 'Escape') setRenamingFile(null);
-                        }}
-                        onBlur={handleRename}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ flex: 1 }}
+                {activeColumnSettings.map(col => col.visible && (
+                  <div key={col.key} style={{ ...cellStyle, width: columnWidths[col.key], color: col.key === 'name' ? 'inherit' : '#666' }}>
+                    {col.key === 'name' && renamingFile === file.path ? (
+                      <input autoFocus value={renameText} onChange={(e) => setRenameText(e.target.value)} 
+                        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setRenamingFile(null); }}
+                        onBlur={handleRename} onClick={(e) => e.stopPropagation()} style={{ flex: 1 }}
                       />
-                    ) : (
-                      <span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.name}</span>
-                    )}
+                    ) : renderCell(file, col.key)}
                   </div>
-                )}
-                {visibleColumns.has('size') && (
-                  <div style={{ ...cellStyle, width: columnWidths.size, color: '#666' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>
-                  </div>
-                )}
-                {visibleColumns.has('type') && (
-                  <div style={{ ...cellStyle, width: columnWidths.type, color: '#666' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>
-                  </div>
-                )}
-                {visibleColumns.has('birthtime') && (
-                  <div style={{ ...cellStyle, width: columnWidths.birthtime, color: '#666' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>
-                  </div>
-                )}
-                {visibleColumns.has('mtime') && (
-                  <div style={{ ...cellStyle, width: columnWidths.mtime, color: '#666' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.mtime)}</span>
-                  </div>
-                )}
-                {visibleColumns.has('atime') && (
-                  <div style={{ ...cellStyle, width: columnWidths.atime, color: '#666' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.atime)}</span>
-                  </div>
-                )}
-                {visibleColumns.has('path') && (
-                  <div style={{ ...cellStyle, width: columnWidths.path, color: '#666' }}>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>
-                  </div>
-                )}
+                ))}
               </li>
             ))}
           </ul>
@@ -1534,6 +1552,17 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
       {contextMenu && (
         <div className="context-menu" style={getMenuPosition()}>
+          {contextMenu.type === 'header' && (
+            <>
+              <div style={{ padding: '4px 10px', fontWeight: 'bold', color: '#666', borderBottom: '1px solid #eee', marginBottom: '4px' }}>Columns</div>
+              {activeColumnSettings.map(col => (
+                <div key={col.key} className="context-menu-item" onClick={() => toggleColumnVisibility(col.key)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={col.visible} readOnly style={{ pointerEvents: 'none' }} />
+                  <span>{COLUMN_LABELS[col.key]}</span>
+                </div>
+              ))}
+            </>
+          )}
           {contextMenu.type === 'file' && (
             <>
               <div className="context-menu-item" onClick={performCut} style={{ padding: '2px 10px' }}>
@@ -1581,33 +1610,18 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
               <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
             </>
           )}
-          {contextMenu.type === 'header' && (
-            <>
-              <div style={{ padding: '2px 10px', fontWeight: 'bold', color: '#666', fontSize: '0.85em' }}>Visible Columns</div>
-              {['name', 'size', 'type', 'birthtime', 'mtime', 'atime', 'path'].map(col => (
-                <div
-                  key={col}
-                  className="context-menu-item"
-                  onClick={() => toggleColumn(col)}
-                  style={{ padding: '2px 10px', display: 'flex', alignItems: 'center' }}
-                >
-                  <input type="checkbox" checked={visibleColumns.has(col)} readOnly style={{ marginRight: '8px', pointerEvents: 'none' }} />
-                  <span>{col.charAt(0).toUpperCase() + col.slice(1)}</span>
-                </div>
-              ))}
-              <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
-            </>
-          )}
           {contextMenu.type !== 'header' && path && (
             <>
               <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={canWriteToCurrentPath ? handleCreateFolder : undefined} style={{ padding: '2px 10px' }}>
                 <span>Create Folder</span>
               </div>
-              <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={() => {
-                if (canWriteToCurrentPath) onPaste(path);
-              }} style={{ padding: '2px 10px' }}>
-                <span>Paste</span> <span className="shortcut">Ctrl+V</span>
-              </div>
+              {canPaste && (
+                <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={() => {
+                  if (canWriteToCurrentPath) onPaste(path);
+                }} style={{ padding: '2px 10px' }}>
+                  <span>Paste</span> <span className="shortcut">Ctrl+V</span>
+                </div>
+              )}
             </>
           )}
         </div>

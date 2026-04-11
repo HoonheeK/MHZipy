@@ -11,8 +11,8 @@ import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[] };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[] }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   externalPath?: string;
@@ -24,6 +24,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([config.defaultPath || "C:"]));
   const [filesSelected, setFilesSelected] = useState<Set<string>>(new Set());
   const [activePane, setActivePane] = useState<'tree' | 'list'>('tree');
+  const [activeQuickAccessPath, setActiveQuickAccessPath] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState(config.defaultPath || "C:");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; source?: 'tree' | 'quickAccess' } | null>(null);
   const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'move' } | null>(null);
@@ -58,22 +59,14 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const activeAllowedPaths = useMemo(() => {
     if (!filterQuickAccess) return undefined;
 
-    const matches = config.quickAccess.filter(qa => {
-      if (selected === qa) return true;
-      if (selected.startsWith(qa)) {
-        const char = selected[qa.length];
-        return char === '\\' || char === '/';
-      }
-      return false;
-    });
-
-    if (matches.length > 0) {
-      matches.sort((a, b) => b.length - a.length);
-      return [matches[0]];
+    // 사용자가 Quick Access 목록에서 직접 폴더를 선택한 경우 해당 폴더로 트리를 제한
+    if (activeQuickAccessPath && config.quickAccess.includes(activeQuickAccessPath)) {
+      return [activeQuickAccessPath];
     }
 
+    // 그 외(Filter Tree는 켰지만 폴더는 아직 안 찍은 경우 등)에는 전체 Quick Access 목록을 보여줌
     return config.quickAccess;
-  }, [filterQuickAccess, selected, config.quickAccess]);
+  }, [filterQuickAccess, activeQuickAccessPath, config.quickAccess]);
 
   const treeRoot = useMemo(() => {
     if (filterQuickAccess && activeAllowedPaths && activeAllowedPaths.length === 1) {
@@ -171,6 +164,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const handleRemoveQuickAccess = (path: string) => {
     const newQuickAccess = config.quickAccess.filter(p => p !== path);
+    if (activeQuickAccessPath === path) setActiveQuickAccessPath(null);
     onSaveConfig({ quickAccess: newQuickAccess });
   };
 
@@ -249,11 +243,21 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   };
 
   const handlePaste = async (targetDir: string) => {
+    console.log("[Paste Action] Target Directory:", targetDir);
+    console.log("[Paste Action] Internal Clipboard State:", clipboard);
+
     if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
+      console.warn("[Paste Action] Permission Denied for target directory");
       showMessage('Permission Error', `You do not have write permission for '${targetDir}'.`);
       return;
     }
-    if (!clipboard || !clipboard.paths.length) return;
+
+    if (!clipboard || !clipboard.paths.length) {
+      console.log("[Paste Action] Nothing to paste (Internal clipboard is empty)");
+      return;
+    }
+
+    console.log(`[Paste Action] Executing ${clipboard.op} operation for:`, clipboard.paths);
 
     const success = await pasteFiles(clipboard.paths, targetDir, clipboard.op);
     if (success) {
@@ -502,10 +506,15 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         refreshTrigger={refreshTrigger}
         quickAccess={config.quickAccess}
         searchConfig={config.search}
+        columnSettings={config.columnSettings}
+        canPaste={!!clipboard && clipboard.paths.length > 0}
+        onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
       />
     </div>
   );
+
+  const canPasteVisible = !!clipboard && clipboard.paths.length > 0;
 
   return (
     <>
@@ -526,6 +535,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
               <div
                 ref={quickAccessRef}
                 className="quick-access-section"
+                // tabIndex={0}
                 style={{ padding: '0 10px', height: quickAccessHeight, overflowY: 'auto', flexShrink: 0 }}
               >
                 <div style={{ fontSize: '0.8em', fontWeight: 'bold', color: '#666', marginBottom: '5px', marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -534,16 +544,24 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                     <input
                       type="checkbox"
                       checked={filterQuickAccess}
-                      onChange={(e) => setFilterQuickAccess(e.target.checked)}
+                      onChange={(e) => {
+                        setFilterQuickAccess(e.target.checked);
+                        if (!e.target.checked) setActiveQuickAccessPath(null);
+                      }}
                       style={{ marginRight: '4px' }}
+                      tabIndex={-1}
                     />
-                    <span style={{ fontSize: '0.9em' }}>Filter Tree</span>
+                    <span style={{ fontSize: '0.9em' }} >Filter Tree</span>
                   </label>
                 </div>
                 {config.quickAccess.map((qaPath, index) => (
                   <div
                     key={qaPath}
-                    onClick={() => { setSelected(qaPath); setSelectedPaths(new Set([qaPath])); }}
+                    onClick={() => { 
+                      setSelected(qaPath); 
+                      setSelectedPaths(new Set([qaPath])); 
+                      setActiveQuickAccessPath(qaPath);
+                    }}
                     onContextMenu={(e) => handleQuickAccessContextMenu(e, qaPath)}
                     draggable
                     onDragStart={(e) => handleQADragStart(e, index)}
@@ -551,6 +569,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                     onDrop={(e) => handleQADrop(e, index)}
                     style={{ cursor: 'pointer', padding: '4px 5px', fontSize: '0.9em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', borderRadius: '4px', backgroundColor: selected === qaPath ? '#e6f3ff' : 'transparent', opacity: draggedQAIndex === index ? 0.5 : 1 }}
                     title={qaPath}
+                    tabIndex={-1}
                   >
                     📁 {qaPath.split(/[/\\]/).pop() || qaPath}
                   </div>
@@ -610,7 +629,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
           }}
           style={{ width: '4px', cursor: 'col-resize', backgroundColor: '#f0f0f0', borderLeft: '1px solid #ddd' }}
         />
-        <section className="mhz-explorer__files">
+        <section className="mhz-explorer__files" >
           {/* <div className="mhz-explorer__path">{selected}</div> */}
           <FileList
             path={selected}
@@ -631,6 +650,9 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             searchQuery={searchQuery}
             editableFolders={config.editableFolders}
             readonlyFolders={config.readonlyFolders}
+            columnSettings={config.columnSettings}
+            canPaste={!!clipboard && clipboard.paths.length > 0}
+            onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
           />
         </section>
         {contextMenu && (
@@ -650,9 +672,11 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                 <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handleCreateFolder(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
                   <span>Create Folder</span>
                 </div>
-                <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handlePaste(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
-                  <span>Paste</span> <span className="shortcut">Ctrl+V</span>
-                </div>
+                {canPasteVisible && (
+                  <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handlePaste(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
+                    <span>Paste</span> <span className="shortcut">Ctrl+V</span>
+                  </div>
+                )}
                 <div className="context-menu-separator"></div>
                 <div className="context-menu-item" onClick={() => handleOpenInExplorer(contextMenu.path, true)} style={{ padding: '2px 10px' }}>
                   Open in File Explorer

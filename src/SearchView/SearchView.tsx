@@ -19,6 +19,9 @@ interface SearchViewProps {
   searchConfig?: SearchConfig;
   onSaveSearchConfig?: (config: SearchConfig) => void;
   onOpenInExplorer?: (path: string) => void;
+  columnSettings?: { key: string; visible: boolean }[];
+  canPaste?: boolean;
+  onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
 }
 
 interface FileData {
@@ -68,7 +71,7 @@ const parseSizeQuery = (input: string) => {
 
 const FILE_TYPES = ['All', 'Folder', 'Image', 'Video', 'Audio', 'Archive', 'Document', 'Code'];
 
-export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger, quickAccess = [], searchConfig, onSaveSearchConfig, onOpenInExplorer }: SearchViewProps) {
+export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger, quickAccess = [], searchConfig, onSaveSearchConfig, onOpenInExplorer, columnSettings, canPaste, onColumnSettingsChange }: SearchViewProps) {
   const [results, setResults] = useState<FileData[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
@@ -126,6 +129,20 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
     }, 1000);
     return () => clearTimeout(handler);
   }, [localQuery, useRegex, sizeQuery, selectedType, dateAfter, dateBefore, showFilters, searchMode, directorySearchPaths, onSaveSearchConfig]);
+
+  // Regex 유효성 검사 및 에러 상태 관리 (사이드 이펙트 분리)
+  useEffect(() => {
+    if (useRegex && localQuery) {
+      try {
+        new RegExp(localQuery, 'i');
+        setRegexError(null);
+      } catch (e) {
+        setRegexError('Invalid Regex');
+      }
+    } else {
+      setRegexError(null);
+    }
+  }, [useRegex, localQuery]);
 
   // Only sync quickAccess if we don't have a saved config or if directorySearchPaths is empty
   useEffect(() => {
@@ -247,10 +264,10 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       try {
         let paths: string[] = [];
         if (searchMode === 'index') {
-           paths = await invoke<string[]>('search_mft', { query: localQuery });
+           paths = await invoke<string[]>('search_mft', { query: localQuery, useRegex });
         } else {
            const searchRoots = getOptimalSearchRoots(Array.from(directorySearchPaths));
-           const searchPromises = searchRoots.map(p => invoke<string[]>('search_directory', { path: p, query: localQuery }));
+           const searchPromises = searchRoots.map(p => invoke<string[]>('search_directory', { path: p, query: localQuery, useRegex }));
            const resultsFromAllRoots = await Promise.all(searchPromises);
            paths = Array.from(new Set(resultsFromAllRoots.flat()));
         }
@@ -320,11 +337,10 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       isMounted = false;
       clearTimeout(timeoutId);
     };
-  }, [localQuery, refreshTrigger, searchMode, directorySearchPaths, isIndexReady, quickAccess]);
+  }, [localQuery, useRegex, refreshTrigger, searchMode, directorySearchPaths, isIndexReady, quickAccess]);
 
   // --- Client-Side Filtering Logic ---
   const filteredResults = useMemo(() => {
-    setRegexError(null);
     const parsedSize = parseSizeQuery(sizeQuery);
     let regex: RegExp | null = null;
 
@@ -332,7 +348,6 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
       try {
         regex = new RegExp(localQuery, 'i');
       } catch (e) {
-        setRegexError('Invalid Regex');
       }
     }
 
@@ -440,7 +455,9 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
 
         {/* Search Input Row */}
         <div style={{ position: 'relative' }}>
-          <div style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>🔎</div>
+          <div style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '1.1em' }}>
+            {isSearching ? '⏳' : '🔎'}
+          </div>
           <input 
             type="text"
             placeholder={useRegex ? "Search with Regex (e.g. ^report.*\\.pdf$)" : "Enter file name to search..."}
@@ -614,18 +631,27 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
 
       {/* Results Area */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        {isSearching && (
-           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '4px', backgroundColor: '#e0f2fe', color: '#0369a1', fontSize: '0.8em', textAlign: 'center', zIndex: 10 }}>
-             Searching...
-           </div>
-        )}
         <div style={{ padding: '8px 16px', borderBottom: '1px solid #eee', backgroundColor: '#fff', fontSize: '0.9em', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
-           <span>Search Results: <span style={{ fontWeight: 'bold', color: '#2563eb' }}>{filteredResults.length}</span> items</span>
-           {results.length !== filteredResults.length && (
+           <span>
+             {isSearching ? (
+               <span style={{ color: '#2563eb', fontWeight: '600' }}>
+                 🔍 Searching for <span style={{ fontStyle: 'italic' }}>"{localQuery}"</span>...
+               </span>
+             ) : (
+               <>
+                 {localQuery ? (
+                   <>✅ Search results: <span style={{ fontWeight: 'bold', color: '#2563eb' }}>{filteredResults.length}</span> items</>
+                 ) : (
+                   'Enter a query to start searching'
+                 )}
+               </>
+             )}
+           </span>
+           {!isSearching && results.length !== filteredResults.length && (
              <span style={{ fontSize: '0.85em' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
            )}
         </div>
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, opacity: isSearching ? 0.5 : 1, transition: 'opacity 0.2s' }}>
           <FileList
             path={null}
             filesOverride={filteredResults}
@@ -639,9 +665,12 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
             onDelete={onDelete}
             onExtract={onExtract}
             refreshTrigger={refreshTrigger}
-            searchQuery={localQuery} // 하이라이팅 등을 위해 전달
+            // searchQuery={localQuery} // 이 줄이 FileList 내부에서 단순 문자열 필터링을 유발하므로 제거합니다.
             enableAutoResize={true}
             onOpenInExplorer={onOpenInExplorer || (() => {})}
+            columnSettings={columnSettings}
+            canPaste={canPaste}
+            onColumnSettingsChange={onColumnSettingsChange}
           />
         </div>
       </div>

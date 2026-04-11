@@ -171,6 +171,25 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
       return;
     }
 
+    if (e.key === 'Tab') {
+      if (e.shiftKey) {
+        // Shift + Tab 키 입력 시 Quick Access 섹션으로 이동
+        e.preventDefault();
+        const quickAccessContainer = document.querySelector('.quick-access-section') as HTMLElement;
+        if (quickAccessContainer) {
+          quickAccessContainer.focus();
+        }
+      } else {
+        // Tab 키 입력 시 하위 노드로 가지 않고 파일 리스트로 바로 이동
+        e.preventDefault();
+        const fileListContainer = document.querySelector('.mhz-explorer__files [tabindex="0"]') as HTMLElement;
+        if (fileListContainer) {
+          fileListContainer.focus();
+        }
+      }
+      return;
+    }
+
     if (e.key === 'ArrowRight') {
       e.stopPropagation();
       if (!isExpanded) onToggleExpand(path);

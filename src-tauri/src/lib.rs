@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, Manager, Window};
 use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::unstable::write::FileOptionsExt;
+use regex::RegexBuilder;
 
 mod mft;
 use mft::MftIndex;
@@ -111,8 +112,9 @@ async fn build_mft_index(
 async fn search_mft(
     state: tauri::State<'_, AppState>,
     query: String,
+    use_regex: bool,
 ) -> Result<Vec<String>, String> {
-    let paths = state.mft.search(&query);
+    let paths = state.mft.search(&query, use_regex);
     // PathBuf를 String으로 변환하여 반환
     Ok(paths
         .into_iter()
@@ -596,14 +598,30 @@ async fn read_directory(path: String) -> Result<Vec<DirectoryEntry>, String> {
 }
 
 #[tauri::command]
-async fn search_directory(path: String, query: String) -> Result<Vec<String>, String> {
-    let query = query.to_lowercase();
+async fn search_directory(path: String, query: String, use_regex: bool) -> Result<Vec<String>, String> {
     // CPU 집약적이거나 I/O 작업이 많을 수 있으므로 spawn_blocking 사용
     let results = tauri::async_runtime::spawn_blocking(move || {
         let mut matches = Vec::new();
+        
+        let regex = if use_regex {
+            RegexBuilder::new(&query)
+                .case_insensitive(true)
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        let query_lower = query.to_lowercase();
+
         for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_lowercase();
-            if name.contains(&query) {
+            let name = entry.file_name().to_string_lossy();
+            let is_match = if let Some(re) = &regex {
+                re.is_match(&name)
+            } else {
+                name.to_lowercase().contains(&query_lower)
+            };
+
+            if is_match {
                 matches.push(entry.path().to_string_lossy().to_string());
                 if matches.len() >= 1000 {
                     // 결과 너무 많으면 제한

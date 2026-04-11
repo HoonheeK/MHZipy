@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::sync::RwLock;
+use regex::RegexBuilder;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, ERROR_HANDLE_EOF, GENERIC_READ, HANDLE};
 use windows::Win32::Storage::FileSystem::{
@@ -341,14 +342,29 @@ impl MftIndex {
     }
 
     // 3. 검색 및 경로 재구성
-    pub fn search(&self, query: &str) -> Vec<PathBuf> {
-        let query = query.to_lowercase();
+    pub fn search(&self, query: &str, use_regex: bool) -> Vec<PathBuf> {
         let search_idx = self.search_index.read().unwrap();
+
+        let regex = if use_regex {
+            RegexBuilder::new(query)
+                .case_insensitive(true)
+                .build()
+                .ok()
+        } else {
+            None
+        };
+        let query_lower = query.to_lowercase();
 
         // Rayon을 사용한 병렬 검색 (초고속 검색의 핵심)
         search_idx
             .par_iter()
-            .filter(|(_, name)| name.to_lowercase().contains(&query))
+            .filter(|(_, name)| {
+                if let Some(re) = &regex {
+                    re.is_match(name)
+                } else {
+                    name.to_lowercase().contains(&query_lower)
+                }
+            })
             .filter_map(|(frn, _)| self.reconstruct_path(frn))
             .collect::<Vec<_>>() // 일단 병렬로 수집
             .into_iter() // 일반 Iterator로 변환

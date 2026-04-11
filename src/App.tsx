@@ -31,6 +31,7 @@ interface AppConfig {
   editableFolders?: string[];
   readonlyFolders?: string[];
   search?: SearchConfig;
+  columnSettings?: { key: string; visible: boolean }[];
 }
 
 function App() {
@@ -184,12 +185,14 @@ function App() {
         initialQuickAccessFolders={config.quickAccess}
         initialEditableFolders={config.editableFolders}
         initialReadonlyFolders={config.readonlyFolders}
-        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[]) => {
+        initialColumnSettings={config.columnSettings}
+        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[]) => {
           saveConfig({
             defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
             editableFolders: newEditable ?? config.editableFolders,
             readonlyFolders: newReadonly ?? config.readonlyFolders,
+            columnSettings: newColumnSettings,
           });
         }}
       />
