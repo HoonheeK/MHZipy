@@ -3,7 +3,7 @@
   "identifier": "default",
   "description": "Default capabilities for the app",
   "windows": [
-    "main"
+    "*"
   ],
   "permissions": [
     "core:default",

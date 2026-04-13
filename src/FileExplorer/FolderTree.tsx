@@ -247,9 +247,10 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
     const data = e.dataTransfer.getData('application/json');
     if (data) {
       try {
-        const { paths } = JSON.parse(data);
+        const parsed = JSON.parse(data);
+        const paths = parsed.paths || parsed.files?.map((f: any) => f.path);
         if (Array.isArray(paths) && paths.length > 0) {
-          const op = e.ctrlKey ? 'copy' : 'move';
+          const op = (e.ctrlKey || e.metaKey) ? 'copy' : 'move';
           onMove(paths, path, op);
         }
       } catch (err) {
@@ -282,7 +283,11 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
         onKeyDown={handleKeyDown}
         onFocus={() => onSelect(path, false)}
         onClick={handleToggle}
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = (e.ctrlKey || e.metaKey) ? 'copy' : 'move';
+        }}
         onDrop={handleDrop}
         onContextMenu={handleContextMenu}
         style={{

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef,useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { rename, mkdir } from '@tauri-apps/plugin-fs';
@@ -20,6 +20,8 @@ interface FileListProps {
   onPaste: (targetDir: string) => void;
   onDelete: (paths: string[]) => void;
   onExtract: (path: string) => void;
+  onMove?: (sourcePaths: string[], targetDir: string, op: 'move' | 'copy') => void;
+  onOpenInNewWindow: (path: string, isDirectory?: boolean) => void;
   onOpenInExplorer: (path: string, isDirectory?: boolean) => void;
   refreshTrigger?: number;
   searchQuery?: string;
@@ -29,6 +31,7 @@ interface FileListProps {
   autoFitTrigger?: number;
   enableAutoResize?: boolean;
   columnSettings?: { key: string; visible: boolean }[];
+  clipboard?: { paths: string[]; op: 'copy' | 'move' } | null;
   canPaste?: boolean;
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
 }
@@ -56,17 +59,41 @@ interface FilterConfig {
   unit: number; // for size multiplier
 }
 
-const COLUMN_LABELS: Record<string, string> = { 
-  name: 'Name', 
-  size: 'Size', 
-  type: 'Type', 
-  birthtime: 'Date Created', 
-  mtime: 'Date Modified', 
-  atime: 'Date Accessed', 
-  path: 'Path' 
+const COLUMN_LABELS: Record<string, string> = {
+  name: 'Name',
+  size: 'Size',
+  type: 'Type',
+  birthtime: 'Date Created',
+  mtime: 'Date Modified',
+  atime: 'Date Accessed',
+  path: 'Path'
 };
 
-export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, onNavigate, onCopy, onPaste, onCut, onDelete, onOpenInExplorer, refreshTrigger, searchQuery, filesOverride, editableFolders, readonlyFolders, autoFitTrigger, enableAutoResize = false, columnSettings, canPaste, onColumnSettingsChange }: FileListProps) {
+export default function FileList({
+  path,
+  selectedFiles,
+  onSelectFiles,
+  onFocus,
+  onNavigate,
+  onCopy,
+  onPaste,
+  onCut,
+  onDelete,
+  onMove,
+  onOpenInNewWindow,
+  onOpenInExplorer,
+  refreshTrigger,
+  searchQuery,
+  filesOverride,
+  editableFolders,
+  readonlyFolders,
+  autoFitTrigger,
+  enableAutoResize = false,
+  columnSettings,
+  clipboard,
+  canPaste,
+  onColumnSettingsChange
+}: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -368,10 +395,10 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const handleFitToScreen = () => {
     if (!containerRef.current) return;
     const containerWidth = containerRef.current.clientWidth;
-    
+
     const cols = activeColumnSettings.filter(c => c.visible).map(c => c.key);
     const currentTotal = cols.reduce((acc, key) => acc + (columnWidths[key] || 0), 0);
-    
+
     if (currentTotal <= 0) return;
 
     const ratio = containerWidth / currentTotal;
@@ -629,7 +656,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     let baseName = "New Folder";
     let newName = baseName;
     let counter = 2;
-    
+
     const existingNames = new Set(files.map(f => f.name));
     while (existingNames.has(newName)) {
       newName = `${baseName} (${counter})`;
@@ -736,7 +763,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
   const performExtract = async () => {
     if (selectedFiles.size !== 1) return;
     const fullPath = Array.from(selectedFiles)[0];
-    
+
     // Find file data in current list or search results
     const fileData = files.find(f => f.path === fullPath) || filesOverride?.find(f => f.path === fullPath);
     if (!fileData) return;
@@ -1033,21 +1060,27 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
   };
 
-  const handleContainerDrop = async (e: React.DragEvent) => {
+  const handleContainerDrop = async (e: React.DragEvent, targetDir?: string) => {
     e.preventDefault();
     e.stopPropagation();
+    const destPath = targetDir || path;
+    if (!destPath) return;
+
     let dataString = e.dataTransfer.getData('application/json');
     if (!dataString) dataString = e.dataTransfer.getData('text/plain'); // fallback 확인
     if (!dataString) return;
 
-    if (path && !checkPathPermission(path, editableFolders, readonlyFolders)) {
+    if (!checkPathPermission(destPath, editableFolders, readonlyFolders)) {
       await confirm('You do not have write permission for this folder.', { title: 'Permission Error', kind: 'error' });
       return;
     }
     try {
       const data = JSON.parse(dataString);
-      if (data.action === 'extract_zip_files' && data.zipPath && path) {
-        await executeZipExtraction(data.zipPath, data.files, path);
+      if (data.action === 'extract_zip_files' && data.zipPath) {
+        await executeZipExtraction(data.zipPath, data.files, destPath);
+      } else if (data.paths && Array.isArray(data.paths) && onMove) {
+        const op = (e.ctrlKey || e.metaKey) ? 'copy' : 'move';
+        onMove(data.paths, destPath, op);
       }
     } catch (e) {
       // ignore
@@ -1140,7 +1173,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
             if (!hasEncrypted) {
               setErrorDialogTitle('Compression Password Warning');
               setErrorDialogMessage('A password was provided for compression, but the generated ZIP does not indicate encryption. If decryption is required, the password might not have been applied.');
-              setErrorDialogDetails(`대상: ${targetZipPath}\n엔트리 수: ${entries.length}\n암호화된 엔트리: ${entries.filter(e=>e.isEncrypted).length}`);
+              setErrorDialogDetails(`대상: ${targetZipPath}\n엔트리 수: ${entries.length}\n암호화된 엔트리: ${entries.filter(e => e.isEncrypted).length}`);
               setErrorDialogOpen(true);
             }
           } catch (e) {
@@ -1169,7 +1202,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   const handleContainerDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = (e.ctrlKey || e.metaKey) ? 'copy' : 'move';
   };
 
   const handleKeyDown = async (e: React.KeyboardEvent) => {
@@ -1182,6 +1215,17 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     if (e.key === 'Enter') {
       e.preventDefault();
       const selectedData = sortedFiles.filter(f => selectedFiles.has(f.path));
+
+      // Ctrl+Enter: 새 창에서 열기
+      if (e.ctrlKey || e.metaKey) {
+        if (selectedData.length > 0) {
+          onOpenInNewWindow(selectedData[0].path, selectedData[0].isDirectory);
+        } else if (lastSelectedIndex !== null && sortedFiles[lastSelectedIndex]) {
+          onOpenInNewWindow(sortedFiles[lastSelectedIndex].path, sortedFiles[lastSelectedIndex].isDirectory);
+        }
+        return;
+      }
+
       if (selectedData.length > 0) {
         await openItems(selectedData);
       } else if (lastSelectedIndex !== null && sortedFiles[lastSelectedIndex]) {
@@ -1247,11 +1291,11 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
     const filesToDragObjects = files.filter(f => filesToDrag.includes(f.path));
 
-    e.dataTransfer.setData('application/json', JSON.stringify({ 
+    e.dataTransfer.setData('application/json', JSON.stringify({
       paths: filesToDrag,
-      files: filesToDragObjects 
+      files: filesToDragObjects
     }));
-    
+
     // 다른 앱(메모장, VSCode 등)으로 드래그 시 경로 텍스트 전달
     // 웹메일 등에서 파일 내용 대신 경로 텍스트가 입력되는 것을 방지하기 위해 text/plain 설정 제거
     // e.dataTransfer.setData('text/plain', filesToDrag.join('\n'));
@@ -1271,32 +1315,47 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
     }
 
     e.dataTransfer.effectAllowed = 'copyMove';
+
+    // 드래그 시각적 효과: 드래그 고스트 이미지 생성
+    const dragGhost = document.createElement('div');
+    dragGhost.style.padding = '5px 10px';
+    dragGhost.style.background = '#007bff';
+    dragGhost.style.color = 'white';
+    dragGhost.style.borderRadius = '4px';
+    dragGhost.style.fontSize = '12px';
+    dragGhost.style.position = 'absolute';
+    dragGhost.style.top = '-1000px';
+    dragGhost.innerText = `📦 ${filesToDrag.length}개 항목 이동 중`;
+    document.body.appendChild(dragGhost);
+    e.dataTransfer.setDragImage(dragGhost, 0, 0);
+    // 메인 스레드 완료 후 요소 삭제
+    setTimeout(() => document.body.removeChild(dragGhost), 0);
   };
 
   const getMenuPosition = () => {
     if (!contextMenu) return {};
     const { x, y } = contextMenu;
-    
+
     const style: any = {
       position: 'fixed',
       width: '180px',
       fontSize: '12px',
       zIndex: 1000,
     };
-    
+
     // 화면 오른쪽/아래쪽 경계를 넘어가면 반대 방향으로 펼침
     if (x + 180 > window.innerWidth) {
       style.right = window.innerWidth - x;
     } else {
       style.left = x;
     }
-    
+
     if (y + 250 > window.innerHeight) {
       style.bottom = window.innerHeight - y;
     } else {
       style.top = y;
     }
-    
+
     return style;
   };
 
@@ -1412,38 +1471,38 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
 
   const renderHeaderCell = (colKey: string, label: string, align: 'left' | 'center' | 'right' = 'left') => {
     return (
-    <div
-      key={colKey}
-      style={{ ...cellStyle, width: columnWidths[colKey], cursor: 'pointer', position: 'relative', overflow: 'visible' }}
-      onClick={() => handleSort(colKey as SortKey)}
-      onDoubleClick={() => handleAutoFit(colKey)}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('columnKey', colKey);
-        e.dataTransfer.effectAllowed = 'move';
-      }}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        const sourceKey = e.dataTransfer.getData('columnKey');
-        if (sourceKey && sourceKey !== colKey) {
-          handleColumnReorder(sourceKey, colKey);
-        }
-      }}
-      onContextMenu={handleHeaderContextMenu}
-    >
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: align }}>
-        {label} {sortConfig.key === colKey && (sortConfig.direction === 'asc' ? '▲' : '▼')}
-      </span>
-      <span
-        onClick={(e) => handleOpenFilter(e, colKey)}
-        style={{ marginLeft: '4px', padding: '0 4px', color: activeFilters[colKey] ? '#007bff' : '#ccc', fontWeight: 'bold' }}
-        title="Filter"
+      <div
+        key={colKey}
+        style={{ ...cellStyle, width: columnWidths[colKey], cursor: 'pointer', position: 'relative', overflow: 'visible' }}
+        onClick={() => handleSort(colKey as SortKey)}
+        onDoubleClick={() => handleAutoFit(colKey)}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData('columnKey', colKey);
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          const sourceKey = e.dataTransfer.getData('columnKey');
+          if (sourceKey && sourceKey !== colKey) {
+            handleColumnReorder(sourceKey, colKey);
+          }
+        }}
+        onContextMenu={handleHeaderContextMenu}
       >
-        Y
-      </span>
-      {renderResizer(colKey)}
-      {openFilter === colKey && renderFilterPopup(colKey)}
-    </div>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: align }}>
+          {label} {sortConfig.key === colKey && (sortConfig.direction === 'asc' ? '▲' : '▼')}
+        </span>
+        <span
+          onClick={(e) => handleOpenFilter(e, colKey)}
+          style={{ marginLeft: '4px', padding: '0 4px', color: activeFilters[colKey] ? '#007bff' : '#ccc', fontWeight: 'bold' }}
+          title="Filter"
+        >
+          Y
+        </span>
+        {renderResizer(colKey)}
+        {openFilter === colKey && renderFilterPopup(colKey)}
+      </div>
     );
   };
 
@@ -1493,7 +1552,7 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
           onContextMenu={handleHeaderContextMenu}
         >
           {activeColumnSettings.map(col =>
-            col.visible && renderHeaderCell(col.key, COLUMN_LABELS[col.key], 
+            col.visible && renderHeaderCell(col.key, COLUMN_LABELS[col.key],
               col.key === 'size' ? 'right' : (['birthtime', 'mtime', 'atime'].includes(col.key) ? 'center' : 'left')
             )
           )}
@@ -1528,16 +1587,27 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
                 draggable
                 onDragStart={(e) => handleDragStart(e, file)}
                 onContextMenu={(e) => handleContextMenu(e, file, index)}
+                onDragOver={(e) => {
+                  if (file.isDirectory) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = (e.ctrlKey || e.metaKey) ? 'copy' : 'move';
+                  }
+                }}
+                onDrop={(e) => {
+                  if (file.isDirectory) handleContainerDrop(e, file.path);
+                }}
                 style={{
                   padding: '6px 0', borderBottom: '1px solid #f5f5f5', display: 'flex', alignItems: 'center', fontSize: '0.9em',
                   backgroundColor: selectedFiles.has(file.path) ? '#e6f3ff' : 'transparent',
-                  cursor: 'default', minWidth: 'fit-content'
+                  cursor: 'default', minWidth: 'fit-content',
+                  opacity: (clipboard?.op === 'move' && clipboard.paths.includes(file.path)) ? 0.5 : 1
                 }}
               >
                 {activeColumnSettings.map(col => col.visible && (
                   <div key={col.key} style={{ ...cellStyle, width: columnWidths[col.key], color: col.key === 'name' ? 'inherit' : '#666' }}>
                     {col.key === 'name' && renamingFile === file.path ? (
-                      <input autoFocus value={renameText} onChange={(e) => setRenameText(e.target.value)} 
+                      <input autoFocus value={renameText} onChange={(e) => setRenameText(e.target.value)}
                         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setRenamingFile(null); }}
                         onBlur={handleRename} onClick={(e) => e.stopPropagation()} style={{ flex: 1 }}
                       />
@@ -1595,7 +1665,17 @@ export default function FileList({ path, selectedFiles, onSelectFiles, onFocus, 
               <div className="context-menu-item" onClick={() => {
                 if (selectedFiles.size > 0) {
                   const firstPath = Array.from(selectedFiles)[0];
-                  const fileData = sortedFiles.find(f => f.path === firstPath);
+                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
+                  onOpenInNewWindow(firstPath, fileData?.isDirectory);
+                }
+                setContextMenu(null);
+              }} style={{ padding: '2px 10px' }}>
+                <span>Open in New Window</span> <span className="shortcut">Ctrl+Enter</span>
+              </div>
+              <div className="context-menu-item" onClick={() => {
+                if (selectedFiles.size > 0) {
+                  const firstPath = Array.from(selectedFiles)[0];
+                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
                   onOpenInExplorer(firstPath, fileData?.isDirectory);
                 }
                 setContextMenu(null);

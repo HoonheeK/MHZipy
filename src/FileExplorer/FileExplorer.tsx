@@ -16,16 +16,17 @@ interface FileExplorerProps {
   currentView: 'folder' | 'search';
   searchQuery?: string;
   externalPath?: string;
+  externalSelect?: string;
   onNavigate?: (path: string) => void;
 }
 
-export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery, externalPath, onNavigate }: FileExplorerProps) {
-  const [selected, setSelected] = useState<string>(config.defaultPath || "C:");
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([config.defaultPath || "C:"]));
+export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery, externalPath, externalSelect, onNavigate }: FileExplorerProps) {
+  const [selected, setSelected] = useState<string>(externalPath || config.defaultPath || "C:");
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([externalPath || config.defaultPath || "C:"]));
   const [filesSelected, setFilesSelected] = useState<Set<string>>(new Set());
   const [activePane, setActivePane] = useState<'tree' | 'list'>('tree');
   const [activeQuickAccessPath, setActiveQuickAccessPath] = useState<string | null>(null);
-  const [pathInput, setPathInput] = useState(config.defaultPath || "C:");
+  const [pathInput, setPathInput] = useState(externalPath || config.defaultPath || "C:");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; source?: 'tree' | 'quickAccess' } | null>(null);
   const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'move' } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -37,6 +38,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const [draggedQAIndex, setDraggedQAIndex] = useState<number | null>(null);
   const [renamingTreePath, setRenamingTreePath] = useState<string | null>(null);
   const [renameTreeText, setRenameTreeText] = useState('');
+  const [hasSystemClipboardFiles, setHasSystemClipboardFiles] = useState(false);
 
   const sidebarWidthRef = useRef(sidebarWidth);
   const quickAccessHeightRef = useRef(quickAccessHeight);
@@ -89,21 +91,47 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     return () => window.removeEventListener('click', closeMenu);
   }, [contextMenu]);
 
+  // 시스템 클립보드에 파일이 있는지 확인 (창 포커스 시점)
   useEffect(() => {
-    setFilesSelected(new Set());
-  }, [selected]);
+    const checkClipboard = async () => {
+      const paths = await invoke<string[]>('get_files_from_clipboard');
+      setHasSystemClipboardFiles(paths.length > 0);
+    };
+
+    window.addEventListener('focus', checkClipboard);
+    checkClipboard(); // 초기 실행
+
+    return () => window.removeEventListener('focus', checkClipboard);
+  }, []);
+
 
   useEffect(() => {
-    setPathInput(selected);
-  }, [selected]);
-
-
-  useEffect(() => {
+    console.log(`[FileExplorer] externalPath 업데이트 감지: "${externalPath}"`);
     if (externalPath && externalPath !== selected) {
+      console.log(`[FileExplorer] 외부 요청 경로("${externalPath}")로 selected 상태를 변경합니다.`);
       setSelected(externalPath);
       setSelectedPaths(new Set([externalPath]));
+      setPathInput(externalPath); // UI 주소창도 함께 업데이트하여 혼선 방지
+
+      if (externalSelect) {
+        console.log(`[FileExplorer] 선택 대상 파일 감지: ${externalSelect}`);
+        setFilesSelected(new Set([externalSelect]));
+      } else {
+        setFilesSelected(new Set());
+      }
     }
-  }, [externalPath]);
+  }, [externalPath, externalSelect]);
+
+  useEffect(() => {
+    // 외부 명령(URL 파라미터)으로 인한 이동이 아닐 때만 선택을 초기화합니다.
+    console.log(`[FileExplorer] 현재 selected 경로: ${selected}`);
+    if (!externalPath) {
+      setFilesSelected(new Set());
+    }
+  }, [selected]);
+
+  // 렌더링 시점에 설정 상태 확인 로그
+  console.log(`[FileExplorer] Render 실행됨. Selected: "${selected}", QuickAccess 개수: ${config.quickAccess.length}`);
 
   useEffect(() => {
     if (onNavigate) onNavigate(selected);
@@ -231,7 +259,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
   };
 
-  const handleCut = (paths: string[]) => {
+  const handleCut = async (paths: string[]) => {
     // Check permission for source paths (need delete permission)
     for (const path of paths) {
       if (!checkPathPermission(path, config.editableFolders, config.readonlyFolders)) {
@@ -240,28 +268,42 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       }
     }
     setClipboard({ paths, op: 'move' });
+    try {
+      await invoke('copy_files_to_clipboard', { paths });
+    } catch (e) {
+      console.error('Failed to copy to system clipboard during cut:', e);
+    }
   };
 
   const handlePaste = async (targetDir: string) => {
-    console.log("[Paste Action] Target Directory:", targetDir);
-    console.log("[Paste Action] Internal Clipboard State:", clipboard);
-
     if (!checkPathPermission(targetDir, config.editableFolders, config.readonlyFolders)) {
-      console.warn("[Paste Action] Permission Denied for target directory");
       showMessage('Permission Error', `You do not have write permission for '${targetDir}'.`);
       return;
     }
 
-    if (!clipboard || !clipboard.paths.length) {
-      console.log("[Paste Action] Nothing to paste (Internal clipboard is empty)");
+    // 1. 시스템 클립보드에서 경로 가져오기
+    const systemPaths = await invoke<string[]>('get_files_from_clipboard');
+
+    if (systemPaths.length === 0) {
+      console.log("[Paste Action] System clipboard is empty");
       return;
     }
 
-    console.log(`[Paste Action] Executing ${clipboard.op} operation for:`, clipboard.paths);
+    // 2. 실행할 작업 결정 (기본값 'copy')
+    // 현재 인스턴스의 내부 클립보드와 경로가 일치하고 op가 'move'인 경우에만 'move'로 처리
+    let op: 'copy' | 'move' = 'copy';
+    if (
+      clipboard &&
+      clipboard.op === 'move' &&
+      clipboard.paths.length === systemPaths.length &&
+      clipboard.paths.every((p, i) => p === systemPaths[i])
+    ) {
+      op = 'move';
+    }
 
-    const success = await pasteFiles(clipboard.paths, targetDir, clipboard.op);
+    const success = await pasteFiles(systemPaths, targetDir, op);
     if (success) {
-      if (clipboard.op === 'move') setClipboard(null);
+      if (op === 'move') setClipboard(null);
       setRefreshTrigger(p => p + 1);
     }
   };
@@ -346,6 +388,35 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
   };
 
+  const handleOpenInNewWindow = async (targetPath: string, isDirectory?: boolean) => {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+
+      let urlPath = targetPath;
+      let urlSelect = "";
+
+      // 파일인 경우 부모 폴더를 열고 해당 파일을 선택하도록 설정
+      if (isDirectory === false) {
+        const parentPath = await dirname(targetPath);
+        if (parentPath !== targetPath) {
+          urlPath = parentPath;
+          urlSelect = `&select=${encodeURIComponent(targetPath)}`;
+        }
+      }
+      // 폴더인 경우(isDirectory가 true이거나 정보가 없는 경우 기본값) urlPath를 그대로 사용
+
+      const label = 'win_' + Math.random().toString(36).substring(2, 10);
+      const url = `index.html?path=${encodeURIComponent(urlPath)}${urlSelect}`;
+
+      new WebviewWindow(label, {
+        url,
+        title: `MHZipy - ${targetPath}`,
+      });
+    } catch (e) {
+      console.error('Failed to open new window:', e);
+    }
+  };
+
   const handleCreateFolder = async (parentPath: string) => {
     if (!checkPathPermission(parentPath, config.editableFolders, config.readonlyFolders)) {
       showMessage('Permission Error', `You do not have permission to create folders in '${parentPath}'.`);
@@ -356,11 +427,11 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     try {
       const entries = await invoke<any[]>('read_directory', { path: parentPath });
       const existingNames = new Set(entries.map((e: any) => e.name));
-      
+
       let baseName = "New Folder";
       let newName = baseName;
       let counter = 2;
-      
+
       while (existingNames.has(newName)) {
         newName = `${baseName} (${counter})`;
         counter++;
@@ -387,26 +458,26 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const getMenuPosition = () => {
     if (!contextMenu) return {};
     const { x, y } = contextMenu;
-    
+
     const style: any = {
       position: 'fixed',
       width: '180px',
       fontSize: '12px',
       zIndex: 1000,
     };
-    
+
     if (x + 180 > window.innerWidth) {
       style.right = window.innerWidth - x;
     } else {
       style.left = x;
     }
-    
+
     if (y + 250 > window.innerHeight) {
       style.bottom = window.innerHeight - y;
     } else {
       style.top = y;
     }
-    
+
     return style;
   };
 
@@ -502,11 +573,13 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         onPaste={handlePaste}
         onDelete={handleDelete}
         onExtract={handleExtract}
+        onOpenInNewWindow={handleOpenInNewWindow}
         onOpenInExplorer={handleOpenInExplorer}
         refreshTrigger={refreshTrigger}
         quickAccess={config.quickAccess}
         searchConfig={config.search}
         columnSettings={config.columnSettings}
+        clipboard={clipboard}
         canPaste={!!clipboard && clipboard.paths.length > 0}
         onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
@@ -514,7 +587,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     </div>
   );
 
-  const canPasteVisible = !!clipboard && clipboard.paths.length > 0;
+  const canPasteVisible = (!!clipboard && clipboard.paths.length > 0) || hasSystemClipboardFiles;
 
   return (
     <>
@@ -557,9 +630,9 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                 {config.quickAccess.map((qaPath, index) => (
                   <div
                     key={qaPath}
-                    onClick={() => { 
-                      setSelected(qaPath); 
-                      setSelectedPaths(new Set([qaPath])); 
+                    onClick={() => {
+                      setSelected(qaPath);
+                      setSelectedPaths(new Set([qaPath]));
                       setActiveQuickAccessPath(qaPath);
                     }}
                     onContextMenu={(e) => handleQuickAccessContextMenu(e, qaPath)}
@@ -643,14 +716,17 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             onCopy={handleCopy}
             onCut={handleCut}
             onPaste={() => handlePaste(selected)}
+            onMove={handleMove}
             onDelete={handleDelete}
             onExtract={handleExtract}
+            onOpenInNewWindow={handleOpenInNewWindow}
             onOpenInExplorer={handleOpenInExplorer}
             refreshTrigger={refreshTrigger}
             searchQuery={searchQuery}
             editableFolders={config.editableFolders}
             readonlyFolders={config.readonlyFolders}
             columnSettings={config.columnSettings}
+            clipboard={clipboard}
             canPaste={!!clipboard && clipboard.paths.length > 0}
             onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
           />
@@ -678,6 +754,9 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                   </div>
                 )}
                 <div className="context-menu-separator"></div>
+              <div className="context-menu-item" onClick={() => handleOpenInNewWindow(contextMenu.path, true)} style={{ padding: '2px 10px' }}>
+                <span>Open in New Window</span> <span className="shortcut">Ctrl+Enter</span>
+                </div>
                 <div className="context-menu-item" onClick={() => handleOpenInExplorer(contextMenu.path, true)} style={{ padding: '2px 10px' }}>
                   Open in File Explorer
                 </div>

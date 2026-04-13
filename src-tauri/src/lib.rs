@@ -708,6 +708,43 @@ fn copy_files_to_clipboard(paths: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_files_from_clipboard() -> Result<Vec<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+        use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+        use windows::Win32::Foundation::HWND;
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        unsafe {
+            if OpenClipboard(HWND::default()).is_ok() {
+                // CF_HDROP format is 15
+                let handle = GetClipboardData(15);
+                if let Ok(h_global) = handle {
+                    let h_drop = HDROP(h_global.0);
+                    let count = DragQueryFileW(h_drop, 0xFFFFFFFF, None);
+                    let mut paths = Vec::new();
+
+                    for i in 0..count {
+                        let len = DragQueryFileW(h_drop, i, None);
+                        let mut buffer = vec![0u16; (len + 1) as usize];
+                        DragQueryFileW(h_drop, i, Some(&mut buffer));
+                        
+                        let path = OsString::from_wide(&buffer[..len as usize]);
+                        paths.push(path.to_string_lossy().into_owned());
+                    }
+                    let _ = CloseClipboard();
+                    return Ok(paths);
+                }
+                let _ = CloseClipboard();
+            }
+        }
+    }
+    Ok(Vec::new())
+}
+
+#[tauri::command]
 fn open_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -809,7 +846,8 @@ pub fn run() {
             read_directory,
             search_directory,
             copy_files_to_clipboard,
-            open_in_explorer
+            open_in_explorer,
+            get_files_from_clipboard
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

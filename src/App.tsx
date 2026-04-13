@@ -44,32 +44,73 @@ function App() {
   const [forwardHistory, setForwardHistory] = useState<string[]>([]);
   const [currentPath, setCurrentPath] = useState<string>('');
   const [requestedPath, setRequestedPath] = useState<string | undefined>(undefined);
+  const [requestedSelect, setRequestedSelect] = useState<string | undefined>(undefined);
 
 
   useEffect(() => {
     const initConfig = async () => {
+      console.log('[App] initConfig: 시작됨');
       try {
+        // 1. URL 파라미터 우선 처리 (설정 로드 실패와 무관하게 동작해야 함)
+        const params = new URLSearchParams(window.location.search);
+        const pathParam = params.get('path');
+        const selectParam = params.get('select');
+        console.log(`[App] URL 파라미터 확인: path="${pathParam}", select="${selectParam}"`);
+
+        if (pathParam) {
+          console.log(`[App] URL 경로 감지됨. 뷰를 "folder"로 전환하고 경로를 "${pathParam}"으로 요청합니다.`);
+          setCurrentView('folder'); 
+          setRequestedPath(pathParam);
+          if (selectParam) {
+            setRequestedSelect(selectParam);
+          }
+        }
+
         const configDir = await appConfigDir();
         const configPath = await join(configDir, 'config.json');
+        console.log(`[App] 설정 파일 경로: ${configPath}`);
+
         if (await exists(configPath)) {
           const content = await readTextFile(configPath);
           const parsed = JSON.parse(content);
+          console.log('[App] 설정 파일 로드 성공:', parsed);
           setConfig(parsed);
-          if (parsed.view) setCurrentView(parsed.view);
-          if (parsed.defaultPath && !currentPath) {
-            setCurrentPath(parsed.defaultPath);
+
+          // URL 경로가 없을 때만 저장된 기본 뷰/경로 사용
+          if (!pathParam) {
+            console.log('[App] URL 경로 없음. 기존 설정(parsed.view, parsed.defaultPath)을 사용합니다.');
+            if (parsed.view) setCurrentView(parsed.view);
+            if (parsed.defaultPath && !currentPath) {
+              setCurrentPath(parsed.defaultPath);
+            }
           }
           if (parsed.search && parsed.search.query) {
             setSearchQuery(parsed.search.query);
           }
+        } else {
+          console.warn('[App] 설정 파일(config.json)이 존재하지 않습니다.');
         }
       } catch (e) {
-        console.error('Failed to load config:', e);
+        console.error('[App] 설정 로드 실패:', e);
       } finally {
         setConfigLoaded(true);
+        console.log('[App] 설정 로드 프로세스 완료 (configLoaded=true)');
       }
     };
     initConfig();
+  }, []);
+
+  // 웹뷰의 기본 파일 드롭 동작(파일 열기) 방지
+  useEffect(() => {
+    const stopDefault = (e: DragEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", stopDefault, false);
+    window.addEventListener("drop", stopDefault, false);
+    return () => {
+      window.removeEventListener("dragover", stopDefault);
+      window.removeEventListener("drop", stopDefault);
+    };
   }, []);
 
   const saveConfig = async (updates: Partial<AppConfig>) => {
@@ -127,6 +168,7 @@ function App() {
     // If this navigation matches the requested back navigation
     if (path === requestedPath) {
       setRequestedPath(undefined);
+      setRequestedSelect(undefined);
       setCurrentPath(path);
       return;
     }
@@ -176,6 +218,7 @@ function App() {
         currentView={currentView}
         searchQuery={searchQuery}
         externalPath={requestedPath}
+        externalSelect={requestedSelect}
         onNavigate={handleFileExplorerNavigate}
       />
       <PreferenceDialog

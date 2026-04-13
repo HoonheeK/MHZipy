@@ -1,7 +1,7 @@
 import { rename } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 import { confirm } from '@tauri-apps/plugin-dialog';
-import { basename, sep } from '@tauri-apps/api/path';
+import { basename, dirname, sep } from '@tauri-apps/api/path';
 import { copyRecursive, getUniquePath } from '../utils/fileOps';
 
 export interface ClipboardItem {
@@ -87,6 +87,13 @@ export const pasteFiles = async (
   try {
     for (const srcPath of sourcePaths) {
       const srcName = await basename(srcPath);
+
+      // 같은 폴더로 이동하는 경우 무시 (중복 이름 생성 방지)
+      if (op === 'move') {
+        const srcDir = await dirname(srcPath);
+        if (srcDir === targetDir) continue;
+      }
+
       const destPath = await getUniquePath(targetDir, srcName);
       
       if (op === 'copy') {

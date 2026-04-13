@@ -14,7 +14,8 @@
       {
         "title": "mhzipy",
         "width": 1280,
-        "height": 960
+        "height": 960,
+        "dragDropEnabled": false
       }
     ],
     "security": {

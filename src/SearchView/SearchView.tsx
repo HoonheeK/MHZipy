@@ -14,6 +14,7 @@ interface SearchViewProps {
   onPaste: (targetDir: string) => void;
   onDelete: (paths: string[]) => void;
   onExtract: (path: string) => void;
+  onOpenInNewWindow: (path: string, isDirectory?: boolean) => void;
   refreshTrigger?: number;
   quickAccess?: string[];
   searchConfig?: SearchConfig;
@@ -21,6 +22,7 @@ interface SearchViewProps {
   onOpenInExplorer?: (path: string) => void;
   columnSettings?: { key: string; visible: boolean }[];
   canPaste?: boolean;
+  clipboard?: { paths: string[]; op: 'copy' | 'move' } | null;
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
 }
 
@@ -71,7 +73,25 @@ const parseSizeQuery = (input: string) => {
 
 const FILE_TYPES = ['All', 'Folder', 'Image', 'Video', 'Audio', 'Archive', 'Document', 'Code'];
 
-export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onPaste, onDelete, onExtract, refreshTrigger, quickAccess = [], searchConfig, onSaveSearchConfig, onOpenInExplorer, columnSettings, canPaste, onColumnSettingsChange }: SearchViewProps) {
+export default function SearchView({
+  searchQuery,
+  onNavigate,
+  onCopy,
+  onCut,
+  onPaste,
+  onDelete,
+  onExtract,
+  onOpenInNewWindow,
+  refreshTrigger,
+  quickAccess = [],
+  searchConfig,
+  onSaveSearchConfig,
+  onOpenInExplorer,
+  columnSettings,
+  canPaste,
+  clipboard,
+  onColumnSettingsChange
+}: SearchViewProps) {
   const [results, setResults] = useState<FileData[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isIndexing, setIsIndexing] = useState(false);
@@ -664,11 +684,13 @@ export default function SearchView({ searchQuery, onNavigate, onCopy, onCut, onP
             onPaste={onPaste}
             onDelete={onDelete}
             onExtract={onExtract}
+            onOpenInNewWindow={onOpenInNewWindow}
             refreshTrigger={refreshTrigger}
             // searchQuery={localQuery} // 이 줄이 FileList 내부에서 단순 문자열 필터링을 유발하므로 제거합니다.
             enableAutoResize={true}
             onOpenInExplorer={onOpenInExplorer || (() => {})}
             columnSettings={columnSettings}
+            clipboard={clipboard}
             canPaste={canPaste}
             onColumnSettingsChange={onColumnSettingsChange}
           />
