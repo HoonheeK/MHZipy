@@ -24,9 +24,10 @@ interface FolderTreeProps {
   renameText?: string;
   onRenameTextChange?: (text: string) => void;
   showMessage?: (title: string, message: string) => void;
+  isRoot?: boolean;
 }
 
-export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage }: FolderTreeProps) {
+export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage, isRoot }: FolderTreeProps) {
   const isAncestorOf = (ancestor: string, descendant: string) => {
     if (!descendant.startsWith(ancestor)) return false;
     if (descendant.length === ancestor.length) return true;
@@ -98,7 +99,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
 
               if (isMounted) {
                 const finalDrives = allowedPaths
-                  ? validDrives.filter((drive) => allowedPaths.some((allowed) => allowed.startsWith(drive.path)))
+                  ? validDrives.filter((drive) => allowedPaths.some((allowed) => isAncestorOf(drive.path, allowed) || isAncestorOf(allowed, drive.path)))
                   : validDrives;
                 setSubFolders(finalDrives);
               }
@@ -274,7 +275,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
   };
 
   return (
-    <div style={{ marginLeft: '16px' }}>
+    <div style={{ marginLeft: isRoot ? '0' : '16px' }}>
       <div
         ref={nodeRef}
         className="folder-tree-node"

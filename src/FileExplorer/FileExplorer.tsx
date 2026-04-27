@@ -25,7 +25,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([externalPath || config.defaultPath || "C:"]));
   const [filesSelected, setFilesSelected] = useState<Set<string>>(new Set());
   const [activePane, setActivePane] = useState<'tree' | 'list'>('tree');
-  const [activeQuickAccessPath, setActiveQuickAccessPath] = useState<string | null>(null);
   const [pathInput, setPathInput] = useState(externalPath || config.defaultPath || "C:");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; source?: 'tree' | 'quickAccess' } | null>(null);
   const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'move' } | null>(null);
@@ -61,24 +60,12 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const activeAllowedPaths = useMemo(() => {
     if (!filterQuickAccess) return undefined;
 
-    // 사용자가 Quick Access 목록에서 직접 폴더를 선택한 경우 해당 폴더로 트리를 제한
-    if (activeQuickAccessPath && config.quickAccess.includes(activeQuickAccessPath)) {
-      return [activeQuickAccessPath];
-    }
-
-    // 그 외(Filter Tree는 켰지만 폴더는 아직 안 찍은 경우 등)에는 전체 Quick Access 목록을 보여줌
+    // 필터링 활성화 시 전체 Quick Access 목록을 허용 경로로 사용
     return config.quickAccess;
-  }, [filterQuickAccess, activeQuickAccessPath, config.quickAccess]);
+  }, [filterQuickAccess, config.quickAccess]);
 
-  const treeRoot = useMemo(() => {
-    if (filterQuickAccess && activeAllowedPaths && activeAllowedPaths.length === 1) {
-      const path = activeAllowedPaths[0];
-      const name = path.split(/[/\\]/).filter(p => p).pop() || path;
-      return { path, name };
-    }
-    return { path: "My PC", name: "My PC" };
-  }, [filterQuickAccess, activeAllowedPaths]);
-
+  // 트리의 루트는 항상 My PC로 고정하여 일관성 유지
+  const treeRoot = { path: "My PC", name: "My PC" };
 
   // Props로부터 expandedPaths 초기화 및 관리
   const expandedPaths = new Set(config.expandedPaths || ["My PC"]);
@@ -121,6 +108,11 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       }
     }
   }, [externalPath, externalSelect]);
+
+  // 현재 탐색 중인 경로(selected)가 변경되면 주소창(pathInput)의 텍스트도 동기화합니다.
+  useEffect(() => {
+    setPathInput(selected);
+  }, [selected]);
 
   useEffect(() => {
     // 외부 명령(URL 파라미터)으로 인한 이동이 아닐 때만 선택을 초기화합니다.
@@ -192,7 +184,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const handleRemoveQuickAccess = (path: string) => {
     const newQuickAccess = config.quickAccess.filter(p => p !== path);
-    if (activeQuickAccessPath === path) setActiveQuickAccessPath(null);
     onSaveConfig({ quickAccess: newQuickAccess });
   };
 
@@ -203,12 +194,27 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     onSaveConfig({ expandedPaths: Array.from(next) });
   };
 
-  // Filter Tree 모드에서 루트가 변경되면 자동으로 펼침
-  useEffect(() => {
-    if (treeRoot.path !== "My PC" && !expandedPaths.has(treeRoot.path)) {
-      handleToggleExpand(treeRoot.path);
-    }
-  }, [treeRoot.path]);
+  const handleTreeSelect = (paths: string | string[], multi: boolean) => {
+    const pathList = Array.isArray(paths) ? paths : [paths];
+    const targetPath = pathList[pathList.length - 1];
+    setSelected(targetPath);
+    setSelectedPaths(prev => {
+      if (multi) {
+        const next = new Set(prev);
+        pathList.forEach(p => (next.has(p) ? next.delete(p) : next.add(p)));
+        return next;
+      }
+      return new Set(pathList);
+    });
+    setActivePane('tree');
+  };
+
+  // // Filter Tree 모드에서 루트가 변경되면 자동으로 펼침
+  // useEffect(() => {
+  //   if (treeRoot.path !== "My PC" && !expandedPaths.has(treeRoot.path)) {
+  //     handleToggleExpand(treeRoot.path);
+  //   }
+  // }, [treeRoot.path]);
 
   const handleSetPermission = (path: string, type: 'editable' | 'readonly') => {
     const currentEditable = config.editableFolders || [];
@@ -619,7 +625,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                       checked={filterQuickAccess}
                       onChange={(e) => {
                         setFilterQuickAccess(e.target.checked);
-                        if (!e.target.checked) setActiveQuickAccessPath(null);
                       }}
                       style={{ marginRight: '4px' }}
                       tabIndex={-1}
@@ -633,7 +638,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                     onClick={() => {
                       setSelected(qaPath);
                       setSelectedPaths(new Set([qaPath]));
-                      setActiveQuickAccessPath(qaPath);
                     }}
                     onContextMenu={(e) => handleQuickAccessContextMenu(e, qaPath)}
                     draggable
@@ -655,42 +659,60 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             </>
           )}
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-            <FolderTree
-              path={treeRoot.path}
-              name={treeRoot.name}
-              onSelect={(paths, multi) => {
-                const pathList = Array.isArray(paths) ? paths : [paths];
-                const targetPath = pathList[pathList.length - 1];
-                setSelected(targetPath);
-                setSelectedPaths(prev => {
-                  if (multi) {
-                    const next = new Set(prev);
-                    pathList.forEach(p => next.has(p) ? next.delete(p) : next.add(p));
-                    return next;
-                  }
-                  return new Set(pathList);
-                });
-                setActivePane('tree');
-              }}
-              activePath={selected}
-              selectedPaths={selectedPaths}
-              expandedPaths={expandedPaths}
-              onToggleExpand={handleToggleExpand}
-              onMove={handleMove}
-              onContextMenu={handleTreeContextMenu}
-              refreshTrigger={refreshTrigger}
-              editableFolders={config.editableFolders}
-              readonlyFolders={config.readonlyFolders}
-              allowedPaths={activeAllowedPaths}
-              clipboard={clipboard}
-              renamingPath={renamingTreePath}
-              renameText={renameTreeText}
-              onRenameTextChange={setRenameTreeText}
-              onStartRename={handleStartTreeRename}
-              onFinishRename={handleFinishTreeRename}
-              onCancelRename={handleCancelTreeRename}
-              showMessage={showMessage}
-            />
+            {!filterQuickAccess ? (
+              <FolderTree
+                path={treeRoot.path}
+                name={treeRoot.name}
+                onSelect={handleTreeSelect}
+                activePath={selected}
+                selectedPaths={selectedPaths}
+                expandedPaths={expandedPaths}
+                onToggleExpand={handleToggleExpand}
+                onMove={handleMove}
+                onContextMenu={handleTreeContextMenu}
+                refreshTrigger={refreshTrigger}
+                editableFolders={config.editableFolders}
+                readonlyFolders={config.readonlyFolders}
+                allowedPaths={activeAllowedPaths}
+                clipboard={clipboard}
+                renamingPath={renamingTreePath}
+                renameText={renameTreeText}
+                onRenameTextChange={setRenameTreeText}
+                onStartRename={handleStartTreeRename}
+                onFinishRename={handleFinishTreeRename}
+                onCancelRename={handleCancelTreeRename}
+                showMessage={showMessage}
+                isRoot
+              />
+            ) : (
+              config.quickAccess.map((qaPath) => (
+                <FolderTree
+                  key={qaPath}
+                  path={qaPath}
+                  name={qaPath.split(/[/\\]/).filter(Boolean).pop() || qaPath}
+                  onSelect={handleTreeSelect}
+                  activePath={selected}
+                  selectedPaths={selectedPaths}
+                  expandedPaths={expandedPaths}
+                  onToggleExpand={handleToggleExpand}
+                  onMove={handleMove}
+                  onContextMenu={handleTreeContextMenu}
+                  refreshTrigger={refreshTrigger}
+                  editableFolders={config.editableFolders}
+                  readonlyFolders={config.readonlyFolders}
+                  allowedPaths={activeAllowedPaths}
+                  clipboard={clipboard}
+                  renamingPath={renamingTreePath}
+                  renameText={renameTreeText}
+                  onRenameTextChange={setRenameTreeText}
+                  onStartRename={handleStartTreeRename}
+                  onFinishRename={handleFinishTreeRename}
+                  onCancelRename={handleCancelTreeRename}
+                  showMessage={showMessage}
+                  isRoot
+                />
+              ))
+            )}
           </div>
         </aside>
         <div
