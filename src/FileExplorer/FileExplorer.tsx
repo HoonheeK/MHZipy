@@ -7,6 +7,7 @@ import FileList from "./FileList";
 import SearchView from "../SearchView/SearchView";
 import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOperations';
 import MessageDialog from "../common/MessageDialog";
+import ConfirmDialog from "../common/ConfirmDialog";
 import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
@@ -51,10 +52,23 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const [msgDialogTitle, setMsgDialogTitle] = useState('');
   const [msgDialogMessage, setMsgDialogMessage] = useState('');
 
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    resolve?: (value: boolean) => void;
+  }>({ open: false, title: '', message: '' });
+
   const showMessage = (title: string, message: string) => {
     setMsgDialogTitle(title);
     setMsgDialogMessage(message);
     setMsgDialogOpen(true);
+  };
+
+  const showConfirm = (title: string, message: string) => {
+    return new Promise<boolean>((resolve) => {
+      setConfirmState({ open: true, title, message, resolve });
+    });
   };
 
   const activeAllowedPaths = useMemo(() => {
@@ -307,10 +321,14 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       op = 'move';
     }
 
-    const success = await pasteFiles(systemPaths, targetDir, op);
-    if (success) {
-      if (op === 'move') setClipboard(null);
-      setRefreshTrigger(p => p + 1);
+    try {
+      const success = await pasteFiles(systemPaths, targetDir, op);
+      if (success) {
+        if (op === 'move') setClipboard(null);
+        setRefreshTrigger(p => p + 1);
+      }
+    } catch (e: any) {
+      showMessage('Invalid Operation', e.message);
     }
   };
 
@@ -321,9 +339,12 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         return;
       }
     }
-    const success = await deleteFiles(paths);
-    if (success) {
-      setRefreshTrigger(p => p + 1);
+    const confirmed = await showConfirm('Confirm Delete', `Are you sure you want to move ${paths.length} item(s) to the recycle bin?`);
+    if (confirmed) {
+      const success = await deleteFiles(paths);
+      if (success) {
+        setRefreshTrigger(p => p + 1);
+      }
     }
   };
 
@@ -336,9 +357,13 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       showMessage('Permission Error', `You do not have permission to edit the source files.`);
       return;
     }
-    const success = await pasteFiles(sourcePaths, targetDir, op);
-    if (success) {
-      setRefreshTrigger(p => p + 1);
+    try {
+      const success = await pasteFiles(sourcePaths, targetDir, op);
+      if (success) {
+        setRefreshTrigger(p => p + 1);
+      }
+    } catch (e: any) {
+      showMessage('Invalid Operation', e.message);
     }
   };
 
@@ -806,6 +831,21 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
           title={msgDialogTitle}
           message={msgDialogMessage}
           onClose={() => setMsgDialogOpen(false)}
+        />
+        <ConfirmDialog
+          open={confirmState.open}
+          title={confirmState.title}
+          message={confirmState.message}
+          onConfirm={() => {
+            if (confirmState.resolve) confirmState.resolve(true);
+            setConfirmState(prev => ({ ...prev, open: false }));
+          }}
+          onCancel={() => {
+            if (confirmState.resolve) confirmState.resolve(false);
+            setConfirmState(prev => ({ ...prev, open: false }));
+          }}
+          okLabel="Yes"
+          cancelLabel="No"
         />
       </div>
     </>

@@ -2,12 +2,12 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { rename, mkdir } from '@tauri-apps/plugin-fs';
-import { confirm } from '@tauri-apps/plugin-dialog';
 import ErrorDialog from './ErrorDialog';
 import { basename, dirname, join } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
 import { openPdfInWindow } from '../PDFViewer/PDFViewer';
 import MessageDialog from '../common/MessageDialog';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 interface FileListProps {
   path: string | null;
@@ -146,10 +146,23 @@ export default function FileList({
   const [msgDialogTitle, setMsgDialogTitle] = useState('');
   const [msgDialogMessage, setMsgDialogMessage] = useState('');
 
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    resolve?: (value: boolean) => void;
+  }>({ open: false, title: '', message: '' });
+
   const showMessage = (title: string, message: string) => {
     setMsgDialogTitle(title);
     setMsgDialogMessage(message);
     setMsgDialogOpen(true);
+  };
+
+  const showConfirm = (title: string, message: string) => {
+    return new Promise<boolean>((resolve) => {
+      setConfirmState({ open: true, title, message, resolve });
+    });
   };
 
   // Column Resizing State
@@ -1013,13 +1026,11 @@ export default function FileList({
         password: password || null
       });
       setVersion(v => v + 1);
+      return true;
     } catch (error) {
       const errStr = String(error);
       if (errStr === 'FILE_EXISTS') {
-        const confirmed = await confirm(
-          'Some files already exist. Do you want to overwrite them?',
-          { title: 'Confirm Overwrite', kind: 'warning' }
-        );
+        const confirmed = await showConfirm('Confirm Overwrite', 'Some files already exist. Do you want to overwrite them?');
         if (confirmed) {
           try {
             await invoke('extract_zip_files', {
@@ -1030,6 +1041,7 @@ export default function FileList({
               password: password || null
             });
             setVersion(v => v + 1);
+            return true;
           } catch (e) {
             const estr = String(e);
             console.error('Extraction failed:', e);
@@ -1043,6 +1055,7 @@ export default function FileList({
             }
           }
         }
+        return false;
       } else {
         console.error('Extraction failed:', error);
         if (errStr.includes('Password required') || errStr.includes('Invalid password')) {
@@ -1053,6 +1066,7 @@ export default function FileList({
           setErrorDialogDetails(errStr);
           setErrorDialogOpen(true);
         }
+        return false;
       }
     } finally {
       if (unlisten) unlisten();
@@ -1071,7 +1085,7 @@ export default function FileList({
     if (!dataString) return;
 
     if (!checkPathPermission(destPath, editableFolders, readonlyFolders)) {
-      await confirm('You do not have write permission for this folder.', { title: 'Permission Error', kind: 'error' });
+      showMessage('Permission Error', 'You do not have write permission for this folder.');
       return;
     }
     try {
@@ -1090,12 +1104,15 @@ export default function FileList({
   const handleExtractSelectedClick = async () => {
     if (!zipPath || !path) return;
     if (selectedZipEntries.size === 0) {
-      await confirm('Please select files to extract.', { title: 'Notification', kind: 'info' });
+      showMessage('Notification', 'Please select files to extract.');
       return;
     }
     setExtractError(null);
     try {
-      await executeZipExtraction(zipPath, Array.from(selectedZipEntries), extractPath || path, extractPassword);
+      const success = await executeZipExtraction(zipPath, Array.from(selectedZipEntries), extractPath || path, extractPassword);
+      if (success) {
+        setZipDialogOpen(false);
+      }
     } catch (e) {
       const err = String(e);
       if (err.includes('Password required') || err.includes('Invalid password')) {
@@ -1118,7 +1135,10 @@ export default function FileList({
     const target = extractPath || path;
     setExtractError(null);
     try {
-      await executeZipExtraction(zipPath, null, target, extractPassword);
+      const success = await executeZipExtraction(zipPath, null, target, extractPassword);
+      if (success) {
+        setZipDialogOpen(false);
+      }
     } catch (e) {
       const err = String(e);
       if (err.includes('Password required') || err.includes('Invalid password')) {
@@ -1173,7 +1193,7 @@ export default function FileList({
             if (!hasEncrypted) {
               setErrorDialogTitle('Compression Password Warning');
               setErrorDialogMessage('A password was provided for compression, but the generated ZIP does not indicate encryption. If decryption is required, the password might not have been applied.');
-              setErrorDialogDetails(`대상: ${targetZipPath}\n엔트리 수: ${entries.length}\n암호화된 엔트리: ${entries.filter(e => e.isEncrypted).length}`);
+              setErrorDialogDetails(`Target: ${targetZipPath}\nTotal entries: ${entries.length}\nEncrypted entries: ${entries.filter(e => e.isEncrypted).length}`);
               setErrorDialogOpen(true);
             }
           } catch (e) {
@@ -1938,8 +1958,8 @@ export default function FileList({
                     style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
                     disabled={!compressPassword}
                   >
-                    <option value="zipcrypto">ZipCrypto (Windows 기본 호환용)</option>
-                    <option value="aes256">AES-256 (보안 강화)</option>
+                  <option value="zipcrypto">ZipCrypto (Standard Windows Compatibility)</option>
+                  <option value="aes256">AES-256 (Enhanced Security)</option>
                   </select>
                   {compressPassword && (
                     <div style={{ fontSize: '0.75em', color: '#e11d48', marginTop: '4px', lineHeight: '1.4' }}>
@@ -2019,6 +2039,20 @@ export default function FileList({
         title={msgDialogTitle}
         message={msgDialogMessage}
         onClose={() => setMsgDialogOpen(false)}
+      />
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        message={confirmState.message}
+        onConfirm={() => {
+          if (confirmState.resolve) confirmState.resolve(true);
+          setConfirmState(prev => ({ ...prev, open: false }));
+        }}
+        onCancel={() => {
+          if (confirmState.resolve) confirmState.resolve(false);
+          setConfirmState(prev => ({ ...prev, open: false }));
+        }}
+        okLabel="Yes"
       />
     </div>
   );
