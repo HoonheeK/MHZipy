@@ -15,19 +15,25 @@ export default function MessageDialog({ open, title, message, onClose }: Message
     if (open && okButtonRef.current) {
       okButtonRef.current.focus();
     }
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    if (open) {
+      window.addEventListener('keydown', handleGlobalKeyDown);
+    }
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
   }, [open]);
 
   if (!open) return null;
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation();
-      onClose();
-    }
-  };
-
   return (
-    <div className="message-dialog-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
+    <div className="message-dialog-overlay" onClick={onClose}>
       <div className="message-dialog" onClick={e => e.stopPropagation()}>
         <div className="message-dialog-header">{title}</div>
         <div className="message-dialog-body">{message}</div>

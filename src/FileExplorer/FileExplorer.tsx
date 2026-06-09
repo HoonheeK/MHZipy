@@ -405,6 +405,23 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
   };
 
+  const handleCompress = async (paths: string[]) => {
+    if (paths.length === 0) return;
+    try {
+      const parentDir = await dirname(paths[0]);
+      if (!checkPathPermission(parentDir, config.editableFolders, config.readonlyFolders)) {
+        showMessage('Permission Error', `You do not have permission to create files in '${parentDir}'.`);
+        return;
+      }
+      // 백엔드(Rust)에 'compress_files' 명령어가 구현되어 있다고 가정합니다. 실제 구현된 커맨드 이름 및 파라미터에 맞게 수정해 주세요.
+      await invoke('compress_files', { paths, targetDir: parentDir });
+      setRefreshTrigger(p => p + 1);
+    } catch (error) {
+      console.error('Compression failed:', error);
+      showMessage('Compression Failed', String(error));
+    }
+  };
+
   const handleExtract = async (path: string) => {
     try {
       const parentDir = await dirname(path);
@@ -569,6 +586,11 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
           handleDelete(Array.from(filesSelected));
         } else if (activePane === 'tree' && selectedPaths.size > 0) {
           handleDelete(Array.from(selectedPaths));
+        }
+      } else if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        if (activePane === 'tree' && selectedPaths.size > 0) {
+          handleCompress(Array.from(selectedPaths));
         }
       }
     };

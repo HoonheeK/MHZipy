@@ -1229,6 +1229,14 @@ export default function FileList({
     if (renamingFile) return; // 이름 변경 중에는 키보드 네비게이션 중단
     if (e.key === 'Escape') {
       setContextMenu(null);
+      if (compressDialogOpen) {
+        setCompressDialogOpen(false);
+        return;
+      }
+      if (zipDialogOpen) {
+        setZipDialogOpen(false);
+        return;
+      }
     }
     if (sortedFiles.length === 0) return;
 
@@ -1299,6 +1307,18 @@ export default function FileList({
       } else {
         onSelectFiles(new Set([sortedFiles[newIndex].path]));
         setAnchorIndex(newIndex);
+      }
+    }
+
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'c') {
+      e.preventDefault();
+      if (canCompress) {
+        performCompress();
+      }
+    } else if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      if (canExtractHere) {
+        performExtract();
       }
     }
   };
@@ -1735,7 +1755,10 @@ export default function FileList({
           display: 'flex', flexDirection: 'column', borderRadius: '8px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)', overflow: 'hidden',
           border: '1px solid #ccc'
-        }} onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+        }} onClick={e => e.stopPropagation()} onKeyDown={e => {
+          e.stopPropagation();
+          if (e.key === 'Escape') setZipDialogOpen(false);
+        }}>
           <div
             onMouseDown={handleZipHeaderMouseDown}
             style={{
@@ -1884,7 +1907,10 @@ export default function FileList({
             backgroundColor: 'white', width: '400px', padding: '20px',
             borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             display: 'flex', flexDirection: 'column', gap: '15px'
-          }} onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+          }} onClick={e => e.stopPropagation()} onKeyDown={e => {
+            e.stopPropagation();
+            if (e.key === 'Escape') setCompressDialogOpen(false);
+          }}>
             <h3 style={{ margin: 0 }}>Compression Settings</h3>
 
             {compressProgress ? (
