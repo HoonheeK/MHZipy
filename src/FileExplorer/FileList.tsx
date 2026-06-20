@@ -34,6 +34,7 @@ interface FileListProps {
   clipboard?: { paths: string[]; op: 'copy' | 'move' } | null;
   canPaste?: boolean;
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
+  onRefresh?: () => void;
 }
 
 interface FileData {
@@ -92,7 +93,8 @@ export default function FileList({
   columnSettings,
   clipboard,
   canPaste,
-  onColumnSettingsChange
+  onColumnSettingsChange,
+  onRefresh,
 }: FileListProps) {
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
@@ -111,6 +113,8 @@ export default function FileList({
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'file' | 'container' | 'header' } | null>(null);
+  
+  const lastCtrlATimeRef = useRef<number>(0);
 
   // Zip Dialog State
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
@@ -120,6 +124,7 @@ export default function FileList({
   const [zipDialogPos, setZipDialogPos] = useState({ x: 100, y: 100 });
   const [zipDialogSize, setZipDialogSize] = useState({ width: 600, height: 500 });
   const [extractPath, setExtractPath] = useState('');
+  const [extractToSubfolder, setExtractToSubfolder] = useState(false);
   const [extractPassword, setExtractPassword] = useState('');
   const [isZipEncrypted, setIsZipEncrypted] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -198,10 +203,29 @@ export default function FileList({
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const prevCompressDialogOpen = useRef(compressDialogOpen);
+  const prevZipDialogOpen = useRef(zipDialogOpen);
+  const prevPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prevCompressDialogOpen.current && !compressDialogOpen) {
+      rootRef.current?.focus();
+    }
+    prevCompressDialogOpen.current = compressDialogOpen;
+  }, [compressDialogOpen]);
+
+  useEffect(() => {
+    if (prevZipDialogOpen.current && !zipDialogOpen) {
+      rootRef.current?.focus();
+    }
+    prevZipDialogOpen.current = zipDialogOpen;
+  }, [zipDialogOpen]);
 
   useEffect(() => {
     columnWidthsRef.current = columnWidths;
   }, [columnWidths]);
+
 
   // Auto Resize Logic
   useEffect(() => {
@@ -241,8 +265,12 @@ export default function FileList({
       return;
     }
     if (!path) return;
-    setLastSelectedIndex(null);
-    setAnchorIndex(null);
+    
+    if (prevPathRef.current !== path) {
+      setLastSelectedIndex(null);
+      setAnchorIndex(null);
+    }
+    prevPathRef.current = path;
     let isMounted = true;
 
     const loadFiles = async () => {
@@ -505,6 +533,39 @@ export default function FileList({
 
       return direction === 'asc' ? result : -result;
     });
+
+  // Auto-select adjacent file after deletion (detected when selected files disappear from list)
+  useEffect(() => {
+    if (sortedFiles.length > 0 && selectedFiles.size > 0 && lastSelectedIndex !== null) {
+      const selectedArray = Array.from(selectedFiles);
+      const anyExist = selectedArray.some(p => sortedFiles.find(f => f.path === p));
+      
+      if (!anyExist) {
+        // All previously selected files are gone (deleted or moved).
+        // Auto-select the adjacent file.
+        const newIndex = Math.min(lastSelectedIndex, sortedFiles.length - 1);
+        const nextFile = sortedFiles[newIndex];
+        if (nextFile) {
+          onSelectFiles(new Set([nextFile.path]));
+          setLastSelectedIndex(newIndex);
+          setAnchorIndex(newIndex);
+          
+          // Steal focus back to list only if no specific input is focused
+          if (document.activeElement === document.body || document.activeElement?.className.includes('message-dialog-button')) {
+            rootRef.current?.focus();
+          }
+        }
+      }
+    } else if (sortedFiles.length === 0 && selectedFiles.size > 0) {
+      // Everything was deleted
+      onSelectFiles(new Set());
+      setLastSelectedIndex(null);
+      setAnchorIndex(null);
+      if (document.activeElement === document.body || document.activeElement?.className.includes('message-dialog-button')) {
+        rootRef.current?.focus();
+      }
+    }
+  }, [sortedFiles, selectedFiles, lastSelectedIndex, onSelectFiles]);
 
   useEffect(() => {
     if (searchQuery) {
@@ -840,10 +901,8 @@ export default function FileList({
       setExtractError(null);
 
       if (path) {
-        const zipName = file.name;
-        const folderName = zipName.substring(0, zipName.lastIndexOf('.')) || zipName;
-        const defaultPath = await join(path, folderName);
-        setExtractPath(defaultPath);
+        setExtractPath(path);
+        setExtractToSubfolder(false);
       }
 
       setZipDialogOpen(true);
@@ -1026,6 +1085,7 @@ export default function FileList({
         password: password || null
       });
       setVersion(v => v + 1);
+      if (onRefresh) onRefresh();
       return true;
     } catch (error) {
       const errStr = String(error);
@@ -1041,6 +1101,7 @@ export default function FileList({
               password: password || null
             });
             setVersion(v => v + 1);
+            if (onRefresh) onRefresh();
             return true;
           } catch (e) {
             const estr = String(e);
@@ -1184,6 +1245,7 @@ export default function FileList({
 
         setCompressDialogOpen(false);
         setVersion(v => v + 1);
+        if (onRefresh) onRefresh();
 
         // Verify that the resulting ZIP reflects encryption when a password was provided.
         if (compressPassword) {
@@ -1274,8 +1336,19 @@ export default function FileList({
       return;
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
       e.preventDefault();
-      const allNames = new Set(sortedFiles.map(f => f.name));
-      onSelectFiles(allNames);
+      const now = Date.now();
+      const timeSinceLast = now - lastCtrlATimeRef.current;
+      lastCtrlATimeRef.current = now;
+
+      if (timeSinceLast < 500) {
+        // Double Ctrl+A: Select all (files and folders)
+        const allPaths = new Set(sortedFiles.map(f => f.path));
+        onSelectFiles(allPaths);
+      } else {
+        // Single Ctrl+A: Select only files
+        const filePaths = new Set(sortedFiles.filter(f => !f.isDirectory).map(f => f.path));
+        onSelectFiles(filePaths);
+      }
       return;
     }
 
@@ -1561,6 +1634,7 @@ export default function FileList({
 
   return (
     <div
+      ref={rootRef}
       style={{ padding: '0', height: '100%', width: '100%', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', outline: 'none' }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
@@ -1700,7 +1774,7 @@ export default function FileList({
                 <span>Delete</span> <span className="shortcut">Del</span>
               </div>
               <div className={`context-menu-item ${!canCompress ? 'disabled' : ''}`} onClick={canCompress ? performCompress : undefined} style={{ padding: '2px 10px' }}>
-                <span>Compress</span>
+                <span>Compress</span> <span className="shortcut">Alt+C</span>
               </div>
               <div className="context-menu-item" onClick={() => {
                 if (selectedFiles.size > 0) {
@@ -1724,7 +1798,7 @@ export default function FileList({
               </div>
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className={`context-menu-item ${!canExtractHere ? 'disabled' : ''}`} onClick={canExtractHere ? performExtract : undefined} style={{ padding: '2px 10px' }}>
-                  <span>Extract Here</span>
+                  <span>Extract Here</span> <span className="shortcut">Alt+E</span>
                 </div>
               )}
               <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
@@ -1757,7 +1831,29 @@ export default function FileList({
           border: '1px solid #ccc'
         }} onClick={e => e.stopPropagation()} onKeyDown={e => {
           e.stopPropagation();
-          if (e.key === 'Escape') setZipDialogOpen(false);
+          if (e.key === 'Escape') {
+            setZipDialogOpen(false);
+          } else if (e.key === 'Tab') {
+            const focusableElements = e.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not([tabindex="-1"]), [href]:not([tabindex="-1"]), input:not([tabindex="-1"]), select:not([tabindex="-1"]), textarea:not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])'
+            );
+            if (focusableElements.length > 0) {
+              const firstElement = focusableElements[0];
+              const lastElement = focusableElements[focusableElements.length - 1];
+
+              if (e.shiftKey) {
+                if (document.activeElement === firstElement || document.activeElement === e.currentTarget || document.activeElement === document.body) {
+                  e.preventDefault();
+                  lastElement.focus();
+                }
+              } else {
+                if (document.activeElement === lastElement) {
+                  e.preventDefault();
+                  firstElement.focus();
+                }
+              }
+            }
+          }
         }}>
           <div
             onMouseDown={handleZipHeaderMouseDown}
@@ -1781,10 +1877,32 @@ export default function FileList({
               <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Extract to:</label>
               <input
                 type="text"
+                autoFocus
                 value={extractPath}
                 onChange={(e) => setExtractPath(e.target.value)}
                 style={{ flex: 1, padding: '4px', fontSize: '0.9em' }}
               />
+              <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <input
+                  type="checkbox"
+                  checked={extractToSubfolder}
+                  onChange={async (e) => {
+                    const checked = e.target.checked;
+                    setExtractToSubfolder(checked);
+                    if (!zipPath) return;
+                    const zipName = zipPath.split(/[/\\]/).pop() || '';
+                    const folderName = zipName.substring(0, zipName.lastIndexOf('.')) || zipName;
+                    if (checked) {
+                      setExtractPath(await join(extractPath, folderName));
+                    } else {
+                      if (extractPath.endsWith(folderName) || extractPath.endsWith(folderName + '/') || extractPath.endsWith(folderName + '\\')) {
+                        setExtractPath(await dirname(extractPath));
+                      }
+                    }
+                  }}
+                />
+                Sub-folder
+              </label>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Password:</label>
@@ -1910,6 +2028,7 @@ export default function FileList({
           }} onClick={e => e.stopPropagation()} onKeyDown={e => {
             e.stopPropagation();
             if (e.key === 'Escape') setCompressDialogOpen(false);
+            if (e.key === 'Enter' && !compressProgress) handleExecuteCompress();
           }}>
             <h3 style={{ margin: 0 }}>Compression Settings</h3>
 

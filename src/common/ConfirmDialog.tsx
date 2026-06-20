@@ -13,6 +13,7 @@ interface ConfirmDialogProps {
 
 export default function ConfirmDialog({ open, title, message, onConfirm, onCancel, okLabel = 'OK', cancelLabel = 'Cancel' }: ConfirmDialogProps) {
   const okButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (open && okButtonRef.current) {
@@ -26,6 +27,13 @@ export default function ConfirmDialog({ open, title, message, onConfirm, onCance
     if (e.key === 'Escape') {
       e.stopPropagation();
       onCancel();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      if (document.activeElement === cancelButtonRef.current) {
+        okButtonRef.current?.focus();
+      } else {
+        cancelButtonRef.current?.focus();
+      }
     }
   };
 
@@ -35,7 +43,7 @@ export default function ConfirmDialog({ open, title, message, onConfirm, onCance
         <div className="message-dialog-header">{title}</div>
         <div className="message-dialog-body">{message}</div>
         <div className="message-dialog-footer" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} className="message-dialog-button">{cancelLabel}</button>
+          <button ref={cancelButtonRef} onClick={onCancel} className="message-dialog-button">{cancelLabel}</button>
           <button ref={okButtonRef} onClick={onConfirm} className="message-dialog-button">{okLabel}</button>
         </div>
       </div>

@@ -10,7 +10,8 @@ interface PreferenceDialogProps {
   initialEditableFolders?: string[];
   initialReadonlyFolders?: string[];
   initialColumnSettings?: { key: string; visible: boolean }[];
-  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[]) => void;
+  initialLanguage?: string;
+  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string) => void;
 }
 
 const DEFAULT_COLUMN_SETTINGS = [
@@ -23,25 +24,29 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, onSave }: PreferenceDialogProps) {
+  const [activeTab, setActiveTab] = useState<'General' | 'Folder'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
   const [quickAccess, setQuickAccess] = useState<string[]>(initialQuickAccessFolders || []);
   const [editable, setEditable] = useState<string[]>(initialEditableFolders || []);
   const [readonly, setReadonly] = useState<string[]>(initialReadonlyFolders || []);
   const [columnSettings, setColumnSettings] = useState<{ key: string; visible: boolean }[]>(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
+  const [language, setLanguage] = useState<string>(initialLanguage || 'en');
 
   // Helper to get basename from path
   const getBaseName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() || p;
 
   useEffect(() => {
     if (isOpen) {
+      setActiveTab('General');
       setPath(initialDefaultPath || '');
       setQuickAccess(initialQuickAccessFolders || []);
       setEditable(initialEditableFolders || []);
       setReadonly(initialReadonlyFolders || []);
       setColumnSettings(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
+      setLanguage(initialLanguage || 'en');
     }
-  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings]);
+  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage]);
 
   const handleBrowse = async () => {
     try {
@@ -118,7 +123,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings);
+    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language);
     onClose();
   };
 
@@ -176,42 +181,77 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
           <h3>Preferences</h3>
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
+        <div className="preference-tabs">
+          <button 
+            className={`preference-tab ${activeTab === 'General' ? 'active' : ''}`}
+            onClick={() => setActiveTab('General')}
+          >
+            General
+          </button>
+          <button 
+            className={`preference-tab ${activeTab === 'Folder' ? 'active' : ''}`}
+            onClick={() => setActiveTab('Folder')}
+          >
+            Folder
+          </button>
+        </div>
         <div className="preference-body">
-          <div className="preference-item">
-            <span className="label-text">Default Start Folder</span>
-            <div className="input-group">
-              <input type="text" value={path} readOnly />
-              <button className="btn-secondary" onClick={handleBrowse} style={{ padding: '4px 12px' }}>Browse</button>
-            </div>
-          </div>
-
-          {renderFolderList("Quick Access Folders", quickAccess, handleAddQuickAccess, handleRemoveQuickAccess)}
-          {renderFolderList("Editable Folders (Allow)", editable, handleAddEditableFolder, (f) => handleRemoveFolderList(f, editable, setEditable))}
-          {renderFolderList("Read-only Folders (Deny)", readonly, handleAddReadonlyFolder, (f) => handleRemoveFolderList(f, readonly, setReadonly))}
-
-          <div className="preference-item">
-            <span className="label-text">File List Columns (Visibility & Order)</span>
-            <div className="column-settings-list" style={{ marginTop: '10px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
-              {columnSettings.map((col, index) => (
-                <div key={col.key} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: index === columnSettings.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={col.visible} 
-                    onChange={() => handleToggleColumn(col.key)}
-                    style={{ marginRight: '12px' }}
-                  />
-                  <span style={{ flex: 1, fontSize: '0.9rem' }}>{columnLabels[col.key]}</span>
-                  <div style={{ display: 'flex', gap: '4px' }}>
-                    <button className="btn-mini" onClick={() => handleMoveColumn(index, 'up')} disabled={index === 0}>▲</button>
-                    <button className="btn-mini" onClick={() => handleMoveColumn(index, 'down')} disabled={index === columnSettings.length - 1}>▼</button>
-                  </div>
+          {activeTab === 'General' && (
+            <>
+              <div className="preference-item">
+                <span className="label-text">Language</span>
+                <div className="input-group">
+                  <select 
+                    value={language} 
+                    onChange={(e) => setLanguage(e.target.value)}
+                    style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', color: '#64748b', fontSize: '0.9rem' }}
+                  >
+                    <option value="en">English</option>
+                    <option value="ko">Korean</option>
+                  </select>
                 </div>
-              ))}
-            </div>
-            <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '6px' }}>
-              Check to show columns. Use arrows to reorder them from left to right.
-            </p>
-          </div>
+              </div>
+              <div className="preference-item">
+                <span className="label-text">File List Columns (Visibility & Order)</span>
+                <div className="column-settings-list" style={{ marginTop: '10px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                  {columnSettings.map((col, index) => (
+                    <div key={col.key} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: index === columnSettings.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
+                      <input 
+                        type="checkbox" 
+                        checked={col.visible} 
+                        onChange={() => handleToggleColumn(col.key)}
+                        style={{ marginRight: '12px' }}
+                      />
+                      <span style={{ flex: 1, fontSize: '0.9rem' }}>{columnLabels[col.key]}</span>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        <button className="btn-mini" onClick={() => handleMoveColumn(index, 'up')} disabled={index === 0}>▲</button>
+                        <button className="btn-mini" onClick={() => handleMoveColumn(index, 'down')} disabled={index === columnSettings.length - 1}>▼</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '6px' }}>
+                  Check to show columns. Use arrows to reorder them from left to right.
+                </p>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'Folder' && (
+            <>
+              <div className="preference-item">
+                <span className="label-text">Default Start Folder</span>
+                <div className="input-group">
+                  <input type="text" value={path} readOnly />
+                  <button className="btn-secondary" onClick={handleBrowse} style={{ padding: '4px 12px' }}>Browse</button>
+                </div>
+              </div>
+
+              {renderFolderList("Quick Access Folders", quickAccess, handleAddQuickAccess, handleRemoveQuickAccess)}
+              {renderFolderList("Editable Folders (Allow)", editable, handleAddEditableFolder, (f) => handleRemoveFolderList(f, editable, setEditable))}
+              {renderFolderList("Read-only Folders (Deny)", readonly, handleAddReadonlyFolder, (f) => handleRemoveFolderList(f, readonly, setReadonly))}
+            </>
+          )}
         </div>
         <div className="preference-footer">
           <button className="btn-secondary" onClick={onClose}>Cancel</button>

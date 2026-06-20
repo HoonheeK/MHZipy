@@ -134,8 +134,7 @@ fn compress_files(
 ) -> Result<(), String> {
     let path = Path::new(&target_zip_path);
     let file = File::create(&path).map_err(|e| e.to_string())?;
-    let buf_writer = BufWriter::new(file); // 성능 향상을 위한 BufWriter
-    let mut zip = zip::ZipWriter::new(buf_writer);
+    let mut zip = zip::ZipWriter::new(file);
 
     let compression = match method.as_deref().unwrap_or("deflated") {
         "stored" => zip::CompressionMethod::Stored,

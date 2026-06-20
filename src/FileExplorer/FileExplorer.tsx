@@ -107,15 +107,15 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
 
   useEffect(() => {
-    console.log(`[FileExplorer] externalPath 업데이트 감지: "${externalPath}"`);
+
     if (externalPath && externalPath !== selected) {
-      console.log(`[FileExplorer] 외부 요청 경로("${externalPath}")로 selected 상태를 변경합니다.`);
+
       setSelected(externalPath);
       setSelectedPaths(new Set([externalPath]));
       setPathInput(externalPath); // UI 주소창도 함께 업데이트하여 혼선 방지
 
       if (externalSelect) {
-        console.log(`[FileExplorer] 선택 대상 파일 감지: ${externalSelect}`);
+
         setFilesSelected(new Set([externalSelect]));
       } else {
         setFilesSelected(new Set());
@@ -130,14 +130,14 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   useEffect(() => {
     // 외부 명령(URL 파라미터)으로 인한 이동이 아닐 때만 선택을 초기화합니다.
-    console.log(`[FileExplorer] 현재 selected 경로: ${selected}`);
+
     if (!externalPath) {
       setFilesSelected(new Set());
     }
   }, [selected]);
 
   // 렌더링 시점에 설정 상태 확인 로그
-  console.log(`[FileExplorer] Render 실행됨. Selected: "${selected}", QuickAccess 개수: ${config.quickAccess.length}`);
+
 
   useEffect(() => {
     if (onNavigate) onNavigate(selected);
@@ -791,6 +791,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             onOpenInNewWindow={handleOpenInNewWindow}
             onOpenInExplorer={handleOpenInExplorer}
             refreshTrigger={refreshTrigger}
+            onRefresh={() => setRefreshTrigger(p => p + 1)}
             searchQuery={searchQuery}
             editableFolders={config.editableFolders}
             readonlyFolders={config.readonlyFolders}
