@@ -316,7 +316,13 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <div style={{ marginTop: '8px', fontSize: '0.95rem', fontWeight: 600 }}>
                   {licenseInfo?.status === 'Expired' && <span style={{ color: '#ef4444' }}>Expired</span>}
                   {typeof licenseInfo?.status === 'object' && 'Trial' in licenseInfo.status && <span style={{ color: '#eab308' }}>Trial Mode ({licenseInfo.status.Trial.days_left} days left)</span>}
-                  {typeof licenseInfo?.status === 'object' && 'Activated' in licenseInfo.status && <span style={{ color: '#22c55e' }}>Activated (Expires: {new Date(licenseInfo.status.Activated.expiry_date * 1000).toLocaleDateString()})</span>}
+                  {typeof licenseInfo?.status === 'object' && 'Activated' in licenseInfo.status && (
+                    <span style={{ color: '#22c55e' }}>
+                      Activated {licenseInfo.status.Activated.expiry_date >= 4000000000 
+                        ? '(Permanent)' 
+                        : `(Expires: ${new Date(licenseInfo.status.Activated.expiry_date * 1000).toLocaleDateString()})`}
+                    </span>
+                  )}
                 </div>
               </div>
 
