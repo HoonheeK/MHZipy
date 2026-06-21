@@ -145,6 +145,11 @@ export default function FileList({
   const [errorDialogMessage, setErrorDialogMessage] = useState('');
   const [errorDialogDetails, setErrorDialogDetails] = useState<string | undefined>(undefined);
 
+  // Copy Names Dialog State
+  const [copyNamesDialogOpen, setCopyNamesDialogOpen] = useState(false);
+  const [copyNamesTarget, setCopyNamesTarget] = useState<string>('');
+  const [copyNamesList, setCopyNamesList] = useState<string[]>([]);
+
   // Compress Dialog State
   const [compressDialogOpen, setCompressDialogOpen] = useState(false);
   const [compressName, setCompressName] = useState('archive.zip');
@@ -910,6 +915,20 @@ export default function FileList({
     } else {
       // 빈 공간 우클릭
       setContextMenu({ x: e.clientX, y: e.clientY, type: 'container' });
+    }
+  };
+
+  const handleCopyFileNames = async (targetPath: string) => {
+    try {
+      const contents = await invoke<FileData[]>('read_directory', { path: targetPath });
+      const names = contents.map(f => f.name);
+      setCopyNamesList(names);
+      setCopyNamesTarget(targetPath);
+      setCopyNamesDialogOpen(true);
+      setContextMenu(null);
+    } catch (e) {
+      console.error("Failed to read directory", e);
+      showMessage('Error', `Failed to read directory: ${e}`);
     }
   };
 
@@ -1867,6 +1886,11 @@ export default function FileList({
               }} style={{ padding: '2px 10px' }}>
                 <span>{t('contextMenu.openInExplorer')}</span>
               </div>
+              {selectedFiles.size === 1 && (sortedFiles.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory || filesOverride?.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory) && (
+                <div className="context-menu-item" onClick={() => handleCopyFileNames(Array.from(selectedFiles)[0])} style={{ padding: '2px 10px' }}>
+                  <span>{t('contextMenu.copyFileNames', 'Copy File Names')}</span>
+                </div>
+              )}
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className={`context-menu-item ${!canExtractHere ? 'disabled' : ''}`} onClick={canExtractHere ? performExtract : undefined} style={{ padding: '2px 10px' }}>
                   <span>{t('contextMenu.extractHere')}</span> <span className="shortcut">Alt+E</span>
@@ -1887,9 +1911,42 @@ export default function FileList({
                   <span>{t('contextMenu.paste')}</span> <span className="shortcut">Ctrl+V</span>
                 </div>
               )}
+              <div className="context-menu-item" onClick={() => handleCopyFileNames(path)} style={{ padding: '2px 10px' }}>
+                <span>{t('contextMenu.copyFileNames', 'Copy File Names')}</span>
+              </div>
             </>
           )}
         </div>
+      )}
+
+      {copyNamesDialogOpen && createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1200,
+          display: 'flex', justifyContent: 'center', alignItems: 'center'
+        }} onClick={() => setCopyNamesDialogOpen(false)}>
+          <div style={{
+            backgroundColor: 'white', width: '500px', padding: '20px',
+            borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            display: 'flex', flexDirection: 'column', gap: '15px'
+          }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: 0 }}>Copy File Names</h3>
+            <p style={{ margin: 0, fontSize: '0.9em', color: '#666' }}>From: {copyNamesTarget}</p>
+            <textarea 
+              readOnly 
+              value={copyNamesList.join('\n')} 
+              style={{ width: '100%', height: '300px', padding: '8px', boxSizing: 'border-box', fontFamily: 'monospace', resize: 'none' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="btn-secondary" onClick={() => setCopyNamesDialogOpen(false)}>Close</button>
+              <button className="btn-primary" onClick={() => {
+                navigator.clipboard.writeText(copyNamesList.join('\n'));
+                setCopyNamesDialogOpen(false);
+              }}>Copy to Clipboard</button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {zipDialogOpen && createPortal(

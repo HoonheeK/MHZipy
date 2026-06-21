@@ -13,6 +13,7 @@ use regex::RegexBuilder;
 
 mod mft;
 use mft::MftIndex;
+mod license;
 
 #[derive(serde::Serialize)]
 struct ZipEntry {
@@ -785,6 +786,16 @@ fn open_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_license_info(app: tauri::AppHandle) -> license::LicenseInfo {
+    license::get_license_status(&app)
+}
+
+#[tauri::command]
+fn activate_license(app: tauri::AppHandle, email: String, code: String) -> Result<license::LicenseInfo, String> {
+    license::activate(&app, &email, &code)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -846,7 +857,9 @@ pub fn run() {
             search_directory,
             copy_files_to_clipboard,
             open_in_explorer,
-            get_files_from_clipboard
+            get_files_from_clipboard,
+            get_license_info,
+            activate_license
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

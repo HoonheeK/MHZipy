@@ -15,6 +15,8 @@ interface PreferenceDialogProps {
   initialUsePdfWorker?: boolean;
   initialLicenseEmail?: string;
   initialLicenseCode?: string;
+  licenseInfo?: any;
+  onActivateLicense?: (email: string, code: string) => Promise<void>;
   onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string) => void;
 }
 
@@ -28,7 +30,7 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, licenseInfo, onActivateLicense, onSave }: PreferenceDialogProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'General' | 'Folder' | 'License'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
@@ -309,16 +311,48 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
 
           {activeTab === 'License' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0' }}>
+              <div className="preference-item" style={{ backgroundColor: '#f1f5f9', padding: '12px', borderRadius: '8px' }}>
+                <span className="label-text">License Status</span>
+                <div style={{ marginTop: '8px', fontSize: '0.95rem', fontWeight: 600 }}>
+                  {licenseInfo?.status === 'Expired' && <span style={{ color: '#ef4444' }}>Expired</span>}
+                  {typeof licenseInfo?.status === 'object' && 'Trial' in licenseInfo.status && <span style={{ color: '#eab308' }}>Trial Mode ({licenseInfo.status.Trial.days_left} days left)</span>}
+                  {typeof licenseInfo?.status === 'object' && 'Activated' in licenseInfo.status && <span style={{ color: '#22c55e' }}>Activated (Expires: {new Date(licenseInfo.status.Activated.expiry_date * 1000).toLocaleDateString()})</span>}
+                </div>
+              </div>
+
+              <div className="preference-item">
+                <span className="label-text">Device ID</span>
+                <div className="input-group">
+                  <input type="text" value={licenseInfo?.device_id || ''} readOnly style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
+                  <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(licenseInfo?.device_id || '')}>Copy</button>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px' }}>
+                  This unique ID is generated based on your hardware and will be sent to the license server to bind your license.
+                </p>
+              </div>
+
               <div className="preference-item">
                 <span className="label-text">{t('preferences.email', 'Email Address')}</span>
                 <div className="input-group">
                   <input type="email" value={licenseEmail} onChange={(e) => setLicenseEmail(e.target.value)} placeholder="name@example.com" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem' }} />
+                  <button 
+                    className="btn-primary" 
+                    onClick={() => {
+                       if (!licenseEmail) { alert('Please enter your email first.'); return; }
+                       if (window.confirm(`Your Device ID (${licenseInfo?.device_id}) and Email will be sent to the purchase page. Continue?`)) {
+                           import('@tauri-apps/plugin-shell').then(({ open }) => {
+                               open(`https://www.marh-sw.com/?email=${encodeURIComponent(licenseEmail)}&deviceId=${encodeURIComponent(licenseInfo?.device_id || '')}`);
+                           });
+                       }
+                    }}
+                  >Buy License</button>
                 </div>
               </div>
               <div className="preference-item">
                 <span className="label-text">{t('preferences.licenseCode', 'License Code')}</span>
                 <div className="input-group">
-                  <input type="text" value={licenseCode} onChange={(e) => setLicenseCode(e.target.value)} placeholder="XXXX-XXXX-XXXX-XXXX" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
+                  <input type="text" value={licenseCode} onChange={(e) => setLicenseCode(e.target.value)} placeholder="Enter license code" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
+                  <button className="btn-primary" onClick={() => onActivateLicense?.(licenseEmail, licenseCode)}>Activate</button>
                 </div>
               </div>
             </div>

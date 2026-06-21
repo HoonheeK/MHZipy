@@ -22,6 +22,13 @@ export interface SearchConfig {
   directorySearchPaths: string[];
 }
 
+export type LicenseStatus = { Trial: { days_left: number } } | { Activated: { expiry_date: number } } | "Expired";
+
+export interface LicenseInfo {
+  status: LicenseStatus;
+  device_id: string;
+}
+
 interface AppConfig {
   defaultPath: string;
   quickAccess: string[];
@@ -51,6 +58,7 @@ function App() {
   const [currentPath, setCurrentPath] = useState<string>('');
   const [requestedPath, setRequestedPath] = useState<string | undefined>(undefined);
   const [requestedSelect, setRequestedSelect] = useState<string | undefined>(undefined);
+  const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
 
 
   useEffect(() => {
@@ -98,6 +106,13 @@ function App() {
           }
         } else {
           console.warn('[App] 설정 파일(config.json)이 존재하지 않습니다.');
+        }
+
+        try {
+          const info: LicenseInfo = await invoke('get_license_info');
+          setLicenseInfo(info);
+        } catch (e) {
+          console.error('[App] 라이센스 정보 로드 실패:', e);
         }
       } catch (e) {
         console.error('[App] 설정 로드 실패:', e);
@@ -258,7 +273,80 @@ function App() {
             licenseCode: newLicenseCode,
           });
         }}
+        licenseInfo={licenseInfo}
+        onActivateLicense={async (email, code) => {
+           try {
+             const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
+             setLicenseInfo(newInfo);
+             alert('License activated successfully!');
+           } catch (err) {
+             alert('Failed to activate: ' + err);
+           }
+        }}
       />
+
+      {licenseInfo && licenseInfo.status === 'Expired' && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.95)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#f8fafc', padding: '20px' }}>
+          <h1 style={{ fontSize: '2rem', marginBottom: '10px', color: '#f87171' }}>License Expired</h1>
+          <p style={{ fontSize: '1.1rem', marginBottom: '30px', textAlign: 'center', maxWidth: '500px' }}>
+            Your trial or purchased license has expired. To continue using MHZipy, please purchase a license.
+          </p>
+          <div style={{ width: '100%', maxWidth: '400px', backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+            <div style={{ marginBottom: '15px' }}>
+               <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Device ID (Copy to purchase)</label>
+               <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="text" value={licenseInfo.device_id} readOnly style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
+                  <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(licenseInfo.device_id)}>Copy</button>
+               </div>
+            </div>
+            <div style={{ marginBottom: '20px' }}>
+               <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Email Address</label>
+               <input type="email" id="blockingEmail" defaultValue={config.licenseEmail || ''} placeholder="name@example.com" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc' }} />
+            </div>
+            <button 
+              className="btn-primary" 
+              style={{ width: '100%', padding: '12px', fontSize: '1rem', marginBottom: '20px' }}
+              onClick={() => {
+                 const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
+                 if (!email) { alert('Please enter your email.'); return; }
+                 import('@tauri-apps/plugin-shell').then(({ open }) => {
+                     open(`https://www.marh-sw.com/?email=${encodeURIComponent(email)}&deviceId=${encodeURIComponent(licenseInfo.device_id)}`);
+                 });
+              }}
+            >Buy License</button>
+
+            <hr style={{ borderColor: '#334155', margin: '20px 0' }} />
+
+            <div style={{ marginBottom: '15px' }}>
+               <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Have a license code?</label>
+               <input type="text" id="blockingCode" defaultValue={config.licenseCode || ''} placeholder="Enter license code" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
+            </div>
+            <button 
+              className="btn-secondary" 
+              style={{ width: '100%', padding: '12px', fontSize: '1rem' }}
+              onClick={async () => {
+                 const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
+                 const code = (document.getElementById('blockingCode') as HTMLInputElement).value;
+                 if (!email || !code) { alert('Please enter both email and code.'); return; }
+                 try {
+                   const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
+                   setLicenseInfo(newInfo);
+                   alert('License activated successfully!');
+                   
+                   // Update config with the new license data
+                   saveConfig({
+                     ...config,
+                     licenseEmail: email,
+                     licenseCode: code,
+                   });
+                 } catch (err) {
+                   alert('Failed to activate: ' + err);
+                 }
+              }}
+            >Activate</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
