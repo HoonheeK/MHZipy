@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import './Menu.css';
 
 interface MenuProps {
@@ -14,6 +15,7 @@ interface MenuProps {
 }
 
 export default function Menu({ onPreference, currentView, onToggleView, onSearch, onBack, canGoBack, onNext, canGoForward, searchQuery }: MenuProps) {
+  const { t } = useTranslation();
   const [localSearch, setLocalSearch] = useState(searchQuery || '');
 
   // Sync from parent if it changes
@@ -38,10 +40,10 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
       <div className="menu-left">
         {currentView === 'folder' && (
           <div className="navigation-buttons">
-            <button onClick={onBack} disabled={!canGoBack} className="menu-button" title="Back">
+            <button onClick={onBack} disabled={!canGoBack} className="menu-button" title={t('menu.back')}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
             </button>
-            <button onClick={onNext} disabled={!canGoForward} className="menu-button" title="Forward">
+            <button onClick={onNext} disabled={!canGoForward} className="menu-button" title={t('menu.forward')}>
               <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </button>
           </div>
@@ -53,7 +55,7 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
             <span className="search-icon">🔎</span>
             <input
               type="text"
-              placeholder="Filter files in current folder..."
+              placeholder={t('menu.searchPlaceholder', 'Filter files in current folder...')}
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
               className="search-input"
@@ -68,14 +70,14 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
         <div className="view-toggle">
           <label className={`toggle-option ${currentView === 'folder' ? 'active' : ''}`} onClick={currentView === 'search' ? onToggleView : undefined}>
             <input type="radio" name="view" readOnly checked={currentView === 'folder'} />
-            📂 Folder
+            📂 {t('menu.folderView')}
           </label>
           <label className={`toggle-option ${currentView === 'search' ? 'active' : ''}`} onClick={currentView === 'folder' ? onToggleView : undefined}>
             <input type="radio" name="view" readOnly checked={currentView === 'search'} />
-            🔍 Search
+            🔍 {t('menu.search')}
           </label>
         </div>
-        <button onClick={onPreference} className="menu-button" title="Preferences" tabIndex={-1}>
+        <button onClick={onPreference} className="menu-button" title={t('menu.settings')} tabIndex={-1}>
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l-.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import './MessageDialog.css';
 
 interface MessageDialogProps {
@@ -32,7 +33,7 @@ export default function MessageDialog({ open, title, message, onClose }: Message
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="message-dialog-overlay" onClick={onClose}>
       <div className="message-dialog" onClick={e => e.stopPropagation()}>
         <div className="message-dialog-header">{title}</div>
@@ -41,6 +42,7 @@ export default function MessageDialog({ open, title, message, onClose }: Message
           <button ref={okButtonRef} onClick={onClose} className="message-dialog-button">OK</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

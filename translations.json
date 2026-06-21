@@ -1,0 +1,392 @@
+{
+  "en": {
+    "menu": { "searchPlaceholder": "Filter files in current folder..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "Remove from Quick Access",
+      "cut": "Cut",
+      "copy": "Copy",
+      "createFolder": "Create Folder",
+      "paste": "Paste",
+      "openInNewWindow": "Open in New Window",
+      "openInExplorer": "Open in File Explorer",
+      "delete": "Delete",
+      "setAsDefaultFolder": "Set as Default Folder",
+      "addToQuickAccess": "Add to Quick Access",
+      "setAsEditable": "Set as Editable",
+      "setAsReadOnly": "Set as Read-only",
+      "clearPermission": "Clear Permission"
+    },
+    "explorer": {
+      "quickAccess": "Quick Access",
+      "filterTree": "Filter Tree"
+    },
+    "search": {
+      "title": "Quick Access Folder Search",
+      "subtitle": "Intelligent File Search",
+      "mftIndex": "MFT Index",
+      "folder": "Folder",
+      "filterSettings": "Filter Settings",
+      "fileType": "File Type",
+      "fileSize": "File Size",
+      "dateModifiedAfter": "Date Modified (After)",
+      "dateModifiedBefore": "Date Modified (Before)",
+      "selectFolder": "Select folder to search (includes Quick Access)...",
+      "browseFolders": "Browse other folders...",
+      "searchingFor": "Searching for",
+      "searchResults": "Search results:",
+      "items": "items",
+      "enterQuery": "Enter a query to start searching"
+    }
+  },
+  "ko": {
+    "menu": { "searchPlaceholder": "현재 폴더에서 파일 필터링..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "빠른 실행에서 제거",
+      "cut": "잘라내기",
+      "copy": "복사",
+      "createFolder": "새 폴더",
+      "paste": "붙여넣기",
+      "openInNewWindow": "새 창에서 열기",
+      "openInExplorer": "파일 탐색기에서 열기",
+      "delete": "삭제",
+      "setAsDefaultFolder": "기본 폴더로 설정",
+      "addToQuickAccess": "빠른 실행에 추가",
+      "setAsEditable": "편집 가능으로 설정",
+      "setAsReadOnly": "읽기 전용으로 설정",
+      "clearPermission": "권한 지우기"
+    },
+    "explorer": {
+      "quickAccess": "빠른 실행",
+      "filterTree": "트리 필터링"
+    },
+    "search": {
+      "title": "빠른 실행 폴더 검색",
+      "subtitle": "지능형 파일 검색",
+      "mftIndex": "MFT 색인",
+      "folder": "폴더",
+      "filterSettings": "필터 설정",
+      "fileType": "파일 유형",
+      "fileSize": "파일 크기",
+      "dateModifiedAfter": "수정일 (이후)",
+      "dateModifiedBefore": "수정일 (이전)",
+      "selectFolder": "검색할 폴더 선택 (빠른 실행 포함)...",
+      "browseFolders": "다른 폴더 찾아보기...",
+      "searchingFor": "검색 중",
+      "searchResults": "검색 결과:",
+      "items": "항목",
+      "enterQuery": "검색어를 입력하세요"
+    }
+  },
+  "ja": {
+    "menu": { "searchPlaceholder": "現在のフォルダ内のファイルをフィルタ..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "クイックアクセスから削除",
+      "cut": "切り取り",
+      "copy": "コピー",
+      "createFolder": "新しいフォルダー",
+      "paste": "貼り付け",
+      "openInNewWindow": "新しいウィンドウで開く",
+      "openInExplorer": "エクスプローラーで開く",
+      "delete": "削除",
+      "setAsDefaultFolder": "デフォルトフォルダーに設定",
+      "addToQuickAccess": "クイックアクセスに追加",
+      "setAsEditable": "編集可能に設定",
+      "setAsReadOnly": "読み取り専用に設定",
+      "clearPermission": "権限をクリア"
+    },
+    "explorer": {
+      "quickAccess": "クイックアクセス",
+      "filterTree": "ツリーをフィルタ"
+    },
+    "search": {
+      "title": "クイックアクセスフォルダー検索",
+      "subtitle": "インテリジェントファイル検索",
+      "mftIndex": "MFTインデックス",
+      "folder": "フォルダー",
+      "filterSettings": "フィルター設定",
+      "fileType": "ファイルの種類",
+      "fileSize": "ファイルサイズ",
+      "dateModifiedAfter": "更新日（以降）",
+      "dateModifiedBefore": "更新日（以前）",
+      "selectFolder": "検索するフォルダーを選択（クイックアクセスを含む）...",
+      "browseFolders": "他のフォルダーを参照...",
+      "searchingFor": "検索中",
+      "searchResults": "検索結果:",
+      "items": "項目",
+      "enterQuery": "検索クエリを入力してください"
+    }
+  },
+  "zh": {
+    "menu": { "searchPlaceholder": "筛选当前文件夹中的文件..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "从快速访问中删除",
+      "cut": "剪切",
+      "copy": "复制",
+      "createFolder": "新建文件夹",
+      "paste": "粘贴",
+      "openInNewWindow": "在新窗口中打开",
+      "openInExplorer": "在文件资源管理器中打开",
+      "delete": "删除",
+      "setAsDefaultFolder": "设为默认文件夹",
+      "addToQuickAccess": "固定到快速访问",
+      "setAsEditable": "设为可编辑",
+      "setAsReadOnly": "设为只读",
+      "clearPermission": "清除权限"
+    },
+    "explorer": {
+      "quickAccess": "快速访问",
+      "filterTree": "筛选树"
+    },
+    "search": {
+      "title": "快速访问文件夹搜索",
+      "subtitle": "智能文件搜索",
+      "mftIndex": "MFT索引",
+      "folder": "文件夹",
+      "filterSettings": "筛选设置",
+      "fileType": "文件类型",
+      "fileSize": "文件大小",
+      "dateModifiedAfter": "修改日期（之后）",
+      "dateModifiedBefore": "修改日期（之前）",
+      "selectFolder": "选择要搜索的文件夹（包含快速访问）...",
+      "browseFolders": "浏览其他文件夹...",
+      "searchingFor": "正在搜索",
+      "searchResults": "搜索结果：",
+      "items": "项",
+      "enterQuery": "输入查询以开始搜索"
+    }
+  },
+  "zh_TW": {
+    "menu": { "searchPlaceholder": "篩選目前資料夾中的檔案..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "從快速存取中刪除",
+      "cut": "剪下",
+      "copy": "複製",
+      "createFolder": "新增資料夾",
+      "paste": "貼上",
+      "openInNewWindow": "在新視窗中開啟",
+      "openInExplorer": "在檔案總管中開啟",
+      "delete": "刪除",
+      "setAsDefaultFolder": "設為預設資料夾",
+      "addToQuickAccess": "釘選到快速存取",
+      "setAsEditable": "設為可編輯",
+      "setAsReadOnly": "設為唯讀",
+      "clearPermission": "清除權限"
+    },
+    "explorer": {
+      "quickAccess": "快速存取",
+      "filterTree": "篩選樹"
+    },
+    "search": {
+      "title": "快速存取資料夾搜尋",
+      "subtitle": "智慧檔案搜尋",
+      "mftIndex": "MFT索引",
+      "folder": "資料夾",
+      "filterSettings": "篩選設定",
+      "fileType": "檔案類型",
+      "fileSize": "檔案大小",
+      "dateModifiedAfter": "修改日期 (之後)",
+      "dateModifiedBefore": "修改日期 (之前)",
+      "selectFolder": "選擇要搜尋的資料夾 (包含快速存取)...",
+      "browseFolders": "瀏覽其他資料夾...",
+      "searchingFor": "正在搜尋",
+      "searchResults": "搜尋結果：",
+      "items": "項目",
+      "enterQuery": "輸入查詢以開始搜尋"
+    }
+  },
+  "es": {
+    "menu": { "searchPlaceholder": "Filtrar archivos en la carpeta actual..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "Quitar de acceso rápido",
+      "cut": "Cortar",
+      "copy": "Copiar",
+      "createFolder": "Crear carpeta",
+      "paste": "Pegar",
+      "openInNewWindow": "Abrir en nueva ventana",
+      "openInExplorer": "Abrir en el Explorador de archivos",
+      "delete": "Eliminar",
+      "setAsDefaultFolder": "Establecer como carpeta predeterminada",
+      "addToQuickAccess": "Agregar a acceso rápido",
+      "setAsEditable": "Establecer como editable",
+      "setAsReadOnly": "Establecer como solo lectura",
+      "clearPermission": "Borrar permisos"
+    },
+    "explorer": {
+      "quickAccess": "Acceso rápido",
+      "filterTree": "Filtrar árbol"
+    },
+    "search": {
+      "title": "Búsqueda de carpeta de acceso rápido",
+      "subtitle": "Búsqueda inteligente de archivos",
+      "mftIndex": "Índice MFT",
+      "folder": "Carpeta",
+      "filterSettings": "Configuración de filtro",
+      "fileType": "Tipo de archivo",
+      "fileSize": "Tamaño de archivo",
+      "dateModifiedAfter": "Fecha de modificación (Después)",
+      "dateModifiedBefore": "Fecha de modificación (Antes)",
+      "selectFolder": "Seleccionar carpeta para buscar...",
+      "browseFolders": "Examinar otras carpetas...",
+      "searchingFor": "Buscando",
+      "searchResults": "Resultados de búsqueda:",
+      "items": "elementos",
+      "enterQuery": "Ingrese una consulta para buscar"
+    }
+  },
+  "fr": {
+    "menu": { "searchPlaceholder": "Filtrer les fichiers dans le dossier actuel..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "Supprimer de l'accès rapide",
+      "cut": "Couper",
+      "copy": "Copier",
+      "createFolder": "Créer un dossier",
+      "paste": "Coller",
+      "openInNewWindow": "Ouvrir dans une nouvelle fenêtre",
+      "openInExplorer": "Ouvrir dans l'Explorateur",
+      "delete": "Supprimer",
+      "setAsDefaultFolder": "Définir comme dossier par défaut",
+      "addToQuickAccess": "Ajouter à l'accès rapide",
+      "setAsEditable": "Définir comme modifiable",
+      "setAsReadOnly": "Définir en lecture seule",
+      "clearPermission": "Effacer l'autorisation"
+    },
+    "explorer": {
+      "quickAccess": "Accès rapide",
+      "filterTree": "Filtrer l'arborescence"
+    },
+    "search": {
+      "title": "Recherche dans l'accès rapide",
+      "subtitle": "Recherche de fichiers intelligente",
+      "mftIndex": "Index MFT",
+      "folder": "Dossier",
+      "filterSettings": "Paramètres de filtre",
+      "fileType": "Type de fichier",
+      "fileSize": "Taille du fichier",
+      "dateModifiedAfter": "Date de modification (Après)",
+      "dateModifiedBefore": "Date de modification (Avant)",
+      "selectFolder": "Sélectionnez le dossier à rechercher...",
+      "browseFolders": "Parcourir d'autres dossiers...",
+      "searchingFor": "Recherche de",
+      "searchResults": "Résultats de recherche:",
+      "items": "éléments",
+      "enterQuery": "Entrez une requête pour rechercher"
+    }
+  },
+  "de": {
+    "menu": { "searchPlaceholder": "Dateien im aktuellen Ordner filtern..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "Aus Schnellzugriff entfernen",
+      "cut": "Ausschneiden",
+      "copy": "Kopieren",
+      "createFolder": "Ordner erstellen",
+      "paste": "Einfügen",
+      "openInNewWindow": "In neuem Fenster öffnen",
+      "openInExplorer": "Im Datei-Explorer öffnen",
+      "delete": "Löschen",
+      "setAsDefaultFolder": "Als Standardordner festlegen",
+      "addToQuickAccess": "Zum Schnellzugriff hinzufügen",
+      "setAsEditable": "Als bearbeitbar festlegen",
+      "setAsReadOnly": "Als schreibgeschützt festlegen",
+      "clearPermission": "Berechtigung löschen"
+    },
+    "explorer": {
+      "quickAccess": "Schnellzugriff",
+      "filterTree": "Baum filtern"
+    },
+    "search": {
+      "title": "Schnellzugriff-Ordnersuche",
+      "subtitle": "Intelligente Dateisuche",
+      "mftIndex": "MFT-Index",
+      "folder": "Ordner",
+      "filterSettings": "Filtereinstellungen",
+      "fileType": "Dateityp",
+      "fileSize": "Dateigröße",
+      "dateModifiedAfter": "Änderungsdatum (Nach)",
+      "dateModifiedBefore": "Änderungsdatum (Vor)",
+      "selectFolder": "Ordner zum Suchen auswählen...",
+      "browseFolders": "Andere Ordner durchsuchen...",
+      "searchingFor": "Suchen nach",
+      "searchResults": "Suchergebnisse:",
+      "items": "Elemente",
+      "enterQuery": "Geben Sie eine Suchanfrage ein"
+    }
+  },
+  "ru": {
+    "menu": { "searchPlaceholder": "Фильтровать файлы в текущей папке..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "Удалить из быстрого доступа",
+      "cut": "Вырезать",
+      "copy": "Копировать",
+      "createFolder": "Создать папку",
+      "paste": "Вставить",
+      "openInNewWindow": "Открыть в новом окне",
+      "openInExplorer": "Открыть в Проводнике",
+      "delete": "Удалить",
+      "setAsDefaultFolder": "Сделать папкой по умолчанию",
+      "addToQuickAccess": "Добавить в быстрый доступ",
+      "setAsEditable": "Сделать редактируемым",
+      "setAsReadOnly": "Сделать только для чтения",
+      "clearPermission": "Очистить разрешения"
+    },
+    "explorer": {
+      "quickAccess": "Быстрый доступ",
+      "filterTree": "Фильтр дерева"
+    },
+    "search": {
+      "title": "Поиск по папкам быстрого доступа",
+      "subtitle": "Интеллектуальный поиск файлов",
+      "mftIndex": "Индекс MFT",
+      "folder": "Папка",
+      "filterSettings": "Настройки фильтра",
+      "fileType": "Тип файла",
+      "fileSize": "Размер файла",
+      "dateModifiedAfter": "Дата изменения (После)",
+      "dateModifiedBefore": "Дата изменения (До)",
+      "selectFolder": "Выберите папку для поиска...",
+      "browseFolders": "Обзор других папок...",
+      "searchingFor": "Поиск",
+      "searchResults": "Результаты поиска:",
+      "items": "элементов",
+      "enterQuery": "Введите запрос для поиска"
+    }
+  },
+  "vi": {
+    "menu": { "searchPlaceholder": "Lọc tệp trong thư mục hiện tại..." },
+    "contextMenu": {
+      "removeFromQuickAccess": "Xóa khỏi Truy cập Nhanh",
+      "cut": "Cắt",
+      "copy": "Sao chép",
+      "createFolder": "Tạo Thư mục",
+      "paste": "Dán",
+      "openInNewWindow": "Mở trong Cửa sổ Mới",
+      "openInExplorer": "Mở trong File Explorer",
+      "delete": "Xóa",
+      "setAsDefaultFolder": "Đặt làm thư mục mặc định",
+      "addToQuickAccess": "Thêm vào Truy cập Nhanh",
+      "setAsEditable": "Đặt làm có thể chỉnh sửa",
+      "setAsReadOnly": "Đặt làm Chỉ đọc",
+      "clearPermission": "Xóa quyền"
+    },
+    "explorer": {
+      "quickAccess": "Truy cập Nhanh",
+      "filterTree": "Lọc Cây"
+    },
+    "search": {
+      "title": "Tìm kiếm Truy cập Nhanh",
+      "subtitle": "Tìm kiếm Tệp Thông minh",
+      "mftIndex": "Chỉ mục MFT",
+      "folder": "Thư mục",
+      "filterSettings": "Cài đặt Lọc",
+      "fileType": "Loại tệp",
+      "fileSize": "Kích thước tệp",
+      "dateModifiedAfter": "Ngày Sửa đổi (Sau)",
+      "dateModifiedBefore": "Ngày Sửa đổi (Trước)",
+      "selectFolder": "Chọn thư mục để tìm kiếm...",
+      "browseFolders": "Duyệt các thư mục khác...",
+      "searchingFor": "Đang tìm kiếm",
+      "searchResults": "Kết quả tìm kiếm:",
+      "items": "mục",
+      "enterQuery": "Nhập truy vấn để bắt đầu"
+    }
+  }
+}

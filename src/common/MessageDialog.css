@@ -37,6 +37,9 @@
   font-size: 0.95em;
   line-height: 1.5;
   white-space: pre-wrap; /* 줄바꿈 지원 */
+  word-break: break-all; /* 긴 경로 강제 줄바꿈 지원 */
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .message-dialog-footer {

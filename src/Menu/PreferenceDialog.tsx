@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { open } from '@tauri-apps/plugin-dialog';
 import './PreferenceDialog.css';
 
@@ -11,7 +12,10 @@ interface PreferenceDialogProps {
   initialReadonlyFolders?: string[];
   initialColumnSettings?: { key: string; visible: boolean }[];
   initialLanguage?: string;
-  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string) => void;
+  initialUsePdfWorker?: boolean;
+  initialLicenseEmail?: string;
+  initialLicenseCode?: string;
+  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string) => void;
 }
 
 const DEFAULT_COLUMN_SETTINGS = [
@@ -24,14 +28,18 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, onSave }: PreferenceDialogProps) {
-  const [activeTab, setActiveTab] = useState<'General' | 'Folder'>('General');
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, onSave }: PreferenceDialogProps) {
+  const { t } = useTranslation();
+  const [activeTab, setActiveTab] = useState<'General' | 'Folder' | 'License'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
   const [quickAccess, setQuickAccess] = useState<string[]>(initialQuickAccessFolders || []);
   const [editable, setEditable] = useState<string[]>(initialEditableFolders || []);
   const [readonly, setReadonly] = useState<string[]>(initialReadonlyFolders || []);
   const [columnSettings, setColumnSettings] = useState<{ key: string; visible: boolean }[]>(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
   const [language, setLanguage] = useState<string>(initialLanguage || 'en');
+  const [usePdfWorker, setUsePdfWorker] = useState<boolean>(initialUsePdfWorker !== false);
+  const [licenseEmail, setLicenseEmail] = useState<string>(initialLicenseEmail || '');
+  const [licenseCode, setLicenseCode] = useState<string>(initialLicenseCode || '');
 
   // Helper to get basename from path
   const getBaseName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() || p;
@@ -45,15 +53,18 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       setReadonly(initialReadonlyFolders || []);
       setColumnSettings(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
       setLanguage(initialLanguage || 'en');
+      setUsePdfWorker(initialUsePdfWorker !== false);
+      setLicenseEmail(initialLicenseEmail || '');
+      setLicenseCode(initialLicenseCode || '');
     }
-  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage]);
+  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode]);
 
   const handleBrowse = async () => {
     try {
       const selected = await open({
         directory: true,
         multiple: false,
-        title: '기본 폴더 선택',
+        title: t('preferences.defaultStartFolder'),
         defaultPath: path,
       });
       if (selected && typeof selected === 'string') {
@@ -69,7 +80,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       const selected = await open({
         directory: true,
         multiple: false,
-        title: 'Quick Access 폴더 추가',
+        title: t('preferences.quickAccessFolders'),
       });
       if (selected && typeof selected === 'string') {
         if (!quickAccess.includes(selected)) {
@@ -87,7 +98,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
 
   const handleAddEditableFolder = async () => {
     try {
-      const selected = await open({ directory: true, multiple: false, title: '편집 가능 폴더 추가' });
+      const selected = await open({ directory: true, multiple: false, title: t('preferences.editableFolders') });
       if (selected && typeof selected === 'string') {
         if (!editable.includes(selected)) {
           setEditable(prev => [...prev, selected]);
@@ -102,7 +113,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
 
   const handleAddReadonlyFolder = async () => {
     try {
-      const selected = await open({ directory: true, multiple: false, title: '읽기 전용 폴더 추가' });
+      const selected = await open({ directory: true, multiple: false, title: t('preferences.readonlyFolders') });
       if (selected && typeof selected === 'string') {
         if (!readonly.includes(selected)) {
           setReadonly(prev => [...prev, selected]);
@@ -123,7 +134,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language);
+    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode);
     onClose();
   };
 
@@ -144,9 +155,9 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   if (!isOpen) return null;
 
   const columnLabels: Record<string, string> = {
-    name: 'Name', size: 'Size', type: 'Type',
-    birthtime: 'Date Created', mtime: 'Date Modified',
-    atime: 'Date Accessed', path: 'Path'
+    name: t('columns.name'), size: t('columns.size'), type: t('columns.type'),
+    birthtime: t('columns.birthtime'), mtime: t('columns.mtime'),
+    atime: t('columns.atime'), path: t('columns.path')
   };
 
   const renderFolderList = (title: string, list: string[], onAdd: () => void, onRemove: (f: string) => void) => (
@@ -157,7 +168,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       </div>
       <div className="folder-card-list">
         {list.length === 0 ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>No folders added.</div>
+          <div style={{ padding: '20px', textAlign: 'center', color: '#94a3b8', fontSize: '0.85rem' }}>{t('preferences.noFoldersAdded')}</div>
         ) : (
           list.map((folder) => (
             <div key={folder} className="folder-card-item">
@@ -170,7 +181,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
           ))
         )}
       </div>
-      <button className="btn-add" onClick={onAdd}>+ Add Folder</button>
+      <button className="btn-add" onClick={onAdd}>{t('preferences.addFolder')}</button>
     </div>
   );
 
@@ -178,7 +189,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     <div className="preference-overlay">
       <div className="preference-modal">
         <div className="preference-header">
-          <h3>Preferences</h3>
+          <h3>{t('preferences.title')}</h3>
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
         <div className="preference-tabs">
@@ -186,33 +197,76 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
             className={`preference-tab ${activeTab === 'General' ? 'active' : ''}`}
             onClick={() => setActiveTab('General')}
           >
-            General
+            {t('preferences.general')}
           </button>
           <button 
             className={`preference-tab ${activeTab === 'Folder' ? 'active' : ''}`}
             onClick={() => setActiveTab('Folder')}
           >
-            Folder
+            {t('preferences.folder')}
+          </button>
+          <button 
+            className={`preference-tab ${activeTab === 'License' ? 'active' : ''}`}
+            onClick={() => setActiveTab('License')}
+          >
+            {t('preferences.license')}
           </button>
         </div>
         <div className="preference-body">
           {activeTab === 'General' && (
             <>
               <div className="preference-item">
-                <span className="label-text">Language</span>
+                <span className="label-text">{t('preferences.language')}</span>
                 <div className="input-group">
                   <select 
                     value={language} 
                     onChange={(e) => setLanguage(e.target.value)}
                     style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', color: '#64748b', fontSize: '0.9rem' }}
                   >
-                    <option value="en">English</option>
-                    <option value="ko">Korean</option>
+                    <option value="ar">{t('preferences.lang_ar')}</option>
+                    <option value="de-AT">{t('preferences.lang_de_AT')}</option>
+                    <option value="bn">{t('preferences.lang_bn')}</option>
+                    <option value="my">{t('preferences.lang_my')}</option>
+                    <option value="km">{t('preferences.lang_km')}</option>
+                    <option value="yue">{t('preferences.lang_yue')}</option>
+                    <option value="zh">{t('preferences.lang_zh')}</option>
+                    <option value="cs">{t('preferences.lang_cs')}</option>
+                    <option value="en">{t('preferences.lang_en')}</option>
+                    <option value="fr">{t('preferences.lang_fr')}</option>
+                    <option value="de">{t('preferences.lang_de')}</option>
+                    <option value="el">{t('preferences.lang_el')}</option>
+                    <option value="id">{t('preferences.lang_id')}</option>
+                    <option value="it">{t('preferences.lang_it')}</option>
+                    <option value="ja">{t('preferences.lang_ja')}</option>
+                    <option value="ko">{t('preferences.lang_ko')}</option>
+                    <option value="lo">{t('preferences.lang_lo')}</option>
+                    <option value="ms">{t('preferences.lang_ms')}</option>
+                    <option value="mn">{t('preferences.lang_mn')}</option>
+                    <option value="pl">{t('preferences.lang_pl')}</option>
+                    <option value="ru">{t('preferences.lang_ru')}</option>
+                    <option value="es">{t('preferences.lang_es')}</option>
+                    <option value="zh-TW">{t('preferences.lang_zh_TW')}</option>
+                    <option value="th">{t('preferences.lang_th')}</option>
+                    <option value="tr">{t('preferences.lang_tr')}</option>
+                    <option value="vi">{t('preferences.lang_vi')}</option>
                   </select>
                 </div>
               </div>
+              <div className="preference-item" style={{ flexDirection: 'row', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
+                <input 
+                  type="checkbox" 
+                  id="pdfWorkerCheckbox"
+                  checked={usePdfWorker}
+                  onChange={(e) => setUsePdfWorker(e.target.checked)}
+                  style={{ width: '16px', height: '16px', margin: 0, cursor: 'pointer' }}
+                />
+                <label htmlFor="pdfWorkerCheckbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, flex: 1 }}>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#334155' }}>{t('preferences.usePdfWorker', 'Use Built-in PDF Viewer')}</span>
+                  <span style={{ fontSize: '0.85rem', color: '#64748b' }}>- {t('preferences.usePdfWorkerDesc', 'Open PDF files with internal PDF worker by default')}</span>
+                </label>
+              </div>
               <div className="preference-item">
-                <span className="label-text">File List Columns (Visibility & Order)</span>
+                <span className="label-text">{t('preferences.columnsTitle')}</span>
                 <div className="column-settings-list" style={{ marginTop: '10px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
                   {columnSettings.map((col, index) => (
                     <div key={col.key} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: index === columnSettings.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
@@ -231,7 +285,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                   ))}
                 </div>
                 <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '6px' }}>
-                  Check to show columns. Use arrows to reorder them from left to right.
+                  {t('preferences.columnsDesc')}
                 </p>
               </div>
             </>
@@ -240,22 +294,39 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
           {activeTab === 'Folder' && (
             <>
               <div className="preference-item">
-                <span className="label-text">Default Start Folder</span>
+                <span className="label-text">{t('preferences.defaultStartFolder')}</span>
                 <div className="input-group">
                   <input type="text" value={path} readOnly />
-                  <button className="btn-secondary" onClick={handleBrowse} style={{ padding: '4px 12px' }}>Browse</button>
+                  <button className="btn-secondary" onClick={handleBrowse} style={{ padding: '4px 12px' }}>{t('preferences.browse')}</button>
                 </div>
               </div>
 
-              {renderFolderList("Quick Access Folders", quickAccess, handleAddQuickAccess, handleRemoveQuickAccess)}
-              {renderFolderList("Editable Folders (Allow)", editable, handleAddEditableFolder, (f) => handleRemoveFolderList(f, editable, setEditable))}
-              {renderFolderList("Read-only Folders (Deny)", readonly, handleAddReadonlyFolder, (f) => handleRemoveFolderList(f, readonly, setReadonly))}
+              {renderFolderList(t('preferences.quickAccessFolders'), quickAccess, handleAddQuickAccess, handleRemoveQuickAccess)}
+              {renderFolderList(t('preferences.editableFolders'), editable, handleAddEditableFolder, (f) => handleRemoveFolderList(f, editable, setEditable))}
+              {renderFolderList(t('preferences.readonlyFolders'), readonly, handleAddReadonlyFolder, (f) => handleRemoveFolderList(f, readonly, setReadonly))}
             </>
+          )}
+
+          {activeTab === 'License' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0' }}>
+              <div className="preference-item">
+                <span className="label-text">{t('preferences.email', 'Email Address')}</span>
+                <div className="input-group">
+                  <input type="email" value={licenseEmail} onChange={(e) => setLicenseEmail(e.target.value)} placeholder="name@example.com" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem' }} />
+                </div>
+              </div>
+              <div className="preference-item">
+                <span className="label-text">{t('preferences.licenseCode', 'License Code')}</span>
+                <div className="input-group">
+                  <input type="text" value={licenseCode} onChange={(e) => setLicenseCode(e.target.value)} placeholder="XXXX-XXXX-XXXX-XXXX" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
+                </div>
+              </div>
+            </div>
           )}
         </div>
         <div className="preference-footer">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" onClick={handleSave}>Save Changes</button>
+          <button className="btn-secondary" onClick={onClose}>{t('preferences.cancel')}</button>
+          <button className="btn-primary" onClick={handleSave}>{t('preferences.saveChanges')}</button>
         </div>
       </div>
     </div>

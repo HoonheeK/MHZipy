@@ -7,6 +7,7 @@ import PreferenceDialog from './Menu/PreferenceDialog';
 import { ensureDir } from './utils/fileOps';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
+import { useTranslation } from 'react-i18next';
 import './App.css';
 
 export interface SearchConfig {
@@ -33,6 +34,9 @@ interface AppConfig {
   search?: SearchConfig;
   columnSettings?: { key: string; visible: boolean }[];
   language?: string;
+  usePdfWorker?: boolean;
+  licenseEmail?: string;
+  licenseCode?: string;
 }
 
 function App() {
@@ -40,6 +44,7 @@ function App() {
   const [isPrefOpen, setIsPrefOpen] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [currentView, setCurrentView] = useState<'folder' | 'search'>('folder');
+  const { i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [forwardHistory, setForwardHistory] = useState<string[]>([]);
@@ -76,6 +81,9 @@ function App() {
           const parsed = JSON.parse(content);
 
           setConfig(parsed);
+          if (parsed.language) {
+            i18n.changeLanguage(parsed.language);
+          }
 
           // URL 경로가 없을 때만 저장된 기본 뷰/경로 사용
           if (!pathParam) {
@@ -117,6 +125,9 @@ function App() {
   const saveConfig = async (updates: Partial<AppConfig>) => {
     if (updates.view) {
       setCurrentView(updates.view);
+    }
+    if (updates.language) {
+      i18n.changeLanguage(updates.language);
     }
     const newConfig = { ...config, ...updates };
     setConfig(newConfig);
@@ -231,7 +242,10 @@ function App() {
         initialReadonlyFolders={config.readonlyFolders}
         initialColumnSettings={config.columnSettings}
         initialLanguage={config.language}
-        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string) => {
+        initialUsePdfWorker={config.usePdfWorker}
+        initialLicenseEmail={config.licenseEmail}
+        initialLicenseCode={config.licenseCode}
+        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string) => {
           saveConfig({
             defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
@@ -239,6 +253,9 @@ function App() {
             readonlyFolders: newReadonly ?? config.readonlyFolders,
             columnSettings: newColumnSettings,
             language: newLanguage,
+            usePdfWorker: newUsePdfWorker,
+            licenseEmail: newLicenseEmail,
+            licenseCode: newLicenseCode,
           });
         }}
       />

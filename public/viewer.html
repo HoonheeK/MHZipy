@@ -171,7 +171,7 @@
     <div id="app-container">
         <div id="sidebar">
             <div id="sidebar-header">
-                <span>목차</span>
+                <span>Outline</span>
                 <button class="search-btn" id="sidebar-close-btn">✕</button>
             </div>
             <div id="outline-container"></div>
@@ -179,11 +179,11 @@
         <div id="sidebar-resizer"></div>
         
         <div id="main-container">
-            <button id="sidebar-toggle-btn">☰ 목차</button>
+            <button id="sidebar-toggle-btn">☰ Outline</button>
             
             <div id="search-bar">
                 <div id="search-controls">
-                    <input id="search-input" type="text" placeholder="검색 (Enter)">
+                    <input id="search-input" type="text" placeholder="Search (Enter)">
                     <button class="search-btn" id="search-prev">▲</button>
                     <button class="search-btn" id="search-next">▼</button>
                     <span id="search-status"></span>
@@ -193,18 +193,18 @@
             </div>
 
             <div id="viewer-scroll-container">
-                <div id="loading">PDF 로딩 중...</div>
+                <div id="loading">Loading PDF...</div>
                 <div id="viewer-content"></div>
             </div>
             <div id="page-indicator">
                 <span id="page-input-container">
-                    <span id="current-page" title="페이지 번호를 클릭하여 이동"></span>
+                    <span id="current-page" title="Click to go to page"></span>
                 </span>
                 <span> / </span>
                 <span id="total-pages"></span>
             </div>
             <div id="zoom-controls">
-                <button class="zoom-btn" id="mode-toggle" title="텍스트 선택 모드">👆</button>
+                <button class="zoom-btn" id="mode-toggle" title="Text Selection Mode">👆</button>
                 <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
                 <button class="zoom-btn" id="zoom-out">−</button>
                 <span id="zoom-level">150%</span>
@@ -213,8 +213,8 @@
         </div>
 
         <div id="context-menu">
-            <button class="context-menu-item" id="ctx-copy">복사</button>
-            <button class="context-menu-item" id="ctx-highlight">하이라이트</button>
+            <button class="context-menu-item" id="ctx-copy">Copy</button>
+            <button class="context-menu-item" id="ctx-highlight">Highlight</button>
         </div>
     </div>
 
@@ -265,12 +265,12 @@
             }
 
             if (!pdfjsLib) {
-                loadingEl.textContent = 'PDF 라이브러리를 찾을 수 없습니다. (public/lib/pdfjs 경로를 확인하세요)';
+                loadingEl.textContent = 'PDF library not found. (Check public/lib/pdfjs path)';
                 return;
             }
 
             if (!fileUrl && !storageId) {
-                loadingEl.textContent = 'PDF 파일이 지정되지 않았습니다.';
+                loadingEl.textContent = 'PDF file is not specified.';
                 return;
             }
 
@@ -328,9 +328,9 @@
                 // 스크롤 이벤트 리스너 등록
                 document.getElementById('viewer-scroll-container').addEventListener('scroll', handleScroll);
             } catch (error) {
-                console.error('PDF 렌더링 오류:', error);
+                console.error('PDF rendering error:', error);
                 loadingEl.style.color = 'red';
-                loadingEl.textContent = 'PDF를 로드하지 못했습니다: ' + error.message;
+                loadingEl.textContent = 'Failed to load PDF: ' + error.message;
             }
         }
 
@@ -424,7 +424,7 @@
                         items: textContent.items
                     });
                 } catch (e) {
-                    console.warn(`페이지 ${pageNum} 텍스트 추출 실패:`, e);
+                    console.warn(`Failed to extract text from page ${pageNum}:`, e);
                 }
 
                 // 어노테이션 레이어 (링크) 렌더링
@@ -478,7 +478,7 @@
                         });
                     }
                 } catch (e) {
-                    console.warn(`페이지 ${pageNum} 어노테이션 로드 실패:`, e);
+                    console.warn(`Failed to load annotations for page ${pageNum}:`, e);
                 }
 
                 // 렌더링 완료 후 페이지 리소스 정리
@@ -497,7 +497,7 @@
             outlineContainer.innerHTML = '';
 
             if (!outline || outline.length === 0) {
-                outlineContainer.textContent = '목차가 없습니다.';
+                outlineContainer.textContent = 'No outline available.';
                 return;
             }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import './MessageDialog.css';
 
 interface ConfirmDialogProps {
@@ -37,7 +38,7 @@ export default function ConfirmDialog({ open, title, message, onConfirm, onCance
     }
   };
 
-  return (
+  return createPortal(
     <div className="message-dialog-overlay" onClick={onCancel} onKeyDown={handleKeyDown}>
       <div className="message-dialog" onClick={e => e.stopPropagation()}>
         <div className="message-dialog-header">{title}</div>
@@ -47,6 +48,7 @@ export default function ConfirmDialog({ open, title, message, onConfirm, onCance
           <button ref={okButtonRef} onClick={onConfirm} className="message-dialog-button">{okLabel}</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

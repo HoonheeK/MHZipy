@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { rename, mkdir } from '@tauri-apps/plugin-fs';
+import { rename, mkdir, exists } from '@tauri-apps/plugin-fs';
+import { open } from '@tauri-apps/plugin-dialog';
 import ErrorDialog from './ErrorDialog';
 import { basename, dirname, join } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
@@ -35,6 +38,7 @@ interface FileListProps {
   canPaste?: boolean;
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
   onRefresh?: () => void;
+  usePdfWorker?: boolean;
 }
 
 interface FileData {
@@ -95,7 +99,9 @@ export default function FileList({
   canPaste,
   onColumnSettingsChange,
   onRefresh,
+  usePdfWorker = true
 }: FileListProps) {
+  const { t } = useTranslation();
   const [files, setFiles] = useState<FileData[]>([]);
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -113,6 +119,7 @@ export default function FileList({
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'file' | 'container' | 'header' } | null>(null);
+  const [openingFiles, setOpeningFiles] = useState<Set<string>>(new Set());
   
   const lastCtrlATimeRef = useRef<number>(0);
 
@@ -140,10 +147,11 @@ export default function FileList({
 
   // Compress Dialog State
   const [compressDialogOpen, setCompressDialogOpen] = useState(false);
-  const [compressName, setCompressName] = useState('');
+  const [compressName, setCompressName] = useState('archive.zip');
   const [compressMethod, setCompressMethod] = useState('deflated');
   const [compressPassword, setCompressPassword] = useState('');
   const [compressEncryption, setCompressEncryption] = useState('zipcrypto');
+  const [compressTargetDir, setCompressTargetDir] = useState('');
   const [compressProgress, setCompressProgress] = useState<{ total: number; processed: number; filename: string; startTime: number } | null>(null);
 
   // Permission/Message Dialog State
@@ -703,7 +711,7 @@ export default function FileList({
       return;
     }
     if (!checkPathPermission(renamingFile, editableFolders, readonlyFolders)) {
-      showMessage('Permission Error', 'You do not have permission to edit this file.');
+      showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
       setRenamingFile(null);
       return;
     }
@@ -712,6 +720,7 @@ export default function FileList({
       const newPath = await join(await dirname(oldPath), renameText);
       await rename(oldPath, newPath);
       setVersion(v => v + 1);
+      if (onRefresh) onRefresh();
     } catch (error) {
       console.error('Failed to rename:', error);
     } finally {
@@ -722,7 +731,7 @@ export default function FileList({
   const handleCreateFolder = async () => {
     if (!path) return;
     if (!checkPathPermission(path, editableFolders, readonlyFolders)) {
-      showMessage('Permission Error', 'You do not have permission to create folders here.');
+      showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
       return;
     }
     setContextMenu(null);
@@ -741,6 +750,7 @@ export default function FileList({
       const newPath = await join(path, newName);
       await mkdir(newPath);
       setVersion(v => v + 1); // Trigger refresh
+      if (onRefresh) onRefresh();
       // Auto-select and enter rename mode for the new folder
       setRenamingFile(newPath);
       setRenameText(newName);
@@ -760,20 +770,34 @@ export default function FileList({
   }, [path, editableFolders, readonlyFolders]);
 
   const canExtractHere = useMemo(() => {
-    if (selectedFiles.size !== 1 || !path) return false;
+    if (selectedFiles.size !== 1) return false;
     const filePath = Array.from(selectedFiles)[0];
     if (!filePath.toLowerCase().endsWith('.zip')) return false;
-    return checkPathPermission(path, editableFolders, readonlyFolders);
-  }, [selectedFiles, path, editableFolders, readonlyFolders]);
+    return checkPathPermission(filePath, editableFolders, readonlyFolders);
+  }, [selectedFiles, editableFolders, readonlyFolders]);
 
   const canCompress = useMemo(() => {
-    if (selectedFiles.size === 0 || !path) return false;
-    return checkPathPermission(path, editableFolders, readonlyFolders);
-  }, [selectedFiles, path, editableFolders, readonlyFolders]);
+    if (selectedFiles.size === 0) return false;
+    const firstFile = Array.from(selectedFiles)[0];
+    return checkPathPermission(firstFile, editableFolders, readonlyFolders);
+  }, [selectedFiles, editableFolders, readonlyFolders]);
+
+  const ensureFilesExist = async (paths: string[]): Promise<boolean> => {
+    if (paths.length === 0) return false;
+    for (const p of paths) {
+      if (!(await exists(p))) {
+        showMessage(t('explorer.error', { defaultValue: 'Error' }), t('fileList.fileNotFound', { defaultValue: 'File not found. It may have been deleted or moved.' }));
+        if (onRefresh) onRefresh();
+        return false;
+      }
+    }
+    return true;
+  };
 
   const performDelete = async () => {
     if (selectedFiles.size === 0) return;
     const fullPaths = Array.from(selectedFiles);
+    if (!(await ensureFilesExist(fullPaths))) return;
     for (const p of fullPaths) {
       if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
         showMessage('Permission Error', `You do not have permission to delete '${p}'.`);
@@ -785,21 +809,23 @@ export default function FileList({
     // but we could optimistically clear it if needed.
   };
 
-  const performCopy = () => {
+  const performCopy = async () => {
     if (selectedFiles.size === 0) return;
     const fullPaths = Array.from(selectedFiles);
+    if (!(await ensureFilesExist(fullPaths))) return;
     onCopy(fullPaths);
   };
 
-  const performCut = () => {
+  const performCut = async () => {
     if (selectedFiles.size === 0) return;
-    for (const p of Array.from(selectedFiles)) {
+    const fullPaths = Array.from(selectedFiles);
+    if (!(await ensureFilesExist(fullPaths))) return;
+    for (const p of fullPaths) {
       if (!checkPathPermission(p, editableFolders, readonlyFolders)) {
         showMessage('Permission Error', `You do not have permission to edit '${p}'.`);
         return;
       }
     }
-    const fullPaths = Array.from(selectedFiles);
     onCut(fullPaths);
   };
 
@@ -809,7 +835,7 @@ export default function FileList({
     (async () => {
       // 압축 파일 생성 위치: 첫 번째 선택된 파일의 부모 폴더
       const firstFile = Array.from(selectedFiles)[0];
-      // const parentDir = await dirname(firstFile);
+      const parentDir = await dirname(firstFile);
 
       // 기본 압축 파일명 설정
       let defaultName = "Archive.zip";
@@ -830,6 +856,7 @@ export default function FileList({
       setCompressPassword('');
       setCompressEncryption('zipcrypto');
       setCompressProgress(null);
+      setCompressTargetDir(parentDir);
       setCompressDialogOpen(true);
     })();
   };
@@ -902,8 +929,10 @@ export default function FileList({
 
       if (path) {
         setExtractPath(path);
-        setExtractToSubfolder(false);
+      } else {
+        setExtractPath(await dirname(file.path));
       }
+      setExtractToSubfolder(false);
 
       setZipDialogOpen(true);
       setSelectedZipEntries(new Set());
@@ -931,11 +960,29 @@ export default function FileList({
     }
     if (file.name.toLowerCase().endsWith('.zip')) {
       await openZipFile(file);
-    } else if (file.name.toLowerCase().endsWith('.pdf')) {
+    } else if (file.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
       await openPdfInWindow({ path: file.path, name: file.name });
     } else {
-      // console.log('Opening file:', file.path);
-      await invoke('open_file', { path: file.path });
+      setOpeningFiles(prev => {
+        const next = new Set(prev);
+        next.add(file.path);
+        return next;
+      });
+      document.body.style.cursor = 'wait';
+      try {
+        await invoke('open_file', { path: file.path });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setTimeout(() => {
+          setOpeningFiles(prev => {
+            const next = new Set(prev);
+            next.delete(file.path);
+            if (next.size === 0) document.body.style.cursor = 'default';
+            return next;
+          });
+        }, 1500);
+      }
     }
   };
 
@@ -948,11 +995,29 @@ export default function FileList({
       if (item.isDirectory) continue;
       if (item.name.toLowerCase().endsWith('.zip')) {
         await openZipFile(item);
-      } else if (item.name.toLowerCase().endsWith('.pdf')) {
+      } else if (item.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
         await openPdfInWindow({ path: item.path, name: item.name });
       } else {
-        // console.log('Opening file:', item.path);
-        await invoke('open_file', { path: item.path });
+        setOpeningFiles(prev => {
+          const next = new Set(prev);
+          next.add(item.path);
+          return next;
+        });
+        document.body.style.cursor = 'wait';
+        try {
+          await invoke('open_file', { path: item.path });
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setTimeout(() => {
+            setOpeningFiles(prev => {
+              const next = new Set(prev);
+              next.delete(item.path);
+              if (next.size === 0) document.body.style.cursor = 'default';
+              return next;
+            });
+          }, 1500);
+        }
       }
     }
   };
@@ -1085,7 +1150,9 @@ export default function FileList({
         password: password || null
       });
       setVersion(v => v + 1);
-      if (onRefresh) onRefresh();
+      if (onRefresh) {
+        setTimeout(() => onRefresh(), 1000);
+      }
       return true;
     } catch (error) {
       const errStr = String(error);
@@ -1101,7 +1168,9 @@ export default function FileList({
               password: password || null
             });
             setVersion(v => v + 1);
-            if (onRefresh) onRefresh();
+            if (onRefresh) {
+              setTimeout(() => onRefresh(), 1000);
+            }
             return true;
           } catch (e) {
             const estr = String(e);
@@ -1146,7 +1215,7 @@ export default function FileList({
     if (!dataString) return;
 
     if (!checkPathPermission(destPath, editableFolders, readonlyFolders)) {
-      showMessage('Permission Error', 'You do not have write permission for this folder.');
+      showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
       return;
     }
     try {
@@ -1163,14 +1232,14 @@ export default function FileList({
   };
 
   const handleExtractSelectedClick = async () => {
-    if (!zipPath || !path) return;
+    if (!zipPath || !extractPath) return;
     if (selectedZipEntries.size === 0) {
       showMessage('Notification', 'Please select files to extract.');
       return;
     }
     setExtractError(null);
     try {
-      const success = await executeZipExtraction(zipPath, Array.from(selectedZipEntries), extractPath || path, extractPassword);
+      const success = await executeZipExtraction(zipPath, Array.from(selectedZipEntries), extractPath, extractPassword);
       if (success) {
         setZipDialogOpen(false);
       }
@@ -1191,9 +1260,8 @@ export default function FileList({
   };
 
   const handleExtractAllClick = async () => {
-    if (!zipPath || !path) return;
-    // extractPath가 있으면 그곳으로, 없으면 현재 경로로
-    const target = extractPath || path;
+    if (!zipPath || !extractPath) return;
+    const target = extractPath;
     setExtractError(null);
     try {
       const success = await executeZipExtraction(zipPath, null, target, extractPassword);
@@ -1215,7 +1283,7 @@ export default function FileList({
   };
 
   const handleExecuteCompress = async () => {
-    if (!path || !compressName) return;
+    if (!compressName || !compressTargetDir) return;
 
     setCompressProgress({ total: 0, processed: 0, filename: 'Preparing...', startTime: Date.now() });
 
@@ -1232,8 +1300,7 @@ export default function FileList({
 
       try {
         const fullPaths = Array.from(selectedFiles);
-        const targetDir = await dirname(fullPaths[0]);
-        const targetZipPath = await join(targetDir, compressName.endsWith('.zip') ? compressName : `${compressName}.zip`);
+        const targetZipPath = await join(compressTargetDir, compressName.endsWith('.zip') ? compressName : `${compressName}.zip`);
 
         await invoke('compress_files', {
           paths: fullPaths,
@@ -1245,7 +1312,9 @@ export default function FileList({
 
         setCompressDialogOpen(false);
         setVersion(v => v + 1);
-        if (onRefresh) onRefresh();
+        if (onRefresh) {
+          setTimeout(() => onRefresh(), 1000);
+        }
 
         // Verify that the resulting ZIP reflects encryption when a password was provided.
         if (compressPassword) {
@@ -1328,7 +1397,7 @@ export default function FileList({
       const filePath = Array.from(selectedFiles)[0];
       if (!checkPathPermission(filePath, editableFolders, readonlyFolders)) {
         e.preventDefault();
-        showMessage('Permission Error', 'You do not have permission to rename this item.');
+        showMessage(t('explorer.permissionError'), t('fileList.permissionRenameError'));
         return;
       }
       setRenamingFile(filePath);
@@ -1621,13 +1690,13 @@ export default function FileList({
 
   const renderCell = (file: FileData, colKey: string) => {
     switch (colKey) {
-      case 'name': return <><span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : '📄'}</span><span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.name}</span></>;
+      case 'name': return <><span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : (openingFiles.has(file.path) ? '⏳' : '📄')}</span><span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, opacity: openingFiles.has(file.path) ? 0.5 : 1 }}>{file.name}</span></>;
       case 'size': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>;
       case 'type': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>;
       case 'birthtime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>;
       case 'mtime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.mtime)}</span>;
       case 'atime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.atime)}</span>;
-      case 'path': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>;
+      case 'path': return <span title={file.path} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.path}</span>;
       default: return null;
     }
   };
@@ -1666,7 +1735,7 @@ export default function FileList({
           onContextMenu={handleHeaderContextMenu}
         >
           {activeColumnSettings.map(col =>
-            col.visible && renderHeaderCell(col.key, COLUMN_LABELS[col.key],
+            col.visible && renderHeaderCell(col.key, t(`columns.${col.key}`, { defaultValue: COLUMN_LABELS[col.key] }),
               col.key === 'size' ? 'right' : (['birthtime', 'mtime', 'atime'].includes(col.key) ? 'center' : 'left')
             )
           )}
@@ -1742,7 +1811,7 @@ export default function FileList({
               {activeColumnSettings.map(col => (
                 <div key={col.key} className="context-menu-item" onClick={() => toggleColumnVisibility(col.key)} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input type="checkbox" checked={col.visible} readOnly style={{ pointerEvents: 'none' }} />
-                  <span>{COLUMN_LABELS[col.key]}</span>
+                  <span>{t(`columns.${col.key}`, { defaultValue: COLUMN_LABELS[col.key] })}</span>
                 </div>
               ))}
             </>
@@ -1750,10 +1819,10 @@ export default function FileList({
           {contextMenu.type === 'file' && (
             <>
               <div className="context-menu-item" onClick={performCut} style={{ padding: '2px 10px' }}>
-                <span>Cut</span> <span className="shortcut">Ctrl+X</span>
+                <span>{t('contextMenu.cut')}</span> <span className="shortcut">Ctrl+X</span>
               </div>
               <div className="context-menu-item" onClick={performCopy} style={{ padding: '2px 10px' }}>
-                <span>Copy</span> <span className="shortcut">Ctrl+C</span>
+                <span>{t('contextMenu.copy')}</span> <span className="shortcut">Ctrl+C</span>
               </div>
               <div className={`context-menu-item ${selectedFiles.size !== 1 ? 'disabled' : ''}`} onClick={() => {
                 if (selectedFiles.size === 1) {
@@ -1768,37 +1837,39 @@ export default function FileList({
                   }
                 }
               }} style={{ padding: '2px 10px' }}>
-                <span>Rename</span> <span className="shortcut">F2</span>
+                <span>{t('contextMenu.rename')}</span> <span className="shortcut">F2</span>
               </div>
               <div className="context-menu-item delete" onClick={performDelete} style={{ padding: '2px 10px' }}>
-                <span>Delete</span> <span className="shortcut">Del</span>
+                <span>{t('contextMenu.delete')}</span> <span className="shortcut">Del</span>
               </div>
               <div className={`context-menu-item ${!canCompress ? 'disabled' : ''}`} onClick={canCompress ? performCompress : undefined} style={{ padding: '2px 10px' }}>
-                <span>Compress</span> <span className="shortcut">Alt+C</span>
+                <span>{t('contextMenu.compress')}</span> <span className="shortcut">Alt+C</span>
               </div>
-              <div className="context-menu-item" onClick={() => {
+              <div className="context-menu-item" onClick={async () => {
                 if (selectedFiles.size > 0) {
                   const firstPath = Array.from(selectedFiles)[0];
+                  if (!(await ensureFilesExist([firstPath]))) { setContextMenu(null); return; }
                   const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
                   onOpenInNewWindow(firstPath, fileData?.isDirectory);
                 }
                 setContextMenu(null);
               }} style={{ padding: '2px 10px' }}>
-                <span>Open in New Window</span> <span className="shortcut">Ctrl+Enter</span>
+                <span>{t('contextMenu.openInNewWindow')}</span> <span className="shortcut">Ctrl+Enter</span>
               </div>
-              <div className="context-menu-item" onClick={() => {
+              <div className="context-menu-item" onClick={async () => {
                 if (selectedFiles.size > 0) {
                   const firstPath = Array.from(selectedFiles)[0];
+                  if (!(await ensureFilesExist([firstPath]))) { setContextMenu(null); return; }
                   const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
                   onOpenInExplorer(firstPath, fileData?.isDirectory);
                 }
                 setContextMenu(null);
               }} style={{ padding: '2px 10px' }}>
-                <span>Open in File Explorer</span>
+                <span>{t('contextMenu.openInExplorer')}</span>
               </div>
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className={`context-menu-item ${!canExtractHere ? 'disabled' : ''}`} onClick={canExtractHere ? performExtract : undefined} style={{ padding: '2px 10px' }}>
-                  <span>Extract Here</span> <span className="shortcut">Alt+E</span>
+                  <span>{t('contextMenu.extractHere')}</span> <span className="shortcut">Alt+E</span>
                 </div>
               )}
               <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
@@ -1807,13 +1878,13 @@ export default function FileList({
           {contextMenu.type !== 'header' && path && (
             <>
               <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={canWriteToCurrentPath ? handleCreateFolder : undefined} style={{ padding: '2px 10px' }}>
-                <span>Create Folder</span>
+                <span>{t('contextMenu.createFolder')}</span>
               </div>
               {canPaste && (
                 <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={() => {
                   if (canWriteToCurrentPath) onPaste(path);
                 }} style={{ padding: '2px 10px' }}>
-                  <span>Paste</span> <span className="shortcut">Ctrl+V</span>
+                  <span>{t('contextMenu.paste')}</span> <span className="shortcut">Ctrl+V</span>
                 </div>
               )}
             </>
@@ -1821,7 +1892,7 @@ export default function FileList({
         </div>
       )}
 
-      {zipDialogOpen && (
+      {zipDialogOpen && createPortal(
         <div style={{
           position: 'fixed', top: zipDialogPos.y, left: zipDialogPos.x,
           width: `${zipDialogSize.width}px`, height: `${zipDialogSize.height}px`,
@@ -2012,10 +2083,11 @@ export default function FileList({
           >
             <div style={{ width: 0, height: 0, borderBottom: '10px solid #ccc', borderLeft: '10px solid transparent', margin: '2px' }}></div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {compressDialogOpen && (
+      {compressDialogOpen && createPortal(
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1100,
@@ -2061,6 +2133,30 @@ export default function FileList({
               </div>
             ) : (
               <>
+                <div style={{ marginBottom: '15px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                    <label style={{ fontWeight: 'bold', fontSize: '0.9em' }}>Save Location</label>
+                    <button
+                      onClick={async () => {
+                        const selected = await open({
+                          directory: true,
+                          multiple: false,
+                          defaultPath: compressTargetDir || undefined
+                        });
+                        if (selected && typeof selected === 'string') {
+                          setCompressTargetDir(selected);
+                        }
+                      }}
+                      style={{ padding: '2px 8px', fontSize: '0.85em', cursor: 'pointer', backgroundColor: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                    >
+                      Browse...
+                    </button>
+                  </div>
+                  <div style={{ padding: '8px', backgroundColor: '#f0f0f0', borderRadius: '4px', fontSize: '0.85em', wordBreak: 'break-all', border: '1px solid #ddd' }}>
+                    {compressTargetDir}
+                  </div>
+                </div>
+
                 <div>
                   <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Archive Name</label>
                   <input
@@ -2129,10 +2225,11 @@ export default function FileList({
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {extractProgress && (
+      {extractProgress && createPortal(
         <div style={{
           position: 'fixed', top: extractProgressPos.y, left: extractProgressPos.x,
           width: '350px', padding: '15px',
@@ -2167,7 +2264,8 @@ export default function FileList({
               return `Time remaining: approx ${Math.ceil(remainingSeconds)}s`;
             })()}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
       <ErrorDialog
         open={errorDialogOpen}

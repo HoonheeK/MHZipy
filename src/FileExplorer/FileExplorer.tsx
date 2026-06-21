@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { dirname, join } from '@tauri-apps/api/path';
 import { mkdir, rename } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
@@ -12,8 +13,8 @@ import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[] };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[] }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   externalPath?: string;
@@ -22,6 +23,7 @@ interface FileExplorerProps {
 }
 
 export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery, externalPath, externalSelect, onNavigate }: FileExplorerProps) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<string>(externalPath || config.defaultPath || "C:");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([externalPath || config.defaultPath || "C:"]));
   const [filesSelected, setFilesSelected] = useState<Set<string>>(new Set());
@@ -30,7 +32,8 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; source?: 'tree' | 'quickAccess' } | null>(null);
   const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'move' } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [sidebarWidth, setSidebarWidth] = useState(config.sidebarWidth || 260);
+  const [sidebarWidth, setSidebarWidth] = useState(config.sidebarWidth !== undefined ? config.sidebarWidth : 260);
+  const [prevSidebarWidth, setPrevSidebarWidth] = useState(config.sidebarWidth || 260);
   const [quickAccessHeight, setQuickAccessHeight] = useState(config.quickAccessHeight || 200);
   const [isResizing, setIsResizing] = useState(false);
   const [isResizingQuickAccess, setIsResizingQuickAccess] = useState(false);
@@ -43,6 +46,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const sidebarWidthRef = useRef(sidebarWidth);
   const quickAccessHeightRef = useRef(quickAccessHeight);
   const quickAccessRef = useRef<HTMLDivElement>(null);
+  const draggedRef = useRef(false);
 
   useEffect(() => { sidebarWidthRef.current = sidebarWidth; }, [sidebarWidth]);
   useEffect(() => { quickAccessHeightRef.current = quickAccessHeight; }, [quickAccessHeight]);
@@ -146,6 +150,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isResizing) {
+        draggedRef.current = true;
         setSidebarWidth(Math.max(150, e.clientX));
       }
       if (isResizingQuickAccess && quickAccessRef.current) {
@@ -636,6 +641,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         canPaste={!!clipboard && clipboard.paths.length > 0}
         onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
+        usePdfWorker={config.usePdfWorker}
       />
     </div>
   );
@@ -665,7 +671,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                 style={{ padding: '0 10px', height: quickAccessHeight, overflowY: 'auto', flexShrink: 0 }}
               >
                 <div style={{ fontSize: '0.8em', fontWeight: 'bold', color: '#666', marginBottom: '5px', marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Quick Access</span>
+                  <span>{t('explorer.quickAccess', { defaultValue: 'Quick Access' })}</span>
                   <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontWeight: 'normal' }} title="Show only Quick Access folders in tree">
                     <input
                       type="checkbox"
@@ -676,7 +682,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                       style={{ marginRight: '4px' }}
                       tabIndex={-1}
                     />
-                    <span style={{ fontSize: '0.9em' }} >Filter Tree</span>
+                    <span style={{ fontSize: '0.9em' }} >{t('explorer.filterTree', { defaultValue: 'Filter Tree' })}</span>
                   </label>
                 </div>
                 {config.quickAccess.map((qaPath, index) => (
@@ -764,7 +770,22 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         </aside>
         <div
           className="mhz-resizer"
-          onMouseDown={() => setIsResizing(true)}
+          onMouseDown={() => {
+            draggedRef.current = false;
+            setIsResizing(true);
+          }}
+          onClick={() => {
+            if (draggedRef.current) return;
+            if (sidebarWidth > 0) {
+              setPrevSidebarWidth(sidebarWidth);
+              setSidebarWidth(0);
+              onSaveConfig({ sidebarWidth: 0 });
+            } else {
+              const newWidth = prevSidebarWidth > 0 ? prevSidebarWidth : 260;
+              setSidebarWidth(newWidth);
+              onSaveConfig({ sidebarWidth: newWidth });
+            }
+          }}
           onDoubleClick={() => {
             setSidebarWidth(0);
             onSaveConfig({ sidebarWidth: 0 });
@@ -799,52 +820,53 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             clipboard={clipboard}
             canPaste={!!clipboard && clipboard.paths.length > 0}
             onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
+            usePdfWorker={config.usePdfWorker}
           />
         </section>
         {contextMenu && (
           <div className="context-menu" style={getMenuPosition()}>
             {contextMenu.source === 'quickAccess' ? (
               <div className="context-menu-item delete" onClick={() => handleRemoveQuickAccess(contextMenu.path)}>
-                <span>Remove from Quick Access</span>
+                <span>{t('contextMenu.removeFromQuickAccess', { defaultValue: 'Remove from Quick Access' })}</span>
               </div>
             ) : (
               <>
                 <div className={`context-menu-item ${!canWriteToSelectedPaths ? 'disabled' : ''}`} onClick={canWriteToSelectedPaths ? () => handleCut(Array.from(selectedPaths)) : undefined} style={{ padding: '2px 10px' }}>
-                  <span>Cut</span> <span className="shortcut">Ctrl+X</span>
+                  <span>{t('contextMenu.cut', { defaultValue: 'Cut' })}</span> <span className="shortcut">Ctrl+X</span>
                 </div>
                 <div className="context-menu-item" onClick={() => handleCopy(Array.from(selectedPaths))} style={{ padding: '2px 10px' }}>
-                  <span>Copy</span> <span className="shortcut">Ctrl+C</span>
+                  <span>{t('contextMenu.copy', { defaultValue: 'Copy' })}</span> <span className="shortcut">Ctrl+C</span>
                 </div>
                 <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handleCreateFolder(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
-                  <span>Create Folder</span>
+                  <span>{t('contextMenu.createFolder', { defaultValue: 'Create Folder' })}</span>
                 </div>
                 {canPasteVisible && (
                   <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handlePaste(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
-                    <span>Paste</span> <span className="shortcut">Ctrl+V</span>
+                    <span>{t('contextMenu.paste', { defaultValue: 'Paste' })}</span> <span className="shortcut">Ctrl+V</span>
                   </div>
                 )}
                 <div className="context-menu-separator"></div>
               <div className="context-menu-item" onClick={() => handleOpenInNewWindow(contextMenu.path, true)} style={{ padding: '2px 10px' }}>
-                <span>Open in New Window</span> <span className="shortcut">Ctrl+Enter</span>
+                <span>{t('contextMenu.openInNewWindow', { defaultValue: 'Open in New Window' })}</span> <span className="shortcut">Ctrl+Enter</span>
                 </div>
                 <div className="context-menu-item" onClick={() => handleOpenInExplorer(contextMenu.path, true)} style={{ padding: '2px 10px' }}>
-                  Open in File Explorer
+                  {t('contextMenu.openInExplorer', { defaultValue: 'Open in File Explorer' })}
                 </div>
                 <div className="context-menu-separator"></div>
                 <div className={`context-menu-item delete ${!canWriteToSelectedPaths ? 'disabled' : ''}`} onClick={canWriteToSelectedPaths ? () => handleDelete(Array.from(selectedPaths)) : undefined} style={{ padding: '2px 10px' }}>
-                  <span>Delete</span> <span className="shortcut">Del</span>
+                  <span>{t('contextMenu.delete', { defaultValue: 'Delete' })}</span> <span className="shortcut">Del</span>
                 </div>
                 <div className="context-menu-separator"></div>
                 {selectedPaths.size === 1 && (
-                  <div className="context-menu-item" onClick={() => handleSetDefault(contextMenu.path)} style={{ padding: '2px 10px' }}>Set as Default Folder</div>
+                  <div className="context-menu-item" onClick={() => handleSetDefault(contextMenu.path)} style={{ padding: '2px 10px' }}>{t('contextMenu.setAsDefaultFolder', { defaultValue: 'Set as Default Folder' })}</div>
                 )}
                 <div className="context-menu-item" onClick={() => Array.from(selectedPaths).forEach(p => handleAddToQuickAccess(p))} style={{ padding: '2px 10px' }}>
-                  Add to Quick Access
+                  {t('contextMenu.addToQuickAccess', { defaultValue: 'Add to Quick Access' })}
                 </div>
                 <div className="context-menu-separator"></div>
-                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')} style={{ padding: '2px 10px' }}>Set as Editable</div>
-                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'readonly')} style={{ padding: '2px 10px' }}>Set as Read-only</div>
-                <div className="context-menu-item" onClick={() => handleClearPermission(contextMenu.path)} style={{ padding: '2px 10px' }}>Clear Permission</div>
+                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')} style={{ padding: '2px 10px' }}>{t('contextMenu.setAsEditable', { defaultValue: 'Set as Editable' })}</div>
+                <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'readonly')} style={{ padding: '2px 10px' }}>{t('contextMenu.setAsReadOnly', { defaultValue: 'Set as Read-only' })}</div>
+                <div className="context-menu-item" onClick={() => handleClearPermission(contextMenu.path)} style={{ padding: '2px 10px' }}>{t('contextMenu.clearPermission', { defaultValue: 'Clear Permission' })}</div>
               </>
             )}
           </div>
