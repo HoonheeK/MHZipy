@@ -15,13 +15,13 @@ const AES_SECRET: &[u8; 32] = b"MHZipy_Super_Secret_Key_12345678";
 
 // Temporary placeholder key - you should replace this with a real key
 pub const PUBLIC_KEY_PEM: &str = r#"-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7pkfcXhvpLOu97ZNnadO
-6276993x7A015huTPSys+7y88cI7+VsaC0XX+xKzbn0lw1F0AArrgs2RoDUC2vuE
-ObJ+QoYO/JGwdnN5KfiFR+Xi6SSCntLQx7rvK4zjpQMGXdRcLqLk682m+lCTrqGW
-PEmUMreBe856Ka7MUJFA3essWco7HZcU9UrTdkFwSmO1auokZVVBlZiIlauMNAl3
-VmpbpoyU9XItFT8CLIHe+j4I2uAjwD0uqUK258hkyO3zwYbfC+1DD8gRjPgiKpfy
-WR6df612mmDqqH7tsKL191ZB0jUTjkLexuxS+HqyPu92J4qoxqEtd5o8uW2oQF1V
-AQIDAQAB
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2AcWNl3U6sDk+zwOKNQF
+e0vK4hy0IDylcRKhKisqMEjoV4p4Jp5SYq13nv+3l8zF0LTcA8tD3TMfwdjWeyTL
+lp29lTqzPyxvm1rZNP+jgP4dHRiiHWymfSyEianGai5DTMMJMjxnFJ3c+7snU7y0
+NiBoXXItI2jrPKudctSwTEXdDgeugzS+Kbu7yDqytllYEajSHTFjQtRCagp+qqod
+7UjajnW79s5vErCL2pPiAO+MH68/JzMZ++kFfcksYkCNCU3/B53y35ySt8fvqVOP
+7wBLZ/OB2bLEZGgecPbXqjbWK/sWuSgLNga/2LpZHyHnJJcH+3EiJOLivGsjoWFv
+zQIDAQAB
 -----END PUBLIC KEY-----"#;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -196,9 +196,22 @@ pub fn verify_license_code(code: &str, current_device_id: &str) -> Result<Licens
     Ok(payload)
 }
 
+#[allow(unreachable_code, unused_variables)]
 pub fn get_license_status(app: &AppHandle) -> LicenseInfo {
-    let config = load_config(app);
     let device_id = get_device_id();
+
+    // --- TEMPORARY PERMANENT LICENSE BYPASS ---
+    // 임시 영구 라이센스 모드입니다. 
+    // 언제든지 원래의 라이센스 검증 로직으로 복구하려면 아래의 return 문을 주석 처리하거나 삭제하세요.
+    return LicenseInfo {
+        status: LicenseStatusType::Activated {
+            expiry_date: 4102444800, // 2100-01-01 00:00:00 UTC (충분히 먼 미래의 날짜)
+        },
+        device_id,
+    };
+    // ------------------------------------------
+
+    let config = load_config(app);
     let now = Utc::now();
 
     if let Some(key) = &config.license_key {
