@@ -54,9 +54,31 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
 
   useEffect(() => {
     if (isSelected && nodeRef.current) {
-      nodeRef.current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      const timer = setTimeout(() => {
+        if (!nodeRef.current) return;
+        
+        // 현재 포커스된 요소가 이 경로를 가진 폴더 노드인 경우 (마우스 클릭 또는 방향키 이동)
+        // 브라우저가 포커스 이동 시 자동으로 스크롤하므로 수동 스크롤을 생략합니다.
+        const activeEl = document.activeElement as HTMLElement;
+        if (activeEl && activeEl.classList.contains('folder-tree-node') && activeEl.dataset.path === path) {
+          return;
+        }
+
+        // 동일한 경로를 가진 모든 노드를 찾습니다 (예: OneDrive가 루트 및 C드라이브 하위에 모두 존재하는 경우)
+        const allNodes = document.querySelectorAll('.folder-tree-node');
+        const nodesForPath = Array.from(allNodes).filter(
+          (node) => (node as HTMLElement).dataset.path === path
+        );
+        
+        // 화면이 위아래로 튀는 현상을 방지하기 위해 중복된 노드 중 첫 번째 노드만 스크롤합니다.
+        if (nodesForPath.length > 0 && nodesForPath[0] === nodeRef.current) {
+          nodeRef.current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+      }, 50);
+
+      return () => clearTimeout(timer);
     }
-  }, [isSelected]);
+  }, [isSelected, path]);
 
   // activePath가 변경되면 해당 경로의 부모 폴더들을 자동으로 펼침
   useEffect(() => {
@@ -98,9 +120,15 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
               });
 
               if (isMounted) {
-                const finalDrives = allowedPaths
-                  ? validDrives.filter((drive) => allowedPaths.some((allowed) => isAncestorOf(drive.path, allowed) || isAncestorOf(allowed, drive.path)))
-                  : validDrives;
+                let finalDrives = validDrives;
+                if (allowedPaths && allowedPaths.length > 0) {
+                  // 필터링이 활성화된 경우 상위 조상 폴더(드라이브 등)를 거치지 않고, 
+                  // 선택된 폴더들을 직접 'My PC'의 직속 하위로 렌더링합니다.
+                  finalDrives = allowedPaths.map(p => ({
+                    name: p.replace(/[/\\]$/, '').split(/[/\\]/).pop() || p,
+                    path: p
+                  }));
+                }
                 setSubFolders(finalDrives);
               }
             } catch (e) {

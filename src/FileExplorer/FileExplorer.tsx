@@ -738,33 +738,42 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                 isRoot
               />
             ) : (
-              config.quickAccess.map((qaPath) => (
-                <FolderTree
-                  key={qaPath}
-                  path={qaPath}
-                  name={qaPath.split(/[/\\]/).filter(Boolean).pop() || qaPath}
-                  onSelect={handleTreeSelect}
-                  activePath={selected}
-                  selectedPaths={selectedPaths}
-                  expandedPaths={expandedPaths}
-                  onToggleExpand={handleToggleExpand}
-                  onMove={handleMove}
-                  onContextMenu={handleTreeContextMenu}
-                  refreshTrigger={refreshTrigger}
-                  editableFolders={config.editableFolders}
-                  readonlyFolders={config.readonlyFolders}
-                  allowedPaths={activeAllowedPaths}
-                  clipboard={clipboard}
-                  renamingPath={renamingTreePath}
-                  renameText={renameTreeText}
-                  onRenameTextChange={setRenameTreeText}
-                  onStartRename={handleStartTreeRename}
-                  onFinishRename={handleFinishTreeRename}
-                  onCancelRename={handleCancelTreeRename}
-                  showMessage={showMessage}
-                  isRoot
-                />
-              ))
+              config.quickAccess
+                .filter(qaPath => {
+                  if (!selected.startsWith(qaPath)) return false;
+                  if (selected.length === qaPath.length) return true;
+                  const sep = selected[qaPath.length];
+                  return sep === '\\' || sep === '/';
+                })
+                .sort((a, b) => b.length - a.length)
+                .slice(0, 1)
+                .map((qaPath) => (
+                  <FolderTree
+                    key={qaPath}
+                    path={qaPath}
+                    name={qaPath.split(/[/\\]/).filter(Boolean).pop() || qaPath}
+                    onSelect={handleTreeSelect}
+                    activePath={selected}
+                    selectedPaths={selectedPaths}
+                    expandedPaths={expandedPaths}
+                    onToggleExpand={handleToggleExpand}
+                    onMove={handleMove}
+                    onContextMenu={handleTreeContextMenu}
+                    refreshTrigger={refreshTrigger}
+                    editableFolders={config.editableFolders}
+                    readonlyFolders={config.readonlyFolders}
+                    allowedPaths={activeAllowedPaths}
+                    clipboard={clipboard}
+                    renamingPath={renamingTreePath}
+                    renameText={renameTreeText}
+                    onRenameTextChange={setRenameTreeText}
+                    onStartRename={handleStartTreeRename}
+                    onFinishRename={handleFinishTreeRename}
+                    onCancelRename={handleCancelTreeRename}
+                    showMessage={showMessage}
+                    isRoot
+                  />
+                ))
             )}
           </div>
         </aside>
