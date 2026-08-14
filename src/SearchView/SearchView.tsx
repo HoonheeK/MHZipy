@@ -449,7 +449,7 @@ export default function SearchView({
   const handleFileListFocus = useCallback(() => {}, []);
 
   return (
-    <div style={{ display: 'flex', height: '100%', width: '100%', flexDirection: 'column', backgroundColor: '#f8f9fa' }}>
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, width: '100%', flexDirection: 'column', backgroundColor: '#f8f9fa' }}>
       {/* Header & Search Bar Area */}
       <div style={{ padding: '16px 20px', borderBottom: '1px solid #e0e0e0', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
         

@@ -269,7 +269,7 @@
                 return;
             }
 
-            if (!fileUrl && !storageId) {
+            if (!fileUrl && !storageId && !window.__PDF_BASE64__) {
                 loadingEl.textContent = 'PDF file is not specified.';
                 return;
             }
@@ -277,7 +277,16 @@
             let loadingTask;
             try {
                 let data;
-                if (storageId) {
+                if (window.__PDF_BASE64__) {
+                    // 0. Tauri에서 주입한 base64 데이터 사용 (빠르고 CORS 문제 없음)
+                    const binaryString = atob(window.__PDF_BASE64__);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    data = bytes.buffer;
+                } else if (storageId) {
                     // 1. IndexedDB에서 데이터 로드 (가장 안정적)
                     data = await loadFromIndexedDB(storageId);
                 } else {
@@ -289,11 +298,20 @@
                     data = await response.arrayBuffer();
                 }
 
-                loadingTask = pdfjsLib.getDocument({
-                    data: data,
+                const config = {
                     cMapUrl: `/lib/pdfjs/cmaps/`,
                     cMapPacked: true,
-                });
+                };
+                if (data) {
+                    config.data = data;
+                } else if (fileUrl) {
+                    config.url = fileUrl;
+                    if (fileUrl.startsWith('pdf-data:')) {
+                        config.disableRange = true;
+                        config.disableStream = true;
+                    }
+                }
+                loadingTask = pdfjsLib.getDocument(config);
             } catch (e) {
                 console.warn('Data load failed, falling back to direct URL access:', e);
                 // 3. 실패 시 URL로 직접 로드 시도 (폴백)
@@ -1013,13 +1031,20 @@
         document.getElementById('zoom-in').onclick = () => updateZoom(0.25);
         document.getElementById('zoom-out').onclick = () => updateZoom(-0.25);
 
-        // URL 파라미터에서 데이터 읽기
+        // URL 파라미터 또는 전역 변수에서 데이터 읽기
         const params = new URLSearchParams(window.location.search);
         const fileUrl = params.get('file');
         const storageId = params.get('storageId');
-        const title = params.get('title');
+        const pdfPath = params.get('pdfPath') || window.__PDF_PATH__;
+        const title = params.get('title') || document.title;
 
-        if (fileUrl || storageId) {
+        if (window.__PDF_BASE64__) {
+            renderPdf(null, title, null);
+        } else if (pdfPath) {
+            const isWindows = navigator.userAgent.includes('Windows');
+            const customUrl = (isWindows ? "http://pdf-data.localhost/" : "pdf-data://localhost/") + encodeURIComponent(pdfPath);
+            renderPdf(customUrl, title, null);
+        } else if (fileUrl || storageId) {
             renderPdf(fileUrl, title, storageId);
         }
 

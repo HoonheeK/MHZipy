@@ -796,10 +796,85 @@ fn activate_license(app: tauri::AppHandle, email: String, code: String) -> Resul
     license::activate(&app, &email, &code)
 }
 
+
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .register_uri_scheme_protocol("pdf-data", |_app, request| {
+            let uri = request.uri().to_string();
+            let path_str = uri
+                .replace("http://pdf-data.localhost/", "")
+                .replace("https://pdf-data.localhost/", "")
+                .replace("pdf-data://localhost/", "");
+            let path_str = urlencoding::decode(&path_str).unwrap_or_default().into_owned();
+            
+            let buf = std::fs::read(&path_str).unwrap_or_default();
+            
+            tauri::http::Response::builder()
+                .header("Access-Control-Allow-Origin", "*")
+                .header("Content-Type", "application/pdf")
+                .body(buf)
+                .unwrap()
+        })
         .setup(|app| {
+            // CLI 인자 파싱
+            let args: Vec<String> = std::env::args().collect();
+            let mut is_pdf_viewer = false;
+            let mut pdf_path = String::new();
+            let mut pdf_title = String::new();
+
+            for i in 0..args.len() {
+                if args[i] == "--pdf-viewer" && i + 1 < args.len() {
+                    is_pdf_viewer = true;
+                    pdf_path = args[i + 1].clone();
+                } else if args[i] == "--pdf-title" && i + 1 < args.len() {
+                    pdf_title = args[i + 1].clone();
+                }
+            }
+
+            if is_pdf_viewer {
+                let title = if pdf_title.is_empty() {
+                    std::path::Path::new(&pdf_path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    pdf_title
+                };
+
+                let init_script = format!("window.__PDF_PATH__ = '{}';", pdf_path.replace("\\", "\\\\").replace("'", "\\'"));
+                let window_label = "pdf-viewer-main".to_string();
+                
+                let pdf_window = tauri::WebviewWindowBuilder::new(
+                    app,
+                    window_label,
+                    tauri::WebviewUrl::App(std::path::PathBuf::from("viewer.html"))
+                )
+                .initialization_script(&init_script)
+                .title(&title)
+                .inner_size(1000.0, 800.0)
+                .build()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+                pdf_window.on_window_event(|event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        std::process::exit(0);
+                    }
+                });
+
+                if let Some(main_window) = app.get_webview_window("main") {
+                    let _ = main_window.hide();
+                }
+                
+                return Ok(());
+            } else {
+                if let Some(main_window) = app.get_webview_window("main") {
+                    let _ = main_window.show();
+                }
+            }
+
             let state = AppState {
                 mft: Arc::new(MftIndex::new("C:".to_string())),
             };

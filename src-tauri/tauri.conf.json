@@ -5,7 +5,7 @@
   "identifier": "com.marho-soft.mhzipy",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -15,7 +15,8 @@
         "title": "mhzipy",
         "width": 1280,
         "height": 960,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "visible": false
       }
     ],
     "security": {

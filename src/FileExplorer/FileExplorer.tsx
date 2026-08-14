@@ -618,7 +618,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   };
 
   const searchViewElement = (
-    <div style={{ display: currentView === 'search' ? 'flex' : 'none', height: '100%', width: '100%', flexDirection: 'column' }}>
+    <div style={{ display: currentView === 'search' ? 'flex' : 'none', flex: 1, minHeight: 0, width: '100%', flexDirection: 'column' }}>
       <SearchView
         searchQuery={searchQuery || ''}
         onNavigate={(path) => {
