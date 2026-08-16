@@ -43,6 +43,11 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   const [licenseEmail, setLicenseEmail] = useState<string>(initialLicenseEmail || '');
   const [licenseCode, setLicenseCode] = useState<string>(initialLicenseCode || '');
 
+  // Dragging state
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
   // Helper to get basename from path
   const getBaseName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() || p;
 
@@ -58,8 +63,45 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       setUsePdfWorker(initialUsePdfWorker !== false);
       setLicenseEmail(initialLicenseEmail || '');
       setLicenseCode(initialLicenseCode || '');
+      setPosition({ x: 0, y: 0 });
     }
   }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDragging) {
+        setPosition({
+          x: e.clientX - dragStart.x,
+          y: e.clientY - dragStart.y
+        });
+      }
+    };
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragStart]);
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Prevent dragging if clicking on the close button
+    if ((e.target as HTMLElement).tagName.toLowerCase() === 'button') {
+      return;
+    }
+    setIsDragging(true);
+    setDragStart({
+      x: e.clientX - position.x,
+      y: e.clientY - position.y
+    });
+  };
 
   const handleBrowse = async () => {
     try {
@@ -149,7 +191,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   };
 
   const handleToggleColumn = (key: string) => {
-    setColumnSettings(prev => prev.map(col => 
+    setColumnSettings(prev => prev.map(col =>
       col.key === key ? { ...col, visible: !col.visible } : col
     ));
   };
@@ -189,25 +231,32 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
 
   return (
     <div className="preference-overlay">
-      <div className="preference-modal">
-        <div className="preference-header">
-          <h3>{t('preferences.title')}</h3>
+      <div
+        className="preference-modal"
+        style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+      >
+        <div
+          className="preference-header"
+          onMouseDown={handleMouseDown}
+          style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+        >
+          <h3 style={{ pointerEvents: 'none' }}>{t('preferences.title')}</h3>
           <button className="close-btn" onClick={onClose}>&times;</button>
         </div>
         <div className="preference-tabs">
-          <button 
+          <button
             className={`preference-tab ${activeTab === 'General' ? 'active' : ''}`}
             onClick={() => setActiveTab('General')}
           >
             {t('preferences.general')}
           </button>
-          <button 
+          <button
             className={`preference-tab ${activeTab === 'Folder' ? 'active' : ''}`}
             onClick={() => setActiveTab('Folder')}
           >
             {t('preferences.folder')}
           </button>
-          <button 
+          <button
             className={`preference-tab ${activeTab === 'License' ? 'active' : ''}`}
             onClick={() => setActiveTab('License')}
           >
@@ -220,8 +269,8 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
               <div className="preference-item">
                 <span className="label-text">{t('preferences.language')}</span>
                 <div className="input-group">
-                  <select 
-                    value={language} 
+                  <select
+                    value={language}
                     onChange={(e) => setLanguage(e.target.value)}
                     style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', color: '#64748b', fontSize: '0.9rem' }}
                   >
@@ -255,8 +304,8 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 </div>
               </div>
               <div className="preference-item" style={{ flexDirection: 'row', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   id="pdfWorkerCheckbox"
                   checked={usePdfWorker}
                   onChange={(e) => setUsePdfWorker(e.target.checked)}
@@ -272,9 +321,9 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <div className="column-settings-list" style={{ marginTop: '10px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
                   {columnSettings.map((col, index) => (
                     <div key={col.key} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: index === columnSettings.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={col.visible} 
+                      <input
+                        type="checkbox"
+                        checked={col.visible}
                         onChange={() => handleToggleColumn(col.key)}
                         style={{ marginRight: '12px' }}
                       />
@@ -318,8 +367,8 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                   {typeof licenseInfo?.status === 'object' && 'Trial' in licenseInfo.status && <span style={{ color: '#eab308' }}>Trial Mode ({licenseInfo.status.Trial.days_left} days left)</span>}
                   {typeof licenseInfo?.status === 'object' && 'Activated' in licenseInfo.status && (
                     <span style={{ color: '#22c55e' }}>
-                      Activated {licenseInfo.status.Activated.expiry_date >= 4000000000 
-                        ? '(Permanent)' 
+                      Activated {licenseInfo.status.Activated.expiry_date >= 4000000000
+                        ? '(Permanent)'
                         : `(Expires: ${new Date(licenseInfo.status.Activated.expiry_date * 1000).toLocaleDateString()})`}
                     </span>
                   )}
@@ -341,15 +390,23 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <span className="label-text">{t('preferences.email', 'Email Address')}</span>
                 <div className="input-group">
                   <input type="email" value={licenseEmail} onChange={(e) => setLicenseEmail(e.target.value)} placeholder="name@example.com" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem' }} />
-                  <button 
-                    className="btn-primary" 
-                    onClick={() => {
-                       if (!licenseEmail) { alert('Please enter your email first.'); return; }
-                       if (window.confirm(`Your Device ID (${licenseInfo?.device_id}) and Email will be sent to the purchase page. Continue?`)) {
-                           import('@tauri-apps/plugin-shell').then(({ open }) => {
-                               open(`https://www.marh-sw.com/?email=${encodeURIComponent(licenseEmail)}&deviceId=${encodeURIComponent(licenseInfo?.device_id || '')}`);
-                           });
-                       }
+                  <button
+                    className="btn-primary"
+                    onClick={async () => {
+                      if (!licenseEmail) {
+                        alert(t('Please enter your email address first.'));
+                        return;
+                      }
+                      if (window.confirm(t('You will be redirected to the purchase page. Continue?'))) {
+                        try {
+                          const webAppUrl = await import('@tauri-apps/api/core').then(m => m.invoke<string>('get_web_app_url'));
+                          import('@tauri-apps/plugin-shell').then(({ open }) => {
+                            open(`${webAppUrl}?email=${encodeURIComponent(licenseEmail)}&deviceId=${encodeURIComponent(licenseInfo?.device_id || '')}`);
+                          });
+                        } catch (e) {
+                          console.error("Failed to get web app url", e);
+                        }
+                      }
                     }}
                   >Buy License</button>
                 </div>

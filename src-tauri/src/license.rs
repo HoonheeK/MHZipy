@@ -4,7 +4,6 @@ use aes_gcm::{
 };
 use chrono::{DateTime, Duration, Utc};
 use machine_uid::get as get_machine_uid;
-use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Sign, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::AppHandle;
@@ -13,16 +12,7 @@ use winreg::RegKey;
 
 const AES_SECRET: &[u8; 32] = b"MHZipy_Super_Secret_Key_12345678";
 
-// Temporary placeholder key - you should replace this with a real key
-pub const PUBLIC_KEY_PEM: &str = r#"-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2AcWNl3U6sDk+zwOKNQF
-e0vK4hy0IDylcRKhKisqMEjoV4p4Jp5SYq13nv+3l8zF0LTcA8tD3TMfwdjWeyTL
-lp29lTqzPyxvm1rZNP+jgP4dHRiiHWymfSyEianGai5DTMMJMjxnFJ3c+7snU7y0
-NiBoXXItI2jrPKudctSwTEXdDgeugzS+Kbu7yDqytllYEajSHTFjQtRCagp+qqod
-7UjajnW79s5vErCL2pPiAO+MH68/JzMZ++kFfcksYkCNCU3/B53y35ySt8fvqVOP
-7wBLZ/OB2bLEZGgecPbXqjbWK/sWuSgLNga/2LpZHyHnJJcH+3EiJOLivGsjoWFv
-zQIDAQAB
------END PUBLIC KEY-----"#;
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum LicenseStatusType {
@@ -41,6 +31,8 @@ pub struct LicenseInfo {
 pub struct LicenseConfig {
     pub first_run_date: i64,
     pub license_key: Option<String>,
+    #[serde(default)]
+    pub expiry_date: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,6 +109,7 @@ pub fn load_config(_app: &AppHandle) -> LicenseConfig {
     let config = LicenseConfig {
         first_run_date: Utc::now().timestamp(),
         license_key: None,
+        expiry_date: None,
     };
     save_config(_app, &config);
     config
@@ -134,105 +127,78 @@ pub fn save_config(_app: &AppHandle, config: &LicenseConfig) {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct GasValidationResponse {
+    valid: bool,
+    reason: Option<String>,
+    #[serde(rename = "expiryDate")]
+    expiry_date: Option<String>,
+}
+
+pub const WEB_APP_URL: &str = "https://script.google.com/macros/s/AKfycbw0cCdkJF0W6O0IhhHtm4RMmadyVHKRLF-g-tDkUAMAuasns1idpcPco9bGPNq2DwS9SQ/exec";
+
 pub fn verify_license_code(code: &str, current_device_id: &str) -> Result<LicensePayload, String> {
-    println!("[License] Verifying license code...");
-    let parts: Vec<&str> = code.split('.').collect();
-    if parts.len() != 2 {
-        println!("[License Error] Invalid format: missing '.' separator");
-        return Err("Invalid license code format".to_string());
-    }
-
-    use base64::{engine::general_purpose::STANDARD as b64, Engine as _};
-    let payload_bytes = b64.decode(parts[0]).map_err(|e| {
-        println!("[License Error] Failed to decode payload base64: {:?}", e);
-        "Failed to decode payload".to_string()
-    })?;
-    let signature_bytes = b64.decode(parts[1]).map_err(|e| {
-        println!("[License Error] Failed to decode signature base64: {:?}", e);
-        "Failed to decode signature".to_string()
-    })?;
-
-    let payload_str = String::from_utf8(payload_bytes.clone()).map_err(|e| {
-        println!("[License Error] Invalid UTF-8 in payload: {:?}", e);
-        "Invalid UTF-8 in payload".to_string()
-    })?;
-
-    let payload: LicensePayload = serde_json::from_str(&payload_str).map_err(|e| {
-        println!(
-            "[License Error] Failed to parse JSON payload: {:?} / String: {}",
-            e, payload_str
-        );
-        "Failed to parse payload".to_string()
-    })?;
-
-    if payload.device_id != current_device_id {
-        println!(
-            "[License Error] Device ID mismatch. Expected: '{}', Got: '{}'",
-            current_device_id, payload.device_id
-        );
-        return Err("License is registered to a different device".to_string());
-    }
-
-    let public_key = RsaPublicKey::from_public_key_pem(PUBLIC_KEY_PEM).map_err(|e| {
-        println!(
-            "[License Error] Failed to load public key from PEM: {:?}",
-            e
-        );
-        "Failed to load public key".to_string()
-    })?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(&payload_bytes);
-    let hash = hasher.finalize();
-
-    public_key
-        .verify(Pkcs1v15Sign::new::<Sha256>(), &hash, &signature_bytes)
+    println!("[License] Verifying license code via Google Apps Script...");
+    
+    let url = format!(
+        "{}?action=validate&code={}&deviceId={}",
+        WEB_APP_URL,
+        urlencoding::encode(code),
+        urlencoding::encode(current_device_id)
+    );
+    
+    let client = reqwest::blocking::Client::new();
+    let res = client.get(&url)
+        .send()
         .map_err(|e| {
-            println!("[License Error] RSA Signature verification failed: {:?}", e);
-            "Invalid license signature".to_string()
+            println!("[License Error] Network error: {:?}", e);
+            format!("Network error: {}", e)
         })?;
-
-    println!("[License] Verification successful!");
-    Ok(payload)
+        
+    let data: GasValidationResponse = res.json().map_err(|e| {
+        println!("[License Error] Invalid response: {:?}", e);
+        format!("Invalid response format: {}", e)
+    })?;
+    
+    if !data.valid {
+        return Err(data.reason.unwrap_or_else(|| "Invalid license code".to_string()));
+    }
+    
+    if let Some(ref date_str) = data.expiry_date {
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
+            println!("[License] Verification successful! Expiry: {}", dt);
+            return Ok(LicensePayload {
+                email: "server-validated".to_string(), // GAS script doesn't return email, so we skip checking it.
+                device_id: current_device_id.to_string(),
+                expires_at: dt.timestamp(),
+            });
+        }
+    }
+    
+    Err("Failed to parse expiry date from server".to_string())
 }
 
 #[allow(unreachable_code, unused_variables)]
 pub fn get_license_status(app: &AppHandle) -> LicenseInfo {
     let device_id = get_device_id();
 
-    // --- TEMPORARY PERMANENT LICENSE BYPASS ---
-    // 임시 영구 라이센스 모드입니다. 
-    // 언제든지 원래의 라이센스 검증 로직으로 복구하려면 아래의 return 문을 주석 처리하거나 삭제하세요.
-    return LicenseInfo {
-        status: LicenseStatusType::Activated {
-            expiry_date: 4102444800, // 2100-01-01 00:00:00 UTC (충분히 먼 미래의 날짜)
-        },
-        device_id,
-    };
-    // ------------------------------------------
-
     let config = load_config(app);
     let now = Utc::now();
 
-    if let Some(key) = &config.license_key {
-        if let Ok(payload) = verify_license_code(key, &device_id) {
-            let expiry =
-                DateTime::from_timestamp(payload.expires_at, 0).unwrap_or(DateTime::<Utc>::MIN_UTC);
-            if now < expiry {
-                return LicenseInfo {
-                    status: LicenseStatusType::Activated {
-                        expiry_date: payload.expires_at,
-                    },
-                    device_id,
-                };
-            }
-            // If expired, fall back to trial logic or just return expired.
-            // A purchased license implies trial is over anyway if it expired.
+    if let Some(expiry_date) = config.expiry_date {
+        let expiry = DateTime::from_timestamp(expiry_date, 0).unwrap_or(DateTime::<Utc>::MIN_UTC);
+        if now < expiry {
             return LicenseInfo {
-                status: LicenseStatusType::Expired,
+                status: LicenseStatusType::Activated {
+                    expiry_date,
+                },
                 device_id,
             };
         }
+        return LicenseInfo {
+            status: LicenseStatusType::Expired,
+            device_id,
+        };
     }
 
     let first_run = DateTime::from_timestamp(config.first_run_date, 0).unwrap_or(now);
@@ -252,13 +218,12 @@ pub fn get_license_status(app: &AppHandle) -> LicenseInfo {
     }
 }
 
-pub fn activate(app: &AppHandle, email: &str, code: &str) -> Result<LicenseInfo, String> {
+pub fn activate(app: &AppHandle, _email: &str, code: &str) -> Result<LicenseInfo, String> {
     let device_id = get_device_id();
     let payload = verify_license_code(code, &device_id)?;
 
-    if payload.email.to_lowercase() != email.to_lowercase() {
-        return Err("Email does not match the license".to_string());
-    }
+    // Removed email check since Google Apps Script validation doesn't return the email.
+    // The device_id verification guarantees the license is for this computer.
 
     if Utc::now().timestamp() >= payload.expires_at {
         return Err("This license has already expired".to_string());
@@ -266,6 +231,7 @@ pub fn activate(app: &AppHandle, email: &str, code: &str) -> Result<LicenseInfo,
 
     let mut config = load_config(app);
     config.license_key = Some(code.to_string());
+    config.expiry_date = Some(payload.expires_at);
     save_config(app, &config);
 
     Ok(get_license_status(app))

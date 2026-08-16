@@ -796,7 +796,10 @@ fn activate_license(app: tauri::AppHandle, email: String, code: String) -> Resul
     license::activate(&app, &email, &code)
 }
 
-
+#[tauri::command]
+fn get_web_app_url() -> String {
+    license::WEB_APP_URL.to_string()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -934,7 +937,8 @@ pub fn run() {
             open_in_explorer,
             get_files_from_clipboard,
             get_license_info,
-            activate_license
+            activate_license,
+            get_web_app_url
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

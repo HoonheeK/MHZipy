@@ -73,7 +73,7 @@ function App() {
 
         if (pathParam) {
 
-          setCurrentView('folder'); 
+          setCurrentView('folder');
           setRequestedPath(pathParam);
           if (selectParam) {
             setRequestedSelect(selectParam);
@@ -275,13 +275,13 @@ function App() {
         }}
         licenseInfo={licenseInfo}
         onActivateLicense={async (email, code) => {
-           try {
-             const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
-             setLicenseInfo(newInfo);
-             alert('License activated successfully!');
-           } catch (err) {
-             alert('Failed to activate: ' + err);
-           }
+          try {
+            const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
+            setLicenseInfo(newInfo);
+            alert('License activated successfully!');
+          } catch (err) {
+            alert('Failed to activate: ' + err);
+          }
         }}
       />
 
@@ -293,55 +293,56 @@ function App() {
           </p>
           <div style={{ width: '100%', maxWidth: '400px', backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
             <div style={{ marginBottom: '15px' }}>
-               <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Device ID (Copy to purchase)</label>
-               <div style={{ display: 'flex', gap: '8px' }}>
-                  <input type="text" value={licenseInfo.device_id} readOnly style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
-                  <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(licenseInfo.device_id)}>Copy</button>
-               </div>
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Device ID (Copy to purchase)</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input type="text" value={licenseInfo.device_id} readOnly style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
+                <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(licenseInfo.device_id)}>Copy</button>
+              </div>
             </div>
             <div style={{ marginBottom: '20px' }}>
-               <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Email Address</label>
-               <input type="email" id="blockingEmail" defaultValue={config.licenseEmail || ''} placeholder="name@example.com" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc' }} />
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Email Address</label>
+              <input type="email" id="blockingEmail" defaultValue={config.licenseEmail || ''} placeholder="name@example.com" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc' }} />
             </div>
-            <button 
-              className="btn-primary" 
+            <button
+              className="btn-primary"
               style={{ width: '100%', padding: '12px', fontSize: '1rem', marginBottom: '20px' }}
               onClick={() => {
-                 const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
-                 if (!email) { alert('Please enter your email.'); return; }
-                 import('@tauri-apps/plugin-shell').then(({ open }) => {
-                     open(`https://www.marh-sw.com/?email=${encodeURIComponent(email)}&deviceId=${encodeURIComponent(licenseInfo.device_id)}`);
-                 });
+                const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
+                if (!email) { alert('Please enter your email.'); return; }
+                import('@tauri-apps/plugin-shell').then(async ({ open }) => {
+                  const webAppUrl = await import('@tauri-apps/api/core').then(m => m.invoke<string>('get_web_app_url'));
+                  open(`${webAppUrl}?email=${encodeURIComponent(email)}&deviceId=${encodeURIComponent(licenseInfo.device_id)}`);
+                });
               }}
             >Buy License</button>
 
             <hr style={{ borderColor: '#334155', margin: '20px 0' }} />
 
             <div style={{ marginBottom: '15px' }}>
-               <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Have a license code?</label>
-               <input type="text" id="blockingCode" defaultValue={config.licenseCode || ''} placeholder="Enter license code" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
+              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Have a license code?</label>
+              <input type="text" id="blockingCode" defaultValue={config.licenseCode || ''} placeholder="Enter license code" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
             </div>
-            <button 
-              className="btn-secondary" 
+            <button
+              className="btn-secondary"
               style={{ width: '100%', padding: '12px', fontSize: '1rem' }}
               onClick={async () => {
-                 const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
-                 const code = (document.getElementById('blockingCode') as HTMLInputElement).value;
-                 if (!email || !code) { alert('Please enter both email and code.'); return; }
-                 try {
-                   const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
-                   setLicenseInfo(newInfo);
-                   alert('License activated successfully!');
-                   
-                   // Update config with the new license data
-                   saveConfig({
-                     ...config,
-                     licenseEmail: email,
-                     licenseCode: code,
-                   });
-                 } catch (err) {
-                   alert('Failed to activate: ' + err);
-                 }
+                const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
+                const code = (document.getElementById('blockingCode') as HTMLInputElement).value;
+                if (!email || !code) { alert('Please enter both email and code.'); return; }
+                try {
+                  const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
+                  setLicenseInfo(newInfo);
+                  alert('License activated successfully!');
+
+                  // Update config with the new license data
+                  saveConfig({
+                    ...config,
+                    licenseEmail: email,
+                    licenseCode: code,
+                  });
+                } catch (err) {
+                  alert('Failed to activate: ' + err);
+                }
               }}
             >Activate</button>
           </div>
