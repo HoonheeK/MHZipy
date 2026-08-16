@@ -16,6 +16,8 @@
     "opener:default",
     "shell:allow-open",
     "core:webview:allow-create-webview-window",
+    "updater:default",
+    "process:default",
     {
       "identifier": "fs:allow-read-dir",
       "allow": [

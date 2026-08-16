@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { checkForUpdates } from '../utils/updater';
 import { open } from '@tauri-apps/plugin-dialog';
 import './PreferenceDialog.css';
 
@@ -50,6 +51,9 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
 
   // Helper to get basename from path
   const getBaseName = (p: string) => p.split(/[/\\]/).filter(Boolean).pop() || p;
+
+  const [alertMessage, setAlertMessage] = useState<{title: string, message: string} | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -339,6 +343,27 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                   {t('preferences.columnsDesc')}
                 </p>
               </div>
+              
+              <div className="preference-item" style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                <span className="label-text">App Updates</span>
+                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '8px' }}>
+                  Check if a newer version of MHZipy is available.
+                </p>
+                <button 
+                  className="btn-primary" 
+                  style={{ alignSelf: 'flex-start' }}
+                  onClick={(e) => { 
+                    e.preventDefault(); 
+                    checkForUpdates(
+                      true,
+                      (title, message) => setAlertMessage({title, message}),
+                      (title, message, onYes) => setConfirmAction({title, message, onConfirm: onYes})
+                    ); 
+                  }}
+                >
+                  Check for Updates
+                </button>
+              </div>
             </>
           )}
 
@@ -394,19 +419,26 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                     className="btn-primary"
                     onClick={async () => {
                       if (!licenseEmail) {
-                        alert(t('Please enter your email address first.'));
+                        setAlertMessage({
+                          title: 'Notice',
+                          message: 'Please enter your email address first.'
+                        });
                         return;
                       }
-                      if (window.confirm(t('You will be redirected to the purchase page. Continue?'))) {
-                        try {
-                          const webAppUrl = await import('@tauri-apps/api/core').then(m => m.invoke<string>('get_web_app_url'));
-                          import('@tauri-apps/plugin-shell').then(({ open }) => {
-                            open(`${webAppUrl}?email=${encodeURIComponent(licenseEmail)}&deviceId=${encodeURIComponent(licenseInfo?.device_id || '')}`);
-                          });
-                        } catch (e) {
-                          console.error("Failed to get web app url", e);
+                      setConfirmAction({
+                        title: 'Purchase License',
+                        message: 'You will be redirected to the purchase page. Do you want to continue?',
+                        onConfirm: async () => {
+                          try {
+                            const webAppUrl = await import('@tauri-apps/api/core').then(m => m.invoke<string>('get_web_app_url'));
+                            import('@tauri-apps/plugin-shell').then(({ open }) => {
+                              open(`${webAppUrl}?email=${encodeURIComponent(licenseEmail)}&deviceId=${encodeURIComponent(licenseInfo?.device_id || '')}`);
+                            });
+                          } catch (e) {
+                            console.error("Failed to get web app url", e);
+                          }
                         }
-                      }
+                      });
                     }}
                   >Buy License</button>
                 </div>
@@ -415,7 +447,21 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <span className="label-text">{t('preferences.licenseCode', 'License Code')}</span>
                 <div className="input-group">
                   <input type="text" value={licenseCode} onChange={(e) => setLicenseCode(e.target.value)} placeholder="Enter license code" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
-                  <button className="btn-primary" onClick={() => onActivateLicense?.(licenseEmail, licenseCode)}>Activate</button>
+                  <button className="btn-primary" onClick={async () => {
+                    if (!onActivateLicense) return;
+                    try {
+                      await onActivateLicense(licenseEmail, licenseCode);
+                      setAlertMessage({
+                        title: 'Success',
+                        message: 'License activated successfully!'
+                      });
+                    } catch (err) {
+                      setAlertMessage({
+                        title: 'Activation Failed',
+                        message: String(err)
+                      });
+                    }
+                  }}>Activate</button>
                 </div>
               </div>
             </div>
@@ -426,6 +472,33 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
           <button className="btn-primary" onClick={handleSave}>{t('preferences.saveChanges')}</button>
         </div>
       </div>
+
+      {/* Custom Alert Modal */}
+      {alertMessage && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#0f172a', fontSize: '1.2rem', fontWeight: 600 }}>{alertMessage.title}</h3>
+            <p style={{ color: '#475569', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.5' }}>{alertMessage.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn-primary" onClick={() => setAlertMessage(null)}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirm Modal */}
+      {confirmAction && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#0f172a', fontSize: '1.2rem', fontWeight: 600 }}>{confirmAction.title}</h3>
+            <p style={{ color: '#475569', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.5' }}>{confirmAction.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="btn-secondary" onClick={() => setConfirmAction(null)}>Cancel</button>
+              <button className="btn-primary" onClick={() => { confirmAction.onConfirm(); setConfirmAction(null); }}>Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

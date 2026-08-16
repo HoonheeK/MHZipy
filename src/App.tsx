@@ -8,6 +8,7 @@ import { ensureDir } from './utils/fileOps';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
+import { checkForUpdates } from './utils/updater';
 import './App.css';
 
 export interface SearchConfig {
@@ -59,9 +60,17 @@ function App() {
   const [requestedPath, setRequestedPath] = useState<string | undefined>(undefined);
   const [requestedSelect, setRequestedSelect] = useState<string | undefined>(undefined);
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
-
+  const [globalAlert, setGlobalAlert] = useState<{title: string, message: string} | null>(null);
+  const [globalConfirm, setGlobalConfirm] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
 
   useEffect(() => {
+    // Check for updates on startup
+    checkForUpdates(
+      false,
+      (title, message) => setGlobalAlert({title, message}),
+      (title, message, onYes) => setGlobalConfirm({title, message, onConfirm: onYes})
+    );
+
     const initConfig = async () => {
 
       try {
@@ -275,13 +284,8 @@ function App() {
         }}
         licenseInfo={licenseInfo}
         onActivateLicense={async (email, code) => {
-          try {
-            const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
-            setLicenseInfo(newInfo);
-            alert('License activated successfully!');
-          } catch (err) {
-            alert('Failed to activate: ' + err);
-          }
+          const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
+          setLicenseInfo(newInfo);
         }}
       />
 
@@ -348,6 +352,33 @@ function App() {
           </div>
         </div>
       )}
+      {/* Global Custom Alert Modal */}
+      {globalAlert && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#0f172a', fontSize: '1.2rem', fontWeight: 600 }}>{globalAlert.title}</h3>
+            <p style={{ color: '#475569', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{globalAlert.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn-primary" onClick={() => setGlobalAlert(null)}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Custom Confirm Modal */}
+      {globalConfirm && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#0f172a', fontSize: '1.2rem', fontWeight: 600 }}>{globalConfirm.title}</h3>
+            <p style={{ color: '#475569', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{globalConfirm.message}</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="btn-secondary" onClick={() => setGlobalConfirm(null)}>Cancel</button>
+              <button className="btn-primary" onClick={() => { globalConfirm.onConfirm(); setGlobalConfirm(null); }}>Continue</button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

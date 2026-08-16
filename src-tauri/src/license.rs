@@ -135,14 +135,15 @@ struct GasValidationResponse {
     expiry_date: Option<String>,
 }
 
-pub const WEB_APP_URL: &str = "https://script.google.com/macros/s/AKfycbw0cCdkJF0W6O0IhhHtm4RMmadyVHKRLF-g-tDkUAMAuasns1idpcPco9bGPNq2DwS9SQ/exec";
+pub const GAS_API_URL: &str = "https://script.google.com/macros/s/AKfycbw0cCdkJF0W6O0IhhHtm4RMmadyVHKRLF-g-tDkUAMAuasns1idpcPco9bGPNq2DwS9SQ/exec";
+pub const WEB_APP_URL: &str = "https://mhzipy-update.marh-sw.com/buy.html";
 
 pub fn verify_license_code(code: &str, current_device_id: &str) -> Result<LicensePayload, String> {
     println!("[License] Verifying license code via Google Apps Script...");
     
     let url = format!(
         "{}?action=validate&code={}&deviceId={}",
-        WEB_APP_URL,
+        GAS_API_URL,
         urlencoding::encode(code),
         urlencoding::encode(current_device_id)
     );
