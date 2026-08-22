@@ -28,7 +28,7 @@
       "endpoints": [
         "https://mhzipy-update.marh-sw.com/updater.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGMDM5RENCQjgwRTA4MzUKUldRMUNBNjR5NTBEL3dSVmxHcXUrcjVvdGN6N3ExRGtRUWRqKzJySURiMExESVhFZ1VUR2ZLczcK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3NUI0MTNEMzU0MTZGNkYKUldSdmIwRTFQVUZiMTRPWWQ3YjFQREZXVmk0QlV2WlFySDBpVHlmcjZqeXdiWWZBVk9RUmdUT0EK"
     }
   },
   "bundle": {

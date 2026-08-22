@@ -22,11 +22,14 @@ jobs:
       - name: install dependencies
         run: npm install
 
-      # 1. Tauri 빌드 (설치 파일 및 자동 업데이트용 .sig 파일 생성)
+      # 1. Tauri 빌드 (서명 키 환경변수가 필요합니다)
       - name: build tauri app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build
 
-      # 2. Cloudflare R2 업로드를 위한 AWS CLI 설정 (R2는 S3 프로토콜과 호환됨)
+      # 2. Cloudflare R2 업로드를 위한 AWS CLI 설정
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -34,23 +37,56 @@ jobs:
           aws-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           aws-region: auto
 
-      # 3. 빌드 결과물을 R2 버킷에 업로드
-      - name: Upload to Cloudflare R2
+      # 3. 빌드 결과물 업로드 및 updater.json 자동 생성
+      - name: Upload to Cloudflare R2 & Generate Updater JSON
         env:
           ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
           $Version = "${{ github.ref_name }}"
           $Endpoint = "https://${env:ACCOUNT_ID}.r2.cloudflarestorage.com"
-          
-          # 설치 파일 및 업데이트 패치 파일이 있는 경로
           $BundlePath = "src-tauri/target/release/bundle/nsis"
           
-          # 1) 해당 버전 폴더(예: /v0.9.0/)에 모든 파일 업로드 보관
+          # [1] 전체 파일 업로드 (해당 버전 폴더에 보관)
           aws s3 cp $BundlePath s3://${env:BUCKET_NAME}/$Version --recursive --endpoint-url $Endpoint
           
-          # 2) 홈페이지에서 '최신 버전 다운로드'를 누를 때 받아갈 고정 링크(latest-setup.exe) 덮어쓰기
+          # [2] 홈페이지 고정 다운로드 링크용 최신 실행파일 덮어쓰기
           $ExeFile = Get-ChildItem -Path $BundlePath -Filter "*.exe" | Select-Object -First 1
           if ($ExeFile) {
             aws s3 cp $($ExeFile.FullName) s3://${env:BUCKET_NAME}/latest-setup.exe --endpoint-url $Endpoint
+          }
+
+          # [3] updater.json 자동 생성 및 업로드
+          # Tauri 2는 업데이트용 패치로 .zip 파일과 그에 대한 .sig 파일을 생성합니다.
+          $SigFile = Get-ChildItem -Path $BundlePath -Filter "*.sig" | Select-Object -First 1
+          $ZipFile = Get-ChildItem -Path $BundlePath -Filter "*.zip" | Select-Object -First 1
+
+          if ($SigFile -and $ZipFile) {
+            $Signature = Get-Content $SigFile.FullName -Raw
+            $ZipFileName = $ZipFile.Name
+            # 앱이 업데이트 패치를 다운로드할 실제 경로
+            $DownloadUrl = "https://mhzipy-update.marh-sw.com/$Version/$ZipFileName"
+            
+            $UpdaterObj = @{
+                version = $Version.TrimStart('v')
+                notes = "새로운 업데이트가 출시되었습니다! ($Version)"
+                pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                platforms = @{
+                    "windows-x86_64" = @{
+                        signature = $Signature.Trim()
+                        url = $DownloadUrl
+                    }
+                }
+            }
+            
+            # JSON 파일 생성
+            $UpdaterJson = $UpdaterObj | ConvertTo-Json -Depth 5
+            Set-Content -Path "updater.json" -Value $UpdaterJson
+            
+            # R2 최상단에 updater.json 덮어쓰기
+            aws s3 cp updater.json s3://${env:BUCKET_NAME}/updater.json --endpoint-url $Endpoint
+            
+            Write-Host "✅ updater.json 생성 및 업로드 완료!"
+          } else {
+            Write-Host "⚠️ 서명 파일(.sig) 또는 압축 파일(.zip)을 찾을 수 없습니다. (Tauri 설정 확인 필요)"
           }
