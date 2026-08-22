@@ -1,0 +1,41 @@
+name: "Publish Release"
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: install app dependencies
+        run: npm install
+
+      - name: build and publish tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "MHZipy ${{ github.ref_name }}"
+          releaseBody: "새로운 버전의 MHZipy입니다. 아래의 자산(Assets)에서 설치 파일을 다운로드하세요."
+          releaseDraft: false
+          prerelease: false
