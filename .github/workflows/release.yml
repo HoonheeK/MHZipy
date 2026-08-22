@@ -22,7 +22,7 @@ jobs:
       - name: install dependencies
         run: npm install
 
-      # 1. Tauri 빌드 (서명 키 환경변수가 필요합니다)
+      # 1. Tauri 빌드
       - name: build tauri app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -30,7 +30,6 @@ jobs:
         run: npm run tauri build
 
       # 2. 빌드 결과물 업로드 및 updater.json 자동 생성
-      # (AWS credentials 액션은 AWS STS를 호출하므로 R2에서는 제거하고 환경변수로 직접 넘깁니다)
       - name: Upload to Cloudflare R2 & Generate Updater JSON
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -39,6 +38,9 @@ jobs:
           ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
         run: |
+          # AWS CLI가 R2 서버와 통신할 때 SSL 에러(Handshake failure)를 막기 위해 Path style을 강제합니다.
+          aws configure set default.s3.addressing_style path
+          
           $Version = "${{ github.ref_name }}"
           $Endpoint = "https://${env:ACCOUNT_ID}.r2.cloudflarestorage.com"
           $BundlePath = "src-tauri/target/release/bundle/nsis"
@@ -47,20 +49,20 @@ jobs:
           aws s3 cp $BundlePath s3://${env:BUCKET_NAME}/$Version --recursive --endpoint-url $Endpoint
           
           # [2] 홈페이지 고정 다운로드 링크용 최신 실행파일 덮어쓰기
-          $ExeFile = Get-ChildItem -Path $BundlePath -Filter "*.exe" | Select-Object -First 1
+          $ExeFile = Get-ChildItem -Path $BundlePath -Filter "*setup.exe" | Select-Object -First 1
           if ($ExeFile) {
             aws s3 cp $($ExeFile.FullName) s3://${env:BUCKET_NAME}/latest-setup.exe --endpoint-url $Endpoint
           }
 
           # [3] updater.json 자동 생성 및 업로드
+          # Windows NSIS 빌드의 경우 업데이트 파일은 .zip이 아니라 .exe 자체와 그 서명(.exe.sig)입니다.
           $SigFile = Get-ChildItem -Path $BundlePath -Filter "*.sig" | Select-Object -First 1
-          $ZipFile = Get-ChildItem -Path $BundlePath -Filter "*.zip" | Select-Object -First 1
-
-          if ($SigFile -and $ZipFile) {
+          
+          if ($SigFile -and $ExeFile) {
             $Signature = Get-Content $SigFile.FullName -Raw
-            $ZipFileName = $ZipFile.Name
+            $ExeFileName = $ExeFile.Name
             
-            $DownloadUrl = "https://mhzipy-update.marh-sw.com/$Version/$ZipFileName"
+            $DownloadUrl = "https://mhzipy-update.marh-sw.com/$Version/$ExeFileName"
             
             $UpdaterObj = @{
                 version = $Version.TrimStart('v')
@@ -80,5 +82,6 @@ jobs:
             aws s3 cp updater.json s3://${env:BUCKET_NAME}/updater.json --endpoint-url $Endpoint
             Write-Host "✅ updater.json 생성 및 업로드 완료!"
           } else {
-            Write-Host "⚠️ 서명 파일(.sig) 또는 압축 파일(.zip)을 찾을 수 없습니다."
+            Write-Host "⚠️ 서명 파일(.sig) 또는 설치 파일(.exe)을 찾을 수 없습니다."
+            exit 1
           }
