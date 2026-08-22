@@ -38,20 +38,19 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
   return (
     <div className="menu-bar">
       <div className="menu-left">
-        {currentView === 'folder' && (
-          <div className="navigation-buttons">
-            <button onClick={onBack} disabled={!canGoBack} className="menu-button" title={t('menu.back')}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-            </button>
-            <button onClick={onNext} disabled={!canGoForward} className="menu-button" title={t('menu.forward')}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-            </button>
-          </div>
-        )}
       </div>
       <div className="menu-center">
         {currentView === 'folder' && (
-          <div className="search-container">
+          <>
+            <div className="navigation-buttons">
+              <button onClick={onBack} disabled={!canGoBack} className="menu-button" title={t('menu.back')}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+              </button>
+              <button onClick={onNext} disabled={!canGoForward} className="menu-button" title={t('menu.forward')}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+              </button>
+            </div>
+            <div className="search-container">
             <span className="search-icon">🔎</span>
             <input
               type="text"
@@ -64,6 +63,7 @@ export default function Menu({ onPreference, currentView, onToggleView, onSearch
               <button onClick={() => setLocalSearch('')} className="clear-search-button">✕</button>
             )}
           </div>
+          </>
         )}
       </div>
       <div className="menu-right">

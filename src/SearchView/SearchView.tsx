@@ -20,7 +20,8 @@ interface SearchViewProps {
   quickAccess?: string[];
   searchConfig?: SearchConfig;
   onSaveSearchConfig?: (config: SearchConfig) => void;
-  onOpenInExplorer?: (path: string) => void;
+  onOpenInExplorer?: (path: string, isDirectory?: boolean) => void;
+  recentOpenedFolders?: string[];
   columnSettings?: { key: string; visible: boolean }[];
   canPaste?: boolean;
   clipboard?: { paths: string[]; op: 'copy' | 'move' } | null;
@@ -90,6 +91,7 @@ export default function SearchView({
   searchConfig,
   onSaveSearchConfig,
   onOpenInExplorer,
+  recentOpenedFolders,
   columnSettings,
   canPaste,
   clipboard,
@@ -684,31 +686,75 @@ export default function SearchView({
              <span style={{ fontSize: '0.85em' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
            )}
         </div>
-        <div style={{ flex: 1, minHeight: 0, opacity: isSearching ? 0.5 : 1, transition: 'opacity 0.2s' }}>
-          <FileList
-            path={null}
-            filesOverride={filteredResults}
-            selectedFiles={selectedFiles}
-            onSelectFiles={setSelectedFiles}
-            onFocus={handleFileListFocus}
-            onNavigate={onNavigate}
-            onCopy={onCopy}
-            onCut={onCut}
-            onPaste={onPaste}
-            onDelete={onDelete}
-            onExtract={onExtract}
-            onOpenInNewWindow={onOpenInNewWindow}
-            refreshTrigger={refreshTrigger}
-            onRefresh={() => setLocalRefresh(r => r + 1)}
-            // searchQuery={localQuery} // 이 줄이 FileList 내부에서 단순 문자열 필터링을 유발하므로 제거합니다.
-            enableAutoResize={true}
-            onOpenInExplorer={onOpenInExplorer || (() => {})}
-            columnSettings={columnSettings}
-            clipboard={clipboard}
-            canPaste={canPaste}
-            onColumnSettingsChange={onColumnSettingsChange}
-            usePdfWorker={usePdfWorker}
-          />
+        <div style={{ flex: 1, minHeight: 0, opacity: isSearching ? 0.5 : 1, transition: 'opacity 0.2s', overflowY: 'auto' }}>
+          {(!localQuery && recentOpenedFolders && recentOpenedFolders.length > 0) ? (
+            <div style={{ padding: '20px' }}>
+              <h3 style={{ margin: '0 0 16px 0', color: '#334155', fontSize: '1.1em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                🕒 Recent Folders
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {recentOpenedFolders.map(folder => (
+                  <div 
+                    key={folder}
+                    onDoubleClick={() => onNavigate(folder)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (onOpenInExplorer) onOpenInExplorer(folder, true);
+                    }}
+                    style={{ 
+                      padding: '12px 16px', 
+                      backgroundColor: '#f8fafc', 
+                      border: '1px solid #e2e8f0', 
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#f1f5f9';
+                      e.currentTarget.style.borderColor = '#cbd5e1';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#f8fafc';
+                      e.currentTarget.style.borderColor = '#e2e8f0';
+                    }}
+                    title="Double click to open in App, Right click to open in Windows Explorer"
+                  >
+                    <span style={{ fontSize: '1.2em' }}>📁</span>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569', fontSize: '0.95em' }}>
+                      {folder}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <FileList
+              path={null}
+              filesOverride={filteredResults}
+              selectedFiles={selectedFiles}
+              onSelectFiles={setSelectedFiles}
+              onFocus={handleFileListFocus}
+              onNavigate={onNavigate}
+              onCopy={onCopy}
+              onCut={onCut}
+              onPaste={onPaste}
+              onDelete={onDelete}
+              onExtract={onExtract}
+              onOpenInNewWindow={onOpenInNewWindow}
+              refreshTrigger={refreshTrigger}
+              onRefresh={() => setLocalRefresh(r => r + 1)}
+              enableAutoResize={true}
+              onOpenInExplorer={onOpenInExplorer || (() => {})}
+              columnSettings={columnSettings}
+              clipboard={clipboard}
+              canPaste={canPaste}
+              onColumnSettingsChange={onColumnSettingsChange}
+              usePdfWorker={usePdfWorker}
+            />
+          )}
         </div>
       </div>
     </div>

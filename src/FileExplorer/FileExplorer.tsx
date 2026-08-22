@@ -603,12 +603,22 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [activePane, filesSelected, selectedPaths, selected, clipboard, config.editableFolders, config.readonlyFolders, contextMenu]);
 
+  const saveRecentFolder = (folderPath: string) => {
+    const current = config.recentOpenedFolders || [];
+    const filtered = current.filter(p => p !== folderPath);
+    const updated = [folderPath, ...filtered].slice(0, 100);
+    onSaveConfig({ recentOpenedFolders: updated });
+  };
+
   const handleOpenInExplorer = async (path: string, isDirectory?: boolean) => {
     try {
       if (isDirectory) {
+        saveRecentFolder(path);
         // For directories, open them directly in the file explorer.
         await invoke('open_file', { path });
       } else {
+        const parentPath = path.substring(0, Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')));
+        if (parentPath) saveRecentFolder(parentPath);
         // For files, open the parent folder and select the file.
         await invoke('open_in_explorer', { path });
       }
@@ -642,6 +652,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
         usePdfWorker={config.usePdfWorker}
+        recentOpenedFolders={config.recentOpenedFolders}
       />
     </div>
   );

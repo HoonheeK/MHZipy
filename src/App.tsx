@@ -4,6 +4,9 @@ import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
 import Menu from './Menu/Menu';
 import FileExplorer from './FileExplorer/FileExplorer';
 import PreferenceDialog from './Menu/PreferenceDialog';
+import FloatingNav from './Menu/FloatingNav';
+import AboutDialog from './Menu/AboutDialog';
+import OpenSourceDialog from './Menu/OpenSourceDialog';
 import { ensureDir } from './utils/fileOps';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
@@ -45,6 +48,7 @@ interface AppConfig {
   usePdfWorker?: boolean;
   licenseEmail?: string;
   licenseCode?: string;
+  recentOpenedFolders?: string[];
 }
 
 function App() {
@@ -62,6 +66,8 @@ function App() {
   const [licenseInfo, setLicenseInfo] = useState<LicenseInfo | null>(null);
   const [globalAlert, setGlobalAlert] = useState<{title: string, message: string} | null>(null);
   const [globalConfirm, setGlobalConfirm] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
+  const [isOpenSourceOpen, setIsOpenSourceOpen] = useState(false);
 
   useEffect(() => {
     // Check for updates on startup
@@ -237,6 +243,10 @@ function App() {
 
   return (
     <div className="app-wrapper">
+      <FloatingNav 
+        onAbout={() => setIsAboutOpen(true)} 
+        onOpenSource={() => setIsOpenSourceOpen(true)} 
+      />
       <Menu
         onPreference={() => setIsPrefOpen(true)}
         currentView={currentView}
@@ -352,6 +362,10 @@ function App() {
           </div>
         </div>
       )}
+
+      <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
+      <OpenSourceDialog isOpen={isOpenSourceOpen} onClose={() => setIsOpenSourceOpen(false)} />
+
       {/* Global Custom Alert Modal */}
       {globalAlert && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>

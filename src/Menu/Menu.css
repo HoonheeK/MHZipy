@@ -26,6 +26,8 @@
   flex: 1;
   display: flex;
   justify-content: center;
+  align-items: center;
+  gap: 12px;
   padding: 0 20px;
   min-width: 0; /* Prevents flex item from overflowing */
 }
