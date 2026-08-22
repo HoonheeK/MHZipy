@@ -26,7 +26,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://mhzipy-update.marh-sw.com/update.json"
+        "https://mhzipy-update.marh-sw.com/updater.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGMDM5RENCQjgwRTA4MzUKUldRMUNBNjR5NTBEL3dSVmxHcXUrcjVvdGN6N3ExRGtRUWRqKzJySURiMExESVhFZ1VUR2ZLczcK"
     }
@@ -38,7 +38,12 @@
     "windows": {
       "nsis": {
         "displayLanguageSelector": true,
-        "languages": ["English", "Korean", "Japanese", "SimpChinese"]
+        "languages": [
+          "English",
+          "Korean",
+          "Japanese",
+          "SimpChinese"
+        ]
       }
     },
     "icon": [

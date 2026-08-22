@@ -13,8 +13,8 @@ import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[] };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[] }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   externalPath?: string;
@@ -605,7 +605,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   const saveRecentFolder = (folderPath: string) => {
     const current = config.recentOpenedFolders || [];
-    const filtered = current.filter(p => p !== folderPath);
+    const filtered = current.filter((p: string) => p !== folderPath);
     const updated = [folderPath, ...filtered].slice(0, 100);
     onSaveConfig({ recentOpenedFolders: updated });
   };

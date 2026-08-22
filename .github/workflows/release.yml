@@ -1,4 +1,4 @@
-name: "Publish Release"
+name: "Build and Deploy to Cloudflare R2"
 
 on:
   push:
@@ -6,15 +6,8 @@ on:
       - "v*"
 
 jobs:
-  publish-tauri:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        platform: [windows-latest]
-
-    runs-on: ${{ matrix.platform }}
+  build-and-deploy:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -26,16 +19,38 @@ jobs:
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: install app dependencies
+      - name: install dependencies
         run: npm install
 
-      - name: build and publish tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # 1. Tauri 빌드 (설치 파일 및 자동 업데이트용 .sig 파일 생성)
+      - name: build tauri app
+        run: npm run tauri build
+
+      # 2. Cloudflare R2 업로드를 위한 AWS CLI 설정 (R2는 S3 프로토콜과 호환됨)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "MHZipy ${{ github.ref_name }}"
-          releaseBody: "새로운 버전의 MHZipy입니다. 아래의 자산(Assets)에서 설치 파일을 다운로드하세요."
-          releaseDraft: false
-          prerelease: false
+          aws-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          aws-region: auto
+
+      # 3. 빌드 결과물을 R2 버킷에 업로드
+      - name: Upload to Cloudflare R2
+        env:
+          ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          $Version = "${{ github.ref_name }}"
+          $Endpoint = "https://${env:ACCOUNT_ID}.r2.cloudflarestorage.com"
+          
+          # 설치 파일 및 업데이트 패치 파일이 있는 경로
+          $BundlePath = "src-tauri/target/release/bundle/nsis"
+          
+          # 1) 해당 버전 폴더(예: /v0.9.0/)에 모든 파일 업로드 보관
+          aws s3 cp $BundlePath s3://${env:BUCKET_NAME}/$Version --recursive --endpoint-url $Endpoint
+          
+          # 2) 홈페이지에서 '최신 버전 다운로드'를 누를 때 받아갈 고정 링크(latest-setup.exe) 덮어쓰기
+          $ExeFile = Get-ChildItem -Path $BundlePath -Filter "*.exe" | Select-Object -First 1
+          if ($ExeFile) {
+            aws s3 cp $($ExeFile.FullName) s3://${env:BUCKET_NAME}/latest-setup.exe --endpoint-url $Endpoint
+          }
