@@ -9,7 +9,7 @@ use regex::RegexBuilder;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, ERROR_HANDLE_EOF, GENERIC_READ, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ,
+    CreateFileW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ,
     FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::Ioctl::{
@@ -69,11 +69,11 @@ impl MftIndex {
         unsafe {
             CreateFileW(
                 PCWSTR(path_wide.as_ptr()),
-                GENERIC_READ.0, // GENERIC_READ 등이 필요할 수 있음
+                GENERIC_READ.0, // GENERIC_READ
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 None,
                 OPEN_EXISTING,
-                FILE_FLAG_BACKUP_SEMANTICS,
+                FILE_ATTRIBUTE_NORMAL,
                 HANDLE(0),
             )
             .map_err(|e| {
