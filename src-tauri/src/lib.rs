@@ -827,13 +827,21 @@ pub fn run() {
             let mut pdf_path = String::new();
             let mut pdf_title = String::new();
 
-            for i in 0..args.len() {
+            let mut i = 1;
+            while i < args.len() {
                 if args[i] == "--pdf-viewer" && i + 1 < args.len() {
                     is_pdf_viewer = true;
                     pdf_path = args[i + 1].clone();
+                    i += 1;
                 } else if args[i] == "--pdf-title" && i + 1 < args.len() {
                     pdf_title = args[i + 1].clone();
+                    i += 1;
+                } else if args[i].to_lowercase().ends_with(".pdf") {
+                    // Windows File Explorer 연동용: 단일 인자로 PDF 경로가 들어왔을 때 자동으로 뷰어 모드로 진입
+                    is_pdf_viewer = true;
+                    pdf_path = args[i].clone();
                 }
+                i += 1;
             }
 
             if is_pdf_viewer {

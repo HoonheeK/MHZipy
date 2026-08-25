@@ -38,11 +38,12 @@
 
         /* Main Content */
         #main-container { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; }
-        #viewer-scroll-container { flex: 1; overflow-y: auto; padding: 20px; text-align: center; position: relative; }
+        #viewer-scroll-container { flex: 1; overflow: auto; padding: 20px; position: relative; }
+        #viewer-content { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 20px; }
         
         /* Page & Canvas */
-        .page-wrapper { position: relative; display: inline-block; margin-bottom: 20px; box-shadow: 0 0 10px rgba(0,0,0,0.5); background: white; }
-        canvas { display: block; max-width: 100%; height: auto; }
+        .page-wrapper { position: relative; flex-shrink: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); background: white; }
+        canvas { display: block; }
         
         /* Text Layer */
         .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; line-height: 1.0; opacity: 0.2; }
@@ -344,7 +345,9 @@
                 await renderPages();
 
                 // 스크롤 이벤트 리스너 등록
-                document.getElementById('viewer-scroll-container').addEventListener('scroll', handleScroll);
+                const scrollEl = document.getElementById('viewer-scroll-container');
+                scrollEl.addEventListener('scroll', handleScroll);
+                scrollEl.addEventListener('scroll', onScrollRenderCheck);
             } catch (error) {
                 console.error('PDF rendering error:', error);
                 loadingEl.style.color = 'red';
@@ -352,15 +355,229 @@
             }
         }
 
+        // 렌더링 중 스크롤 복원을 위한 상태
+        let _zoomScrollRestore = null; // { pageNum, offsetRatio }
+
+        // 지연 렌더링을 위한 상태
+        let _pageDataList = [];       // 모든 페이지의 메타데이터
+        let _renderedPages = new Set(); // 이미 렌더링된 페이지 인덱스
+        let _renderVersion = 0;       // 줌 변경 시 이전 렌더링 취소용
+
+        // 개별 페이지 렌더링 함수
+        async function renderSinglePage(pageData, version) {
+            const { pageNum, page, viewport, pageWrapper } = pageData;
+
+            // 버전이 바뀌었으면 (줌이 변경됨) 중단
+            if (version !== _renderVersion) return;
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            pageWrapper.appendChild(canvas);
+
+            // 텍스트 레이어 생성
+            const textLayerDiv = document.createElement('div');
+            textLayerDiv.className = 'textLayer';
+            textLayerDiv.style.width = `${viewport.width}px`;
+            textLayerDiv.style.height = `${viewport.height}px`;
+            pageWrapper.appendChild(textLayerDiv);
+
+            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            if (version !== _renderVersion) return;
+
+            // 검색을 위해 텍스트 컨텐츠 추출 및 저장
+            try {
+                const textContent = await page.getTextContent();
+                if (version !== _renderVersion) return;
+                
+                // 텍스트 레이어 렌더링
+                if (typeof pdfjsLib.renderTextLayer === 'function') {
+                    const renderTask = pdfjsLib.renderTextLayer({
+                        textContentSource: textContent,
+                        container: textLayerDiv,
+                        viewport: viewport,
+                        textDivs: []
+                    });
+                    if (renderTask.promise) await renderTask.promise;
+                } else {
+                    textContent.items.forEach(item => {
+                        if (!item.str) return;
+                        const span = document.createElement('span');
+                        span.textContent = item.str;
+                        
+                        const tx = item.transform;
+                        if (!tx) return;
+                        
+                        const [vx, vy] = viewport.convertToViewportPoint(tx[4], tx[5]);
+                        const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+                        const scaledFontSize = fontSize * viewport.scale;
+                        
+                        span.style.left = `${vx}px`;
+                        span.style.top = `${vy - scaledFontSize}px`;
+                        span.style.fontSize = `${scaledFontSize}px`;
+                        span.style.fontFamily = 'sans-serif';
+                        
+                        textLayerDiv.appendChild(span);
+                    });
+                }
+
+                pageTextContents.push({
+                    pageNum,
+                    viewport,
+                    items: textContent.items
+                });
+            } catch (e) {
+                console.warn(`Failed to extract text from page ${pageNum}:`, e);
+            }
+
+            // 어노테이션 레이어 (링크) 렌더링
+            try {
+                const annotations = await page.getAnnotations();
+                if (version !== _renderVersion) return;
+                if (annotations.length > 0) {
+                    const annotationLayerDiv = document.createElement('div');
+                    annotationLayerDiv.className = 'annotationLayer';
+                    annotationLayerDiv.style.width = `${viewport.width}px`;
+                    annotationLayerDiv.style.height = `${viewport.height}px`;
+                    pageWrapper.appendChild(annotationLayerDiv);
+
+                    annotations.forEach(annotation => {
+                        if (annotation.subtype === 'Link' && annotation.rect) {
+                            const section = document.createElement('section');
+                            section.className = 'linkAnnotation';
+                            
+                            const rect = viewport.convertToViewportRectangle(annotation.rect);
+                            const x = Math.min(rect[0], rect[2]);
+                            const y = Math.min(rect[1], rect[3]);
+                            const w = Math.abs(rect[2] - rect[0]);
+                            const h = Math.abs(rect[3] - rect[1]);
+                            
+                            section.style.left = `${x}px`;
+                            section.style.top = `${y}px`;
+                            section.style.width = `${w}px`;
+                            section.style.height = `${h}px`;
+
+                            const a = document.createElement('a');
+                            if (annotation.url) {
+                                a.href = annotation.url;
+                                a.target = '_blank';
+                                a.title = annotation.url;
+                            } else if (annotation.dest) {
+                                a.href = '#';
+                                a.onclick = async (e) => {
+                                    e.preventDefault();
+                                    let dest = annotation.dest;
+                                    if (typeof dest === 'string') {
+                                        dest = await pdfDoc.getDestination(dest);
+                                    }
+                                    if (dest) {
+                                        const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                                        goToPage(pageIndex + 1);
+                                    }
+                                };
+                            }
+                            section.appendChild(a);
+                            annotationLayerDiv.appendChild(section);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn(`Failed to load annotations for page ${pageNum}:`, e);
+            }
+
+            page.cleanup();
+        }
+
+        // 현재 뷰포트 근처의 미렌더링 페이지를 찾아서 렌더링
+        let _isLazyRendering = false;
+        let _pendingLazyRender = false;
+        async function renderVisiblePages() {
+            if (_pageDataList.length === 0) return;
+            if (_isLazyRendering) {
+                _pendingLazyRender = true;
+                return;
+            }
+            _isLazyRendering = true;
+            _pendingLazyRender = false;
+            const version = _renderVersion;
+
+            try {
+                const scrollContainer = document.getElementById('viewer-scroll-container');
+                const containerRect = scrollContainer.getBoundingClientRect();
+                // 버퍼: 뷰포트 높이의 1배만큼 위아래 여유
+                const bufferHeight = containerRect.height;
+
+                // 보이는 페이지 + 버퍼 영역의 페이지 찾기
+                const toRender = [];
+                for (let i = 0; i < _pageDataList.length; i++) {
+                    if (_renderedPages.has(i)) continue;
+                    const wr = _pageDataList[i].pageWrapper.getBoundingClientRect();
+                    // 뷰포트 + 버퍼 영역에 겹치는지 확인
+                    if (wr.bottom >= containerRect.top - bufferHeight &&
+                        wr.top <= containerRect.bottom + bufferHeight) {
+                        toRender.push(i);
+                    }
+                }
+
+                // 보이는 영역 중심에서 가까운 순으로 정렬
+                const viewCenter = (containerRect.top + containerRect.bottom) / 2;
+                toRender.sort((a, b) => {
+                    const aRect = _pageDataList[a].pageWrapper.getBoundingClientRect();
+                    const bRect = _pageDataList[b].pageWrapper.getBoundingClientRect();
+                    const aDist = Math.abs((aRect.top + aRect.bottom) / 2 - viewCenter);
+                    const bDist = Math.abs((bRect.top + bRect.bottom) / 2 - viewCenter);
+                    return aDist - bDist;
+                });
+
+                for (const idx of toRender) {
+                    if (version !== _renderVersion) break;
+                    if (_renderedPages.has(idx)) continue;
+                    _renderedPages.add(idx);
+                    await renderSinglePage(_pageDataList[idx], version);
+                }
+
+                // 검색어가 있다면 검색 재실행
+                if (version === _renderVersion) {
+                    pageTextContents.sort((a, b) => a.pageNum - b.pageNum);
+                    const searchInput = document.getElementById('search-input');
+                    if (searchInput.value) performSearch(searchInput.value);
+                }
+            } finally {
+                _isLazyRendering = false;
+                if (_pendingLazyRender) {
+                    setTimeout(renderVisiblePages, 0);
+                }
+            }
+        }
+
+        // 스크롤 시 지연 렌더링 트리거 (디바운스)
+        let _scrollRenderTimer = null;
+        function onScrollRenderCheck() {
+            if (_scrollRenderTimer) clearTimeout(_scrollRenderTimer);
+            _scrollRenderTimer = setTimeout(() => {
+                renderVisiblePages();
+            }, 100);
+        }
+
         async function renderPages() {
             const container = document.getElementById('viewer-content');
+            const scrollContainer = document.getElementById('viewer-scroll-container');
             container.innerHTML = '';
             pageTextContents = [];
             searchResults = [];
             document.getElementById('search-status').textContent = '';
 
+            // 이전 렌더링 무효화
+            _renderVersion++;
+            _pageDataList = [];
+            _renderedPages = new Set();
+
             if (!pdfDoc) return;
 
+            const version = _renderVersion;
+
+            // === 1단계: 모든 페이지의 플레이스홀더(wrapper)를 먼저 생성 ===
             for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
                 const page = await pdfDoc.getPage(pageNum);
                 let viewport = page.getViewport({ scale: currentScale });
@@ -372,7 +589,7 @@
                     viewport = page.getViewport({ scale: currentScale * scaleFactor });
                 }
                 
-                // 페이지 래퍼 생성
+                // 페이지 래퍼 생성 (빈 플레이스홀더)
                 const pageWrapper = document.createElement('div');
                 pageWrapper.className = 'page-wrapper';
                 pageWrapper.id = `page-${pageNum}`;
@@ -380,132 +597,25 @@
                 pageWrapper.style.height = `${viewport.height}px`;
                 container.appendChild(pageWrapper);
 
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
-                pageWrapper.appendChild(canvas);
-
-                // 텍스트 레이어 생성
-                const textLayerDiv = document.createElement('div');
-                textLayerDiv.className = 'textLayer';
-                textLayerDiv.style.width = `${viewport.width}px`;
-                textLayerDiv.style.height = `${viewport.height}px`;
-                pageWrapper.appendChild(textLayerDiv);
-
-                await page.render({ canvasContext: context, viewport: viewport }).promise;
-
-                // 검색을 위해 텍스트 컨텐츠 추출 및 저장
-                try {
-                    const textContent = await page.getTextContent();
-                    
-                    // 텍스트 레이어 렌더링
-                    if (typeof pdfjsLib.renderTextLayer === 'function') {
-                        const renderTask = pdfjsLib.renderTextLayer({
-                            textContentSource: textContent,
-                            container: textLayerDiv,
-                            viewport: viewport,
-                            textDivs: []
-                        });
-                        if (renderTask.promise) await renderTask.promise;
-                    } else {
-                        // Fallback: Manual text rendering for selection if renderTextLayer is missing
-                        textContent.items.forEach(item => {
-                            if (!item.str) return;
-                            const span = document.createElement('span');
-                            span.textContent = item.str;
-                            
-                            // Basic positioning logic
-                            const tx = item.transform;
-                            if (!tx) return;
-                            
-                            // PDF coords: (x, y) is bottom-left of the text baseline
-                            // viewport.convertToViewportPoint(x, y) -> [x, y] in canvas coords (y is flipped)
-                            const [vx, vy] = viewport.convertToViewportPoint(tx[4], tx[5]);
-                            
-                            // Calculate scaled font size (approximate)
-                            const fontSize = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
-                            const scaledFontSize = fontSize * viewport.scale;
-                            
-                            span.style.left = `${vx}px`;
-                            span.style.top = `${vy - scaledFontSize}px`; // Adjust for baseline (approx)
-                            span.style.fontSize = `${scaledFontSize}px`;
-                            span.style.fontFamily = 'sans-serif';
-                            
-                            textLayerDiv.appendChild(span);
-                        });
-                    }
-
-                    pageTextContents.push({
-                        pageNum,
-                        viewport,
-                        items: textContent.items
-                    });
-                } catch (e) {
-                    console.warn(`Failed to extract text from page ${pageNum}:`, e);
-                }
-
-                // 어노테이션 레이어 (링크) 렌더링
-                try {
-                    const annotations = await page.getAnnotations();
-                    if (annotations.length > 0) {
-                        const annotationLayerDiv = document.createElement('div');
-                        annotationLayerDiv.className = 'annotationLayer';
-                        annotationLayerDiv.style.width = `${viewport.width}px`;
-                        annotationLayerDiv.style.height = `${viewport.height}px`;
-                        pageWrapper.appendChild(annotationLayerDiv);
-
-                        annotations.forEach(annotation => {
-                            if (annotation.subtype === 'Link' && annotation.rect) {
-                                const section = document.createElement('section');
-                                section.className = 'linkAnnotation';
-                                
-                                const rect = viewport.convertToViewportRectangle(annotation.rect);
-                                const x = Math.min(rect[0], rect[2]);
-                                const y = Math.min(rect[1], rect[3]);
-                                const w = Math.abs(rect[2] - rect[0]);
-                                const h = Math.abs(rect[3] - rect[1]);
-                                
-                                section.style.left = `${x}px`;
-                                section.style.top = `${y}px`;
-                                section.style.width = `${w}px`;
-                                section.style.height = `${h}px`;
-
-                                const a = document.createElement('a');
-                                if (annotation.url) {
-                                    a.href = annotation.url;
-                                    a.target = '_blank';
-                                    a.title = annotation.url;
-                                } else if (annotation.dest) {
-                                    a.href = '#';
-                                    a.onclick = async (e) => {
-                                        e.preventDefault();
-                                        let dest = annotation.dest;
-                                        if (typeof dest === 'string') {
-                                            dest = await pdfDoc.getDestination(dest);
-                                        }
-                                        if (dest) {
-                                            const pageIndex = await pdfDoc.getPageIndex(dest[0]);
-                                            goToPage(pageIndex + 1);
-                                        }
-                                    };
-                                }
-                                section.appendChild(a);
-                                annotationLayerDiv.appendChild(section);
-                            }
-                        });
-                    }
-                } catch (e) {
-                    console.warn(`Failed to load annotations for page ${pageNum}:`, e);
-                }
-
-                // 렌더링 완료 후 페이지 리소스 정리
-                page.cleanup();
+                _pageDataList.push({ pageNum, page, viewport, pageWrapper });
             }
 
-            // 검색어가 있다면 검색 재실행
-            const searchInput = document.getElementById('search-input');
-            if (searchInput.value) performSearch(searchInput.value);
+            if (version !== _renderVersion) return;
+
+            // === 스크롤 위치 복원 (플레이스홀더가 모두 배치된 직후) ===
+            if (_zoomScrollRestore) {
+                const { pageNum, offsetRatio } = _zoomScrollRestore;
+                _zoomScrollRestore = null;
+                const targetEl = document.getElementById(`page-${pageNum}`);
+                if (targetEl) {
+                    const scrollOffset = targetEl.offsetTop - scrollContainer.offsetTop + (offsetRatio * targetEl.offsetHeight);
+                    scrollContainer.scrollTop = Math.max(0, scrollOffset);
+                    updatePageIndicator(pageNum);
+                }
+            }
+
+            // === 2단계: 현재 보이는 페이지만 렌더링 (나머지는 스크롤 시 지연 렌더링) ===
+            await renderVisiblePages();
         }
 
         // --- 목차 (Outline) 기능 ---
@@ -795,12 +905,39 @@
             input.select();
         }
 
-        function updateZoom(delta) {
+        async function updateZoom(delta) {
             const newScale = currentScale + delta;
             if (newScale < 0.5 || newScale > 5.0) return;
+
+            // 현재 보고 있는 페이지 번호와 페이지 내 위치 비율 저장
+            const scrollContainer = document.getElementById('viewer-scroll-container');
+            const pages = document.querySelectorAll('.page-wrapper');
+            let currentPageNum = 1;
+            let currentPageOffsetRatio = 0;
+
+            if (pages.length > 0) {
+                const containerRect = scrollContainer.getBoundingClientRect();
+                let maxVisibility = -1;
+                for (let i = 0; i < pages.length; i++) {
+                    const pageRect = pages[i].getBoundingClientRect();
+                    const visibleTop = Math.max(pageRect.top, containerRect.top);
+                    const visibleBottom = Math.min(pageRect.bottom, containerRect.bottom);
+                    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+                    if (visibleHeight > maxVisibility) {
+                        maxVisibility = visibleHeight;
+                        currentPageNum = i + 1;
+                        // 페이지 내 스크롤 비율 저장 (컨테이너 상단 기준으로 페이지 어디를 보고 있었는지)
+                        currentPageOffsetRatio = (containerRect.top - pageRect.top) / pageRect.height;
+                    }
+                }
+            }
+
+            // 스크롤 복원 정보를 renderPages에서 사용할 수 있도록 저장
+            _zoomScrollRestore = { pageNum: currentPageNum, offsetRatio: currentPageOffsetRatio };
+
             currentScale = newScale;
             document.getElementById('zoom-level').textContent = Math.round(currentScale * 100) + '%';
-            renderPages();
+            await renderPages();
         }
 
         // --- 사이드바 리사이징 ---
@@ -908,22 +1045,85 @@
         // 단축키 핸들러
         window.addEventListener('keydown', async (e) => {
             const isCtrl = e.ctrlKey || e.metaKey;
-            const key = e.key.toLowerCase();
+            const key = e.key;
+            const keyLower = key.toLowerCase();
 
-            if (isCtrl && key === 'f') {
+            // 검색 입력 중일 때는 화살표 단축키 무시
+            if (document.activeElement === searchInput && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+                return;
+            }
+
+            if (isCtrl && keyLower === 'f') {
                 e.preventDefault();
                 searchBar.classList.add('visible');
                 document.querySelectorAll('.highlight').forEach(el => (/** @type {HTMLElement} */ (el)).style.display = 'block');
                 searchInput.focus();
                 searchInput.select();
             }
-            else if (e.key === 'Escape') {
+            else if (key === 'Escape') {
                 window.closeSearch();
             }
-            else if (isCtrl && key === 'n' && !searchBar.classList.contains('visible')) {
+            else if (isCtrl && keyLower === 'n' && !searchBar.classList.contains('visible')) {
                 e.preventDefault();
                 if (!pdfDoc) return;
                 showPageInput();
+            }
+            else if (key === 'ArrowRight' || key === 'ArrowLeft') {
+                e.preventDefault();
+                const scrollContainer = document.getElementById('viewer-scroll-container');
+                const containerRect = scrollContainer.getBoundingClientRect();
+                const pages = document.querySelectorAll('.page-wrapper');
+                
+                if (pages.length === 0) return;
+
+                if (key === 'ArrowRight') {
+                    // 다음 상태: 뷰포트 아래에 있는 첫 번째 페이지를 찾아 맨 위로 올림
+                    let found = false;
+                    for (let i = 0; i < pages.length; i++) {
+                        const rect = pages[i].getBoundingClientRect();
+                        if (rect.top >= containerRect.bottom - 10) {
+                            const scrollOffset = pages[i].offsetTop - scrollContainer.offsetTop;
+                            scrollContainer.scrollTo({ top: scrollOffset, behavior: 'smooth' });
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
+                    }
+                } else if (key === 'ArrowLeft') {
+                    // 이전 상태: 현재 보이는 첫 페이지를 찾고, 그보다 이전 페이지들 중 적절한 위치로 스냅
+                    let firstVisible = -1;
+                    for (let i = 0; i < pages.length; i++) {
+                        const rect = pages[i].getBoundingClientRect();
+                        if (rect.bottom > containerRect.top + 10) {
+                            firstVisible = i;
+                            break;
+                        }
+                    }
+                    
+                    if (firstVisible > 0) {
+                        const targetTop = scrollContainer.scrollTop - scrollContainer.clientHeight;
+                        if (targetTop <= 0) {
+                            scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                        } else {
+                            let closestPage = 0;
+                            let minDiff = Infinity;
+                            for (let i = 0; i < firstVisible; i++) {
+                                const pageTop = pages[i].offsetTop - scrollContainer.offsetTop;
+                                const diff = Math.abs(pageTop - targetTop);
+                                if (diff < minDiff) {
+                                    minDiff = diff;
+                                    closestPage = i;
+                                }
+                            }
+                            const scrollOffset = pages[closestPage].offsetTop - scrollContainer.offsetTop;
+                            scrollContainer.scrollTo({ top: scrollOffset, behavior: 'smooth' });
+                        }
+                    } else {
+                        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                }
             }
         });
 
