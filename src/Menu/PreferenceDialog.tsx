@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { checkForUpdates } from '../utils/updater';
 import { open } from '@tauri-apps/plugin-dialog';
 import './PreferenceDialog.css';
 
@@ -16,9 +15,10 @@ interface PreferenceDialogProps {
   initialUsePdfWorker?: boolean;
   initialLicenseEmail?: string;
   initialLicenseCode?: string;
+  initialDisableUpdateCheck?: boolean;
   licenseInfo?: any;
   onActivateLicense?: (email: string, code: string) => Promise<void>;
-  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string) => void;
+  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean) => void;
 }
 
 const DEFAULT_COLUMN_SETTINGS = [
@@ -31,7 +31,7 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, licenseInfo, onActivateLicense, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, licenseInfo, onActivateLicense, onSave }: PreferenceDialogProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'General' | 'Folder' | 'License'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
@@ -43,6 +43,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   const [usePdfWorker, setUsePdfWorker] = useState<boolean>(initialUsePdfWorker !== false);
   const [licenseEmail, setLicenseEmail] = useState<string>(initialLicenseEmail || '');
   const [licenseCode, setLicenseCode] = useState<string>(initialLicenseCode || '');
+  const [disableUpdateCheck, setDisableUpdateCheck] = useState<boolean>(!!initialDisableUpdateCheck);
 
   // Dragging state
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -67,9 +68,10 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       setUsePdfWorker(initialUsePdfWorker !== false);
       setLicenseEmail(initialLicenseEmail || '');
       setLicenseCode(initialLicenseCode || '');
+      setDisableUpdateCheck(!!initialDisableUpdateCheck);
       setPosition({ x: 0, y: 0 });
     }
-  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode]);
+  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -182,7 +184,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode);
+    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck);
     onClose();
   };
 
@@ -342,27 +344,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '6px' }}>
                   {t('preferences.columnsDesc')}
                 </p>
-              </div>
-              
-              <div className="preference-item" style={{ marginTop: '16px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-                <span className="label-text">App Updates</span>
-                <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '8px' }}>
-                  Check if a newer version of MHZipy is available.
-                </p>
-                <button 
-                  className="btn-primary" 
-                  style={{ alignSelf: 'flex-start' }}
-                  onClick={(e) => { 
-                    e.preventDefault(); 
-                    checkForUpdates(
-                      true,
-                      (title, message) => setAlertMessage({title, message}),
-                      (title, message, onYes) => setConfirmAction({title, message, onConfirm: onYes})
-                    ); 
-                  }}
-                >
-                  Check for Updates
-                </button>
               </div>
             </>
           )}

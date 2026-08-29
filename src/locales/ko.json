@@ -56,7 +56,9 @@
     "noFoldersAdded": "추가된 폴더가 없습니다.",
     "addFolder": "+ 폴더 추가",
     "cancel": "취소",
-    "saveChanges": "변경사항 저장"
+    "saveChanges": "변경사항 저장",
+    "disableUpdateCheck": "기동 시 체크하지 않는다",
+    "checkOnStartup": "시작 시 업데이트 확인"
   },
   "columns": {
     "name": "이름",

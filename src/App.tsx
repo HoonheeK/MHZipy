@@ -49,6 +49,7 @@ interface AppConfig {
   licenseEmail?: string;
   licenseCode?: string;
   recentOpenedFolders?: string[];
+  disableUpdateCheck?: boolean;
 }
 
 function App() {
@@ -70,13 +71,6 @@ function App() {
   const [isOpenSourceOpen, setIsOpenSourceOpen] = useState(false);
 
   useEffect(() => {
-    // Check for updates on startup
-    checkForUpdates(
-      false,
-      (title, message) => setGlobalAlert({title, message}),
-      (title, message, onYes) => setGlobalConfirm({title, message, onConfirm: onYes})
-    );
-
     const initConfig = async () => {
 
       try {
@@ -119,8 +113,21 @@ function App() {
           if (parsed.search && parsed.search.query) {
             setSearchQuery(parsed.search.query);
           }
+          if (!parsed.disableUpdateCheck) {
+            checkForUpdates(
+              false,
+              (title, message) => setGlobalAlert({title, message}),
+              (title, message, onYes) => setGlobalConfirm({title, message, onConfirm: onYes})
+            );
+          }
         } else {
           console.warn('[App] 설정 파일(config.json)이 존재하지 않습니다.');
+          // Default behavior when config is missing
+          checkForUpdates(
+            false,
+            (title, message) => setGlobalAlert({title, message}),
+            (title, message, onYes) => setGlobalConfirm({title, message, onConfirm: onYes})
+          );
         }
 
         try {
@@ -279,7 +286,8 @@ function App() {
         initialUsePdfWorker={config.usePdfWorker}
         initialLicenseEmail={config.licenseEmail}
         initialLicenseCode={config.licenseCode}
-        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string) => {
+        initialDisableUpdateCheck={config.disableUpdateCheck}
+        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean) => {
           saveConfig({
             defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
@@ -290,6 +298,7 @@ function App() {
             usePdfWorker: newUsePdfWorker,
             licenseEmail: newLicenseEmail,
             licenseCode: newLicenseCode,
+            disableUpdateCheck: newDisableUpdateCheck,
           });
         }}
         licenseInfo={licenseInfo}
@@ -363,7 +372,12 @@ function App() {
         </div>
       )}
 
-      <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
+      <AboutDialog 
+        isOpen={isAboutOpen} 
+        onClose={() => setIsAboutOpen(false)} 
+        disableUpdateCheck={config.disableUpdateCheck}
+        onToggleUpdateCheck={(disabled) => saveConfig({ ...config, disableUpdateCheck: disabled })}
+      />
       <OpenSourceDialog isOpen={isOpenSourceOpen} onClose={() => setIsOpenSourceOpen(false)} />
 
       {/* Global Custom Alert Modal */}
