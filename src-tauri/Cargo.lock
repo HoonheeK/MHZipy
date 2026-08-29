@@ -2507,7 +2507,7 @@ dependencies = [
 
 [[package]]
 name = "mhzipy"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",

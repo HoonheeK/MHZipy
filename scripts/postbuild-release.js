@@ -86,7 +86,7 @@ async function run() {
     const signature = fs.readFileSync(sigPath, 'utf8').trim();
 
     // 4. 포터블 exe → .abc 변환 후 ZIP 생성 (ZipCrypto 암호화)
-    const abcFileName = `${productName}_${version}.abc`;
+    const abcFileName = `${productName}.abc`;
     const zipFileName = `${productName}_${version}.zip`;
     const zipPath = path.join(releaseDir, zipFileName);
 

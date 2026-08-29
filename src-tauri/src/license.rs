@@ -12,8 +12,6 @@ use winreg::RegKey;
 
 const AES_SECRET: &[u8; 32] = b"MHZipy_Super_Secret_Key_12345678";
 
-
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum LicenseStatusType {
     Trial { days_left: i32 },
@@ -140,31 +138,31 @@ pub const WEB_APP_URL: &str = "https://mhzipy-update.marh-sw.com/buy.html";
 
 pub fn verify_license_code(code: &str, current_device_id: &str) -> Result<LicensePayload, String> {
     println!("[License] Verifying license code via Google Apps Script...");
-    
+
     let url = format!(
         "{}?action=validate&code={}&deviceId={}",
         GAS_API_URL,
         urlencoding::encode(code),
         urlencoding::encode(current_device_id)
     );
-    
+
     let client = reqwest::blocking::Client::new();
-    let res = client.get(&url)
-        .send()
-        .map_err(|e| {
-            println!("[License Error] Network error: {:?}", e);
-            format!("Network error: {}", e)
-        })?;
-        
+    let res = client.get(&url).send().map_err(|e| {
+        println!("[License Error] Network error: {:?}", e);
+        format!("Network error: {}", e)
+    })?;
+
     let data: GasValidationResponse = res.json().map_err(|e| {
         println!("[License Error] Invalid response: {:?}", e);
         format!("Invalid response format: {}", e)
     })?;
-    
+
     if !data.valid {
-        return Err(data.reason.unwrap_or_else(|| "Invalid license code".to_string()));
+        return Err(data
+            .reason
+            .unwrap_or_else(|| "Invalid license code".to_string()));
     }
-    
+
     if let Some(ref date_str) = data.expiry_date {
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date_str) {
             println!("[License] Verification successful! Expiry: {}", dt);
@@ -175,7 +173,7 @@ pub fn verify_license_code(code: &str, current_device_id: &str) -> Result<Licens
             });
         }
     }
-    
+
     Err("Failed to parse expiry date from server".to_string())
 }
 
@@ -190,9 +188,7 @@ pub fn get_license_status(app: &AppHandle) -> LicenseInfo {
         let expiry = DateTime::from_timestamp(expiry_date, 0).unwrap_or(DateTime::<Utc>::MIN_UTC);
         if now < expiry {
             return LicenseInfo {
-                status: LicenseStatusType::Activated {
-                    expiry_date,
-                },
+                status: LicenseStatusType::Activated { expiry_date },
                 device_id,
             };
         }
