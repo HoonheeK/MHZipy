@@ -16,9 +16,10 @@ interface PreferenceDialogProps {
   initialLicenseEmail?: string;
   initialLicenseCode?: string;
   initialDisableUpdateCheck?: boolean;
+  initialPdfExportPath?: string;
   licenseInfo?: any;
   onActivateLicense?: (email: string, code: string) => Promise<void>;
-  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean) => void;
+  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string) => void;
 }
 
 const DEFAULT_COLUMN_SETTINGS = [
@@ -31,7 +32,7 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, licenseInfo, onActivateLicense, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo, onActivateLicense, onSave }: PreferenceDialogProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'General' | 'Folder' | 'License'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
@@ -44,6 +45,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   const [licenseEmail, setLicenseEmail] = useState<string>(initialLicenseEmail || '');
   const [licenseCode, setLicenseCode] = useState<string>(initialLicenseCode || '');
   const [disableUpdateCheck, setDisableUpdateCheck] = useState<boolean>(!!initialDisableUpdateCheck);
+  const [pdfExportPath, setPdfExportPath] = useState<string>(initialPdfExportPath || '');
 
   // Dragging state
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -69,9 +71,10 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       setLicenseEmail(initialLicenseEmail || '');
       setLicenseCode(initialLicenseCode || '');
       setDisableUpdateCheck(!!initialDisableUpdateCheck);
+      setPdfExportPath(initialPdfExportPath || '');
       setPosition({ x: 0, y: 0 });
     }
-  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck]);
+  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -184,7 +187,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck);
+    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath);
     onClose();
   };
 
@@ -321,6 +324,30 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                   <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#334155' }}>{t('preferences.usePdfWorker', 'Use Built-in PDF Viewer')}</span>
                   <span style={{ fontSize: '0.85rem', color: '#64748b' }}>- {t('preferences.usePdfWorkerDesc', 'Open PDF files with internal PDF worker by default')}</span>
                 </label>
+              </div>
+              <div className="preference-item" style={{ marginTop: '8px' }}>
+                <span className="label-text">PDF Export Directory (Leave empty to use same directory as original file)</span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={pdfExportPath}
+                    onChange={(e) => setPdfExportPath(e.target.value)}
+                    placeholder="e.g. C:\Users\Document\PDFs"
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn-secondary" onClick={async () => {
+                    const selected = await open({
+                      directory: true,
+                      multiple: false,
+                      defaultPath: pdfExportPath || undefined,
+                    });
+                    if (selected && typeof selected === 'string') {
+                      setPdfExportPath(selected);
+                    }
+                  }}>
+                    Browse
+                  </button>
+                </div>
               </div>
               <div className="preference-item">
                 <span className="label-text">{t('preferences.columnsTitle')}</span>

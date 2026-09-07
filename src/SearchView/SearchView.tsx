@@ -28,6 +28,7 @@ interface SearchViewProps {
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
   onSelectionChange?: (paths: Set<string>) => void;
   usePdfWorker?: boolean;
+  pdfExportPath?: string;
 }
 
 interface FileData {
@@ -97,7 +98,8 @@ export default function SearchView({
   clipboard,
   onColumnSettingsChange,
   onSelectionChange,
-  usePdfWorker
+  usePdfWorker,
+  pdfExportPath
 }: SearchViewProps) {
   const { t } = useTranslation();
   const [results, setResults] = useState<FileData[]>([]);
@@ -752,6 +754,7 @@ export default function SearchView({
               clipboard={clipboard}
               canPaste={canPaste}
               onColumnSettingsChange={onColumnSettingsChange}
+              pdfExportPath={pdfExportPath}
               usePdfWorker={usePdfWorker}
             />
           )}

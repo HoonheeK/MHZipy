@@ -39,6 +39,7 @@ interface FileListProps {
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
   onRefresh?: () => void;
   usePdfWorker?: boolean;
+  pdfExportPath?: string;
 }
 
 interface FileData {
@@ -99,7 +100,8 @@ export default function FileList({
   canPaste,
   onColumnSettingsChange,
   onRefresh,
-  usePdfWorker = true
+  usePdfWorker = true,
+  pdfExportPath
 }: FileListProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<FileData[]>([]);
@@ -1894,6 +1896,15 @@ export default function FileList({
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className={`context-menu-item ${!canExtractHere ? 'disabled' : ''}`} onClick={canExtractHere ? performExtract : undefined} style={{ padding: '2px 10px' }}>
                   <span>{t('contextMenu.extractHere')}</span> <span className="shortcut">Alt+E</span>
+                </div>
+              )}
+              {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.pptx') && (
+                <div className="context-menu-item" onClick={() => {
+                  const filePath = Array.from(selectedFiles)[0];
+                  invoke('convert_pptx_to_pdf', { sourcePath: filePath, targetDir: pdfExportPath });
+                  setContextMenu(null);
+                }} style={{ padding: '2px 10px' }}>
+                  <span>Export To PDF</span>
                 </div>
               )}
               <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>

@@ -13,16 +13,17 @@ import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[] };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[] }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   externalPath?: string;
   externalSelect?: string;
+  pdfExportPath?: string;
   onNavigate?: (path: string) => void;
 }
 
-export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery, externalPath, externalSelect, onNavigate }: FileExplorerProps) {
+export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery, externalPath, externalSelect, pdfExportPath, onNavigate }: FileExplorerProps) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string>(externalPath || config.defaultPath || "C:");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([externalPath || config.defaultPath || "C:"]));
@@ -653,6 +654,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
         usePdfWorker={config.usePdfWorker}
         recentOpenedFolders={config.recentOpenedFolders}
+        pdfExportPath={pdfExportPath}
       />
     </div>
   );
@@ -841,6 +843,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             canPaste={!!clipboard && clipboard.paths.length > 0}
             onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
             usePdfWorker={config.usePdfWorker}
+            pdfExportPath={pdfExportPath}
           />
         </section>
         {contextMenu && (

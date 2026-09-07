@@ -9,9 +9,10 @@ import AboutDialog from './Menu/AboutDialog';
 import OpenSourceDialog from './Menu/OpenSourceDialog';
 import { ensureDir } from './utils/fileOps';
 import { invoke } from '@tauri-apps/api/core';
-import { emit } from '@tauri-apps/api/event';
+import { emit, listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { checkForUpdates } from './utils/updater';
+import PdfProgressDialog from './common/PdfProgressDialog';
 import './App.css';
 
 export interface SearchConfig {
@@ -50,6 +51,7 @@ interface AppConfig {
   licenseCode?: string;
   recentOpenedFolders?: string[];
   disableUpdateCheck?: boolean;
+  pdfExportPath?: string;
 }
 
 function App() {
@@ -69,6 +71,43 @@ function App() {
   const [globalConfirm, setGlobalConfirm] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isOpenSourceOpen, setIsOpenSourceOpen] = useState(false);
+  const [pdfProgressOpen, setPdfProgressOpen] = useState(false);
+  const [pdfProgressState, setPdfProgressState] = useState({ progress: 0, filename: '' });
+
+  useEffect(() => {
+    const unlistenProgress = listen<any>('pdf-conversion-progress', (event: any) => {
+      setPdfProgressOpen(true);
+      setPdfProgressState({
+        progress: event.payload.processed,
+        filename: event.payload.filename
+      });
+    });
+
+    const unlistenComplete = listen<string>('pdf-conversion-complete', (event: any) => {
+      setPdfProgressOpen(false);
+      setGlobalConfirm({
+        title: 'Conversion Complete',
+        message: 'PDF conversion is complete. Do you want to open the PDF file?',
+        onConfirm: () => {
+          invoke('open_file', { path: event.payload });
+        }
+      });
+    });
+
+    const unlistenError = listen<string>('pdf-conversion-error', (event: any) => {
+      setPdfProgressOpen(false);
+      setGlobalAlert({
+        title: 'Conversion Error',
+        message: `Failed to convert PDF: ${event.payload}`
+      });
+    });
+
+    return () => {
+      unlistenProgress.then((f: UnlistenFn) => f());
+      unlistenComplete.then((f: UnlistenFn) => f());
+      unlistenError.then((f: UnlistenFn) => f());
+    };
+  }, []);
 
   useEffect(() => {
     const initConfig = async () => {
@@ -272,6 +311,7 @@ function App() {
         searchQuery={searchQuery}
         externalPath={requestedPath}
         externalSelect={requestedSelect}
+        pdfExportPath={config.pdfExportPath}
         onNavigate={handleFileExplorerNavigate}
       />
       <PreferenceDialog
@@ -287,7 +327,8 @@ function App() {
         initialLicenseEmail={config.licenseEmail}
         initialLicenseCode={config.licenseCode}
         initialDisableUpdateCheck={config.disableUpdateCheck}
-        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean) => {
+        initialPdfExportPath={config.pdfExportPath}
+        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string) => {
           saveConfig({
             defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
@@ -299,6 +340,7 @@ function App() {
             licenseEmail: newLicenseEmail,
             licenseCode: newLicenseCode,
             disableUpdateCheck: newDisableUpdateCheck,
+            pdfExportPath: newPdfExportPath,
           });
         }}
         licenseInfo={licenseInfo}
@@ -407,6 +449,12 @@ function App() {
         </div>
       )}
 
+      <PdfProgressDialog 
+        isOpen={pdfProgressOpen} 
+        onClose={() => setPdfProgressOpen(false)} 
+        progress={pdfProgressState.progress} 
+        filename={pdfProgressState.filename} 
+      />
     </div>
   );
 }

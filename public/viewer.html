@@ -492,6 +492,18 @@
                 pdfDoc = await loadingTask.promise;
                 loadingEl.style.display = 'none';
 
+                // 메타데이터(원본 파일 정보) 확인 및 저장
+                try {
+                    const meta = await pdfDoc.getMetadata();
+                    const info = meta?.info || {};
+                    const sourceStr = info.Source || info.Subject || info.Keywords || '';
+                    if (sourceStr && sourceStr.includes('Source: ')) {
+                        window.__SOURCE_PPTX_PATH__ = sourceStr.replace('Source: ', '').trim();
+                    }
+                } catch (err) {
+                    console.warn('Failed to load metadata', err);
+                }
+
                 // 목차 로드
                 loadOutline();
 
@@ -771,6 +783,24 @@
                 container.appendChild(pageWrapper);
 
                 _pageDataList.push({ pageNum, page, viewport, pageWrapper });
+
+                // 첫 페이지 왼쪽 아래에 조그맣게 Source 표시
+                if (pageNum === 1 && window.__SOURCE_PPTX_PATH__) {
+                    const infoEl = document.createElement('div');
+                    infoEl.style.position = 'absolute';
+                    infoEl.style.bottom = '10px';
+                    infoEl.style.left = '10px';
+                    infoEl.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                    infoEl.style.color = '#fff';
+                    infoEl.style.padding = '4px 8px';
+                    infoEl.style.borderRadius = '4px';
+                    infoEl.style.fontSize = '11px';
+                    infoEl.style.zIndex = '100';
+                    infoEl.style.pointerEvents = 'none';
+                    infoEl.style.whiteSpace = 'nowrap';
+                    infoEl.textContent = `Source PPTX: ${window.__SOURCE_PPTX_PATH__}`;
+                    pageWrapper.appendChild(infoEl);
+                }
             }
 
             if (version !== _renderVersion) return;
@@ -1633,6 +1663,32 @@
         });
         zoomInput.addEventListener('blur', () => {
             zoomInput.value = Math.round(currentScale * 100) + '%';
+        });
+
+        // 키보드 네비게이션 (화살표, 페이지업/다운, 스페이스)
+        window.addEventListener('keydown', (e) => {
+            const tagName = e.target.tagName.toLowerCase();
+            if (tagName === 'input' || tagName === 'textarea') return;
+
+            const currentPageSpan = document.getElementById('current-page');
+            if (!currentPageSpan) return;
+            const currentPageNum = parseInt(currentPageSpan.textContent);
+
+            switch (e.key) {
+                case 'ArrowLeft':
+                case 'ArrowUp':
+                case 'PageUp':
+                    e.preventDefault();
+                    goToPage(currentPageNum - 1, true);
+                    break;
+                case 'ArrowRight':
+                case 'ArrowDown':
+                case 'PageDown':
+                case ' ':
+                    e.preventDefault();
+                    goToPage(currentPageNum + 1, true);
+                    break;
+            }
         });
 
         // URL 파라미터 또는 전역 변수에서 데이터 읽기

@@ -801,6 +801,193 @@ fn get_web_app_url() -> String {
     license::WEB_APP_URL.to_string()
 }
 
+#[tauri::command]
+fn convert_pptx_to_pdf(
+    window: tauri::Window,
+    source_path: String,
+    target_dir: Option<String>,
+) -> Result<String, String> {
+    let src_path = Path::new(&source_path);
+    let mut tgt_dir_path = src_path.parent().unwrap().to_path_buf();
+    
+    if let Some(dir) = target_dir {
+        if !dir.is_empty() {
+            tgt_dir_path = PathBuf::from(dir);
+        }
+    }
+    
+    if !tgt_dir_path.exists() {
+        fs::create_dir_all(&tgt_dir_path).map_err(|e| e.to_string())?;
+    }
+
+    let file_stem = src_path.file_stem().unwrap().to_string_lossy().to_string();
+    let mut tgt_path = tgt_dir_path.join(format!("{}.pdf", file_stem));
+    let mut counter = 1;
+    while tgt_path.exists() {
+        tgt_path = tgt_dir_path.join(format!("{} ({}).pdf", file_stem, counter));
+        counter += 1;
+    }
+    
+    let target_path_str = tgt_path.to_string_lossy().to_string();
+    
+    let window_clone = window.clone();
+    let src_clone = source_path.clone();
+    let tgt_clone = target_path_str.clone();
+    
+    std::thread::spawn(move || {
+        // Report 10%
+        let _ = window_clone.emit("pdf-conversion-progress", ProgressPayload {
+            total: 100,
+            processed: 10,
+            filename: file_stem.clone()
+        });
+
+        // office2pdf doesn't have progress callbacks, so we just run it.
+        // It might take a few seconds. We'll spawn another thread to simulate progress up to 90%.
+        let w2 = window_clone.clone();
+        let name_clone = file_stem.clone();
+        
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let is_done = Arc::new(AtomicBool::new(false));
+        let is_done_clone = is_done.clone();
+        
+        std::thread::spawn(move || {
+            for i in 2..=9 {
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                if is_done_clone.load(Ordering::SeqCst) {
+                    break;
+                }
+                let _ = w2.emit("pdf-conversion-progress", ProgressPayload {
+                    total: 100,
+                    processed: i * 10,
+                    filename: name_clone.clone()
+                });
+            }
+        });
+
+        let ps_script = r#"
+            param(
+                [Parameter(Mandatory=$true)][string]$SourcePath,
+                [Parameter(Mandatory=$true)][string]$TargetPath
+            )
+
+            $SourcePath = Resolve-Path -Path $SourcePath -ErrorAction Stop
+            $TargetPath = [System.IO.Path]::GetFullPath($TargetPath)
+
+            try {
+                $ppSaveAsPDF = 32
+                $ppt = New-Object -ComObject PowerPoint.Application
+                $presentation = $ppt.Presentations.Open($SourcePath, $true, $false, $false)
+                $presentation.SaveAs($TargetPath, $ppSaveAsPDF)
+                $presentation.Close()
+            } catch {
+                Write-Error "Failed to convert PPTX to PDF: $_"
+                exit 1
+            } finally {
+                if ($ppt) {
+                    $ppt.Quit()
+                    [System.Runtime.Interopservices.Marshal]::ReleaseComObject($ppt) | Out-Null
+                    [System.GC]::Collect()
+                    [System.GC]::WaitForPendingFinalizers()
+                }
+            }
+        "#;
+
+        let ps_result = std::process::Command::new("powershell")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
+            .arg(&format!(
+                "& {{ {} }} -SourcePath '{}' -TargetPath '{}'",
+                ps_script,
+                src_clone.replace("'", "''"),
+                tgt_clone.replace("'", "''")
+            ))
+            .output();
+
+        let mut com_success = false;
+        if let Ok(output) = ps_result {
+            if output.status.success() {
+                com_success = true;
+            } else {
+                println!("COM automation failed: {:?}", String::from_utf8_lossy(&output.stderr));
+            }
+        }
+
+        let update_metadata = |tgt: &str, src: &str| {
+            use lopdf::{Document, Object, StringFormat, Dictionary};
+            if let Ok(mut doc) = Document::load(tgt) {
+                let (info_id, mut info_dict) = if let Ok(obj) = doc.trailer.get(b"Info") {
+                    if let Ok(id) = obj.as_reference() {
+                        if let Ok(Object::Dictionary(dict)) = doc.get_object(id) {
+                            (id, dict.clone())
+                        } else {
+                            (doc.new_object_id(), Dictionary::new())
+                        }
+                    } else {
+                        (doc.new_object_id(), Dictionary::new())
+                    }
+                } else {
+                    (doc.new_object_id(), Dictionary::new())
+                };
+
+                let mut utf16_src = vec![0xFE, 0xFF];
+                for u in src.encode_utf16() {
+                    utf16_src.push((u >> 8) as u8);
+                    utf16_src.push((u & 0xFF) as u8);
+                }
+                
+                let mut utf16_subject = vec![0xFE, 0xFF];
+                for u in format!("Source: {}", src).encode_utf16() {
+                    utf16_subject.push((u >> 8) as u8);
+                    utf16_subject.push((u & 0xFF) as u8);
+                }
+                
+                info_dict.set("Source", Object::String(utf16_src.clone(), StringFormat::Literal));
+                info_dict.set("Subject", Object::String(utf16_subject.clone(), StringFormat::Literal));
+                info_dict.set("Keywords", Object::String(utf16_subject, StringFormat::Literal));
+                
+                doc.objects.insert(info_id, Object::Dictionary(info_dict));
+                doc.trailer.set("Info", info_id);
+                let _ = doc.save(tgt);
+            }
+        };
+
+        let res = if com_success {
+            is_done.store(true, Ordering::SeqCst);
+            update_metadata(&tgt_clone, &src_clone);
+            let _ = window_clone.emit("pdf-conversion-complete", tgt_clone.clone());
+            Ok(())
+        } else {
+            println!("Falling back to office2pdf...");
+            match office2pdf::convert(&src_clone) {
+                Ok(result) => {
+                    is_done.store(true, Ordering::SeqCst);
+                    
+                    if let Err(e) = std::fs::write(&tgt_clone, &result.pdf) {
+                        Err(e.to_string())
+                    } else {
+                        update_metadata(&tgt_clone, &src_clone);
+                        let _ = window_clone.emit("pdf-conversion-complete", tgt_clone.clone());
+                        Ok(())
+                    }
+                },
+                Err(e) => {
+                    is_done.store(true, Ordering::SeqCst);
+                    Err(e.to_string())
+                }
+            }
+        };
+        
+        if let Err(e) = res {
+            // Emitting error back to frontend (can use complete with error or separate event)
+            let _ = window_clone.emit("pdf-conversion-error", e);
+        }
+    });
+
+    Ok(target_path_str)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -867,7 +1054,7 @@ pub fn run() {
                 .title(&title)
                 .inner_size(1000.0, 800.0)
                 .build()
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + 'static>)?;
 
                 pdf_window.on_window_event(|event| {
                     if let tauri::WindowEvent::CloseRequested { .. } = event {
@@ -948,7 +1135,8 @@ pub fn run() {
             get_files_from_clipboard,
             get_license_info,
             activate_license,
-            get_web_app_url
+            get_web_app_url,
+            convert_pptx_to_pdf
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
