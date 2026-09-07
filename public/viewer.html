@@ -168,6 +168,38 @@
         .linkAnnotation > a { display: block; width: 100%; height: 100%; }
         .linkAnnotation:hover { background-color: rgba(255, 255, 0, 0.2); outline: 1px solid rgba(0, 0, 0, 0.2); }
 
+        /* Capture Features */
+        @keyframes flash-effect {
+            0% { opacity: 0; }
+            50% { opacity: 0.8; background-color: white; }
+            100% { opacity: 0; }
+        }
+        .flash-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            animation: flash-effect 0.3s ease-out;
+        }
+        #region-select-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 9000;
+            cursor: crosshair;
+            display: none;
+        }
+        #region-select-overlay.active {
+            display: block;
+        }
+        .region-select-box {
+            position: absolute;
+            border: 2px dashed #0059ff;
+            background-color: rgba(0, 89, 255, 0.1);
+            display: none;
+            pointer-events: none;
+            z-index: 100;
+        }
+
         /* Custom Password Dialog */
         .message-dialog-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -218,6 +250,10 @@
         <div id="sidebar-resizer"></div>
         
         <div id="main-container">
+            <div id="region-select-overlay">
+                <div id="region-select-box"></div>
+            </div>
+            
             <button id="sidebar-toggle-btn">☰ Outline</button>
             
             <div id="search-bar">
@@ -244,6 +280,11 @@
             </div>
             <div id="zoom-controls">
                 <button class="zoom-btn" id="mode-toggle" title="Text Selection Mode">👆</button>
+                <button class="zoom-btn" id="capture-full" title="현재 화면 캡쳐">📷</button>
+                <button class="zoom-btn" id="capture-region" title="영역 선택 캡쳐">🔲</button>
+                <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
+                <button class="zoom-btn" id="rotate-ccw" title="Rotate Counter-Clockwise">↺</button>
+                <button class="zoom-btn" id="rotate-cw" title="Rotate Clockwise">↻</button>
                 <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
                 <button class="zoom-btn" id="zoom-out">−</button>
                 <input type="text" id="zoom-level" value="150%">
@@ -269,6 +310,7 @@
         let searchResults = [];
         let currentSearchIndex = -1;
         let currentScale = 1.5; // 기본 스케일
+        let currentRotation = 0; // 기본 회전 각도
 
         function showPasswordDialog(msg) {
             return new Promise((resolve) => {
@@ -460,7 +502,7 @@
                 // Landscape(가로 모드)인 경우 첫 페이지가 한 화면에 다 들어오도록 스케일 조정
                 if (pdfDoc.numPages > 0) {
                     const firstPage = await pdfDoc.getPage(1);
-                    const viewport1 = firstPage.getViewport({ scale: 1.0 });
+                    const viewport1 = firstPage.getViewport({ scale: 1.0, rotation: currentRotation });
                     if (viewport1.width > viewport1.height) {
                         const scrollContainer = document.getElementById('viewer-scroll-container');
                         const containerWidth = scrollContainer.clientWidth - 40; // 좌우 패딩 20px씩
@@ -711,7 +753,7 @@
             // === 1단계: 모든 페이지의 플레이스홀더(wrapper)를 먼저 생성 ===
             for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
                 const page = await pdfDoc.getPage(pageNum);
-                let viewport = page.getViewport({ scale: currentScale });
+                let viewport = page.getViewport({ scale: currentScale, rotation: currentRotation });
                 
                 // Canvas 크기 제한 (메모리 최적화)
                 const MAX_CANVAS_DIMENSION = 4096;
@@ -747,6 +789,11 @@
 
             // === 2단계: 현재 보이는 페이지만 렌더링 (나머지는 스크롤 시 지연 렌더링) ===
             await renderVisiblePages();
+            
+            // 모든 페이지 래퍼에 영역 캡쳐 박스를 동기화
+            if (typeof applyRegionBoxToAllPages === 'function') {
+                applyRegionBoxToAllPages();
+            }
         }
 
         // --- 목차 (Outline) 기능 ---
@@ -987,17 +1034,11 @@
             });
         }
 
-        async function goToPage(pageNum) {
+        async function goToPage(pageNum, smooth = false) {
             if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= pdfDoc.numPages) {
-                // 줌 초기화
-                if (currentScale !== 1.5) {
-                    currentScale = 1.5;
-                    document.getElementById('zoom-level').textContent = '150%';
-                    await renderPages();
-                }
                 const pageEl = document.getElementById(`page-${pageNum}`);
                 if (pageEl) {
-                    pageEl.scrollIntoView({ behavior: 'auto', block: 'start' });
+                    pageEl.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
                     updatePageIndicator(pageNum); // 즉시 페이지 번호 업데이트
                 }
             }
@@ -1040,6 +1081,21 @@
             let newScale = currentScale + delta;
             if (newScale < 0.1) newScale = 0.1;
             if (newScale > 10.0) newScale = 10.0;
+
+            // 1페이지 높이에 맞춰지는 스케일(Fit Height) 자동 스냅
+            if (pdfDoc && pdfDoc.numPages > 0) {
+                const currentPage = parseInt(document.getElementById('current-page').textContent) || 1;
+                const page = await pdfDoc.getPage(currentPage);
+                const viewport = page.getViewport({ scale: 1.0, rotation: currentRotation });
+                const scrollContainer = document.getElementById('viewer-scroll-container');
+                const containerHeight = scrollContainer.clientHeight - 40;
+                const fitHeightScale = containerHeight / viewport.height;
+                
+                // 확대/축소 중 페이지 높이에 딱 맞는 스케일 근처면 알아서 스냅(맞춤)
+                if (Math.abs(newScale - fitHeightScale) < 0.15) {
+                    newScale = fitHeightScale;
+                }
+            }
 
             // 현재 보고 있는 페이지 번호와 페이지 내 위치 비율 저장
             const scrollContainer = document.getElementById('viewer-scroll-container');
@@ -1149,6 +1205,198 @@
             viewerContainer.scrollTop = scrollTop - walkY;
         });
 
+        // --- 캡쳐 기능 ---
+        function playFlashEffect() {
+            const flash = document.createElement('div');
+            flash.className = 'flash-overlay';
+            document.body.appendChild(flash);
+            setTimeout(() => flash.remove(), 300);
+        }
+
+        async function copyCanvasToClipboard(canvas) {
+            try {
+                const blobPromise = new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                const item = new ClipboardItem({ 'image/png': blobPromise });
+                await navigator.clipboard.write([item]);
+            } catch (err) {
+                console.error('Clipboard copy failed:', err);
+                alert('클립보드 복사에 실패했습니다: ' + err.message);
+            }
+        }
+
+        async function doCapture(captureRect) {
+            const offCanvas = document.createElement('canvas');
+            offCanvas.width = captureRect.width;
+            offCanvas.height = captureRect.height;
+            const ctx = offCanvas.getContext('2d');
+            
+            // 바탕색
+            ctx.fillStyle = '#525659';
+            ctx.fillRect(0, 0, offCanvas.width, offCanvas.height);
+            
+            const pages = document.querySelectorAll('.page-wrapper');
+            pages.forEach(page => {
+                const pageRect = page.getBoundingClientRect();
+                
+                // 성능 최적화: 캡쳐 영역에 보이지 않는 페이지는 건너뜀
+                if (pageRect.bottom <= captureRect.top || pageRect.top >= captureRect.bottom ||
+                    pageRect.right <= captureRect.left || pageRect.left >= captureRect.right) {
+                    return;
+                }
+                
+                const drawX = pageRect.left - captureRect.left;
+                const drawY = pageRect.top - captureRect.top;
+                const drawW = pageRect.width;
+                const drawH = pageRect.height;
+                
+                // 페이지 배경색(흰색) 그리기
+                ctx.fillStyle = 'white';
+                ctx.fillRect(drawX, drawY, drawW, drawH);
+                
+                const canvas = page.querySelector('canvas');
+                if (canvas) {
+                    try {
+                        ctx.drawImage(canvas, drawX, drawY, drawW, drawH);
+                    } catch (e) {
+                        console.error('Canvas drawImage error:', e);
+                    }
+                }
+            });
+            
+            await copyCanvasToClipboard(offCanvas);
+            playFlashEffect();
+        }
+
+        let isPageCaptureMode = false;
+
+        document.getElementById('capture-full').onclick = () => {
+            isPageCaptureMode = !isPageCaptureMode;
+            if (isPageCaptureMode) {
+                document.getElementById('capture-full').style.background = 'rgba(255,255,255,0.3)';
+                viewerContainer.style.cursor = 'crosshair';
+                
+                // 다른 모드 해제
+                if (isRegionCaptureMode) {
+                    document.getElementById('capture-region').click();
+                }
+            } else {
+                document.getElementById('capture-full').style.background = 'transparent';
+                viewerContainer.style.cursor = '';
+            }
+        };
+
+        viewerContainer.addEventListener('click', (e) => {
+            if (!isPageCaptureMode) return;
+            
+            const pageWrapper = e.target.closest('.page-wrapper');
+            if (pageWrapper) {
+                const rect = pageWrapper.getBoundingClientRect();
+                doCapture({
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height
+                });
+                
+                // 캡쳐 후 모드 해제하지 않음 (연속 캡쳐 지원)
+            }
+        });
+
+        let isRegionCaptureMode = false;
+        let isDrawingRegion = false;
+        let activeRegionPage = null; // .page-wrapper 요소
+        let regionStartX = 0;
+        let regionStartY = 0;
+        let regionBounds = null; // { leftPct, topPct, widthPct, heightPct }
+        
+        window.applyRegionBoxToAllPages = () => {
+            const pages = document.querySelectorAll('.page-wrapper');
+            pages.forEach(page => {
+                let box = page.querySelector('.region-select-box');
+                if (regionBounds) {
+                    if (!box) {
+                        box = document.createElement('div');
+                        box.className = 'region-select-box';
+                        page.appendChild(box);
+                    }
+                    box.style.display = 'block';
+                    box.style.left = `${regionBounds.leftPct}%`;
+                    box.style.top = `${regionBounds.topPct}%`;
+                    box.style.width = `${regionBounds.widthPct}%`;
+                    box.style.height = `${regionBounds.heightPct}%`;
+                } else {
+                    if (box) box.style.display = 'none';
+                }
+            });
+        };
+
+        document.getElementById('capture-region').onclick = () => {
+            isRegionCaptureMode = !isRegionCaptureMode;
+            if (isRegionCaptureMode) {
+                document.getElementById('capture-region').style.background = 'rgba(255,255,255,0.3)';
+                viewerContainer.style.cursor = 'crosshair';
+                
+                // 다른 모드 해제
+                if (isPageCaptureMode) {
+                    document.getElementById('capture-full').click();
+                }
+            } else {
+                document.getElementById('capture-region').style.background = 'transparent';
+                viewerContainer.style.cursor = '';
+                regionBounds = null;
+                applyRegionBoxToAllPages();
+            }
+        };
+
+        viewerContainer.addEventListener('mousedown', (e) => {
+            if (!isRegionCaptureMode) return;
+            e.preventDefault(); // 텍스트 선택(Text Selection Mode) 방지
+            
+            const pageWrapper = e.target.closest('.page-wrapper');
+            if (!pageWrapper) return;
+            
+            isDrawingRegion = true;
+            activeRegionPage = pageWrapper;
+            
+            const rect = pageWrapper.getBoundingClientRect();
+            regionStartX = e.clientX - rect.left;
+            regionStartY = e.clientY - rect.top;
+            
+            regionBounds = {
+                leftPct: (regionStartX / rect.width) * 100,
+                topPct: (regionStartY / rect.height) * 100,
+                widthPct: 0,
+                heightPct: 0
+            };
+            applyRegionBoxToAllPages();
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDrawingRegion || !activeRegionPage) return;
+            const rect = activeRegionPage.getBoundingClientRect();
+            const currentX = e.clientX - rect.left;
+            const currentY = e.clientY - rect.top;
+            
+            const x = Math.min(regionStartX, currentX);
+            const y = Math.min(regionStartY, currentY);
+            const w = Math.abs(currentX - regionStartX);
+            const h = Math.abs(currentY - regionStartY);
+            
+            regionBounds = {
+                leftPct: (x / rect.width) * 100,
+                topPct: (y / rect.height) * 100,
+                widthPct: (w / rect.width) * 100,
+                heightPct: (h / rect.height) * 100
+            };
+            applyRegionBoxToAllPages();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDrawingRegion) {
+                isDrawingRegion = false;
+            }
+        });
+
         // --- UI 이벤트 핸들러 ---
         const sidebar = document.getElementById('sidebar');
         const searchBar = document.getElementById('search-bar');
@@ -1206,54 +1454,49 @@
                 const containerRect = scrollContainer.getBoundingClientRect();
                 const pages = document.querySelectorAll('.page-wrapper');
                 
-                if (pages.length === 0) return;
-
-                if (key === 'ArrowRight') {
-                    // 다음 상태: 뷰포트 아래에 있는 첫 번째 페이지를 찾아 맨 위로 올림
-                    let found = false;
-                    for (let i = 0; i < pages.length; i++) {
-                        const rect = pages[i].getBoundingClientRect();
-                        if (rect.top >= containerRect.bottom - 10) {
-                            const scrollOffset = pages[i].offsetTop - scrollContainer.offsetTop;
-                            scrollContainer.scrollTo({ top: scrollOffset, behavior: 'smooth' });
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
-                    }
-                } else if (key === 'ArrowLeft') {
-                    // 이전 상태: 현재 보이는 첫 페이지를 찾고, 그보다 이전 페이지들 중 적절한 위치로 스냅
-                    let firstVisible = -1;
-                    for (let i = 0; i < pages.length; i++) {
-                        const rect = pages[i].getBoundingClientRect();
-                        if (rect.bottom > containerRect.top + 10) {
-                            firstVisible = i;
-                            break;
-                        }
-                    }
+                let visibleCount = 0;
+                for (let i = 0; i < pages.length; i++) {
+                    const rect = pages[i].getBoundingClientRect();
+                    const visibleTop = Math.max(rect.top, containerRect.top);
+                    const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+                    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
                     
-                    if (firstVisible > 0) {
-                        const targetTop = scrollContainer.scrollTop - scrollContainer.clientHeight;
-                        if (targetTop <= 0) {
-                            scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
-                        } else {
-                            let closestPage = 0;
-                            let minDiff = Infinity;
-                            for (let i = 0; i < firstVisible; i++) {
-                                const pageTop = pages[i].offsetTop - scrollContainer.offsetTop;
-                                const diff = Math.abs(pageTop - targetTop);
-                                if (diff < minDiff) {
-                                    minDiff = diff;
-                                    closestPage = i;
-                                }
+                    // 페이지의 30% 이상이 보이거나, 화면 높이의 50% 이상을 덮고 있으면 보이는 것으로 간주
+                    if (visibleHeight > rect.height * 0.3 || visibleHeight > containerRect.height * 0.5) {
+                        visibleCount++;
+                    }
+                }
+                
+                const step = Math.max(1, visibleCount);
+                const currentPageEl = document.getElementById('current-page');
+                const currentPage = parseInt(currentPageEl.textContent) || 1;
+                
+                if (key === 'ArrowRight' && pdfDoc && currentPage < pdfDoc.numPages) {
+                    goToPage(Math.min(pdfDoc.numPages, currentPage + step), true);
+                } else if (key === 'ArrowLeft' && pdfDoc && currentPage > 1) {
+                    goToPage(Math.max(1, currentPage - step), true);
+                }
+            }
+            else if (key === ' ' && !e.ctrlKey) {
+                if (isRegionCaptureMode && regionBounds) {
+                    e.preventDefault();
+                    // 현재 보이는 페이지를 기준으로 캡쳐
+                    const currentPageEl = document.getElementById('current-page');
+                    const currentPageNum = parseInt(currentPageEl.textContent) || 1;
+                    const activePageEl = document.getElementById(`page-${currentPageNum}`);
+                    if (activePageEl) {
+                        const box = activePageEl.querySelector('.region-select-box');
+                        if (box && box.style.display !== 'none') {
+                            const rect = box.getBoundingClientRect();
+                            if (rect.width > 5 && rect.height > 5) {
+                                doCapture({
+                                    left: rect.left,
+                                    top: rect.top,
+                                    width: rect.width,
+                                    height: rect.height
+                                });
                             }
-                            const scrollOffset = pages[closestPage].offsetTop - scrollContainer.offsetTop;
-                            scrollContainer.scrollTo({ top: scrollOffset, behavior: 'smooth' });
                         }
-                    } else {
-                        scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
                     }
                 }
             }
@@ -1358,6 +1601,16 @@
             if (searchResults.length === 0) return;
             currentSearchIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
             updateSearchFocus();
+        };
+
+        document.getElementById('rotate-ccw').onclick = async () => {
+            currentRotation = (currentRotation - 90 + 360) % 360;
+            await renderPages();
+        };
+        
+        document.getElementById('rotate-cw').onclick = async () => {
+            currentRotation = (currentRotation + 90) % 360;
+            await renderPages();
         };
 
         document.getElementById('zoom-in').onclick = () => updateZoom(0.25);
