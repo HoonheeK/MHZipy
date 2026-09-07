@@ -138,6 +138,40 @@ async function run() {
             console.log("✅ 로컬 release-history.json 파일 동기화 완료");
         }
 
+        // src/data/updateLogs.ts 동기화 (한/영/일어 릴리스 노트)
+        const localUpdateLogsTsPath = path.resolve(__dirname, '../../../HOMEPAGE/marh-software/src/data/updateLogs.ts');
+        if (fs.existsSync(localUpdateLogsTsPath) && fs.existsSync(releaseHistoryPath)) {
+            const history = JSON.parse(fs.readFileSync(releaseHistoryPath, 'utf8'));
+            if (history.length > 0) {
+                const latest = history[0];
+                let tsContent = fs.readFileSync(localUpdateLogsTsPath, 'utf8');
+                
+                // version이 존재하는지 정규식으로 확인 (mhzipyUpdateLogs 내에서)
+                const versionRegex = new RegExp(`version:\\s*["']${latest.version}["']`);
+                if (!versionRegex.test(tsContent)) {
+                    const newEntry = `  {
+    version: "${latest.version}",
+    date: "${latest.date}",
+    changes: {
+      ko: ${JSON.stringify(latest.notes.ko || [], null, 2).replace(/\\n/g, '\\n        ').replace(/\\]$/, '      ]')},
+      ja: ${JSON.stringify(latest.notes.ja || [], null, 2).replace(/\\n/g, '\\n        ').replace(/\\]$/, '      ]')},
+      en: ${JSON.stringify(latest.notes.en || [], null, 2).replace(/\\n/g, '\\n        ').replace(/\\]$/, '      ]')}
+    }
+  },\n`;
+                    const targetString = 'export const mhzipyUpdateLogs: UpdateLog[] = [\n';
+                    if (tsContent.includes(targetString)) {
+                        tsContent = tsContent.replace(targetString, targetString + newEntry);
+                        fs.writeFileSync(localUpdateLogsTsPath, tsContent, 'utf8');
+                        console.log(`✅ 로컬 updateLogs.ts 파일 동기화 완료 (버전 ${latest.version} 추가됨)`);
+                    } else {
+                        console.warn("⚠️ updateLogs.ts 에서 mhzipyUpdateLogs 배열을 찾을 수 없습니다.");
+                    }
+                } else {
+                    console.log(`✅ updateLogs.ts 에 버전 ${latest.version} 이(가) 이미 존재하여 추가를 건너뜁니다.`);
+                }
+            }
+        }
+
         // 홈페이지 자동 빌드
         try {
             console.log(`\n홈페이지 프로젝트(${homepageDir}) 빌드를 시작합니다...`);
