@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
+import { execSync } from 'child_process';
 
 // archiver v5는 CommonJS 전용이므로 createRequire 사용
 const require = createRequire(import.meta.url);
@@ -94,9 +95,18 @@ async function run() {
     await createPasswordZip(portableExePath, abcFileName, zipPath);
 
     // 5. 자동생성할 update.json 데이터 구성
+    const releaseHistoryPath = path.resolve(__dirname, '../release-history.json');
+    let englishNotes = `MHZipy Version ${version} Released!`;
+    if (fs.existsSync(releaseHistoryPath)) {
+        const history = JSON.parse(fs.readFileSync(releaseHistoryPath, 'utf8'));
+        if (history.length > 0 && history[0].version === version) {
+            englishNotes = history[0].notes.en.join('\\n');
+        }
+    }
+
     const updateJson = {
         version: version,
-        notes: `Beta Version Released!`,
+        notes: englishNotes,
         pub_date: new Date().toISOString(),
         platforms: {
             "windows-x86_64": {
@@ -116,11 +126,28 @@ async function run() {
 
     // 로컬 홈페이지 프로젝트의 update.json 파일도 동기화
     const localUpdateJsonPath = path.resolve(__dirname, '../../../HOMEPAGE/marh-software/homepage-files/update.json');
+    const localHistoryJsonPath = path.resolve(__dirname, '../../../HOMEPAGE/marh-software/homepage-files/release-history.json');
+    const homepageDir = path.resolve(__dirname, '../../../HOMEPAGE/marh-software');
+    
     if (fs.existsSync(path.dirname(localUpdateJsonPath))) {
         fs.writeFileSync(localUpdateJsonPath, JSON.stringify(updateJson, null, 2));
         console.log("✅ 로컬 update.json 파일 동기화 완료");
+        
+        if (fs.existsSync(releaseHistoryPath)) {
+            fs.copyFileSync(releaseHistoryPath, localHistoryJsonPath);
+            console.log("✅ 로컬 release-history.json 파일 동기화 완료");
+        }
+
+        // 홈페이지 자동 빌드
+        try {
+            console.log(`\n홈페이지 프로젝트(${homepageDir}) 빌드를 시작합니다...`);
+            execSync('npm run build', { cwd: homepageDir, stdio: 'inherit' });
+            console.log("✅ 홈페이지 빌드 완료\n");
+        } catch (error) {
+            console.error("❌ 홈페이지 빌드 중 오류 발생:", error.message);
+        }
     } else {
-        console.warn("⚠️ 홈페이지 프로젝트 경로를 찾을 수 없어 로컬 update.json 동기화를 건너뜁니다:", path.dirname(localUpdateJsonPath));
+        console.warn("⚠️ 홈페이지 프로젝트 경로를 찾을 수 없어 로컬 동기화를 건너뜁니다:", path.dirname(localUpdateJsonPath));
     }
 
     // 6. Cloudflare R2 업로드

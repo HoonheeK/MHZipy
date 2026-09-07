@@ -1,0 +1,17 @@
+[
+  {
+    "version": "0.9.5",
+    "date": "2026-09-07",
+    "notes": {
+      "ko": [
+        "PDFViewer 기능 개선 (회전, Capture)"
+      ],
+      "en": [
+        "PDFViewer feature improvements (rotation, capture)"
+      ],
+      "ja": [
+        "PDFViewer機能の改善(回転、キャプチャー)"
+      ]
+    }
+  }
+]
