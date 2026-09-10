@@ -445,6 +445,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   const handleOpenInNewWindow = async (targetPath: string, isDirectory?: boolean) => {
     try {
       const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
 
       let urlPath = targetPath;
       let urlSelect = "";
@@ -459,12 +460,25 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       }
       // 폴더인 경우(isDirectory가 true이거나 정보가 없는 경우 기본값) urlPath를 그대로 사용
 
+      // 현재 창의 위치를 가져와서 같은 모니터에 새 창을 띄움
+      let posX: number | undefined;
+      let posY: number | undefined;
+      try {
+        const currentWin = getCurrentWindow();
+        const position = await currentWin.outerPosition();
+        posX = position.x + 50;
+        posY = position.y + 50;
+      } catch (e) {
+        console.warn('현재 창 위치를 가져올 수 없습니다:', e);
+      }
+
       const label = 'win_' + Math.random().toString(36).substring(2, 10);
       const url = `index.html?path=${encodeURIComponent(urlPath)}${urlSelect}`;
 
       new WebviewWindow(label, {
         url,
         title: `MHZipy - ${targetPath}`,
+        ...(posX !== undefined && posY !== undefined ? { x: posX, y: posY } : {})
       });
     } catch (e) {
       console.error('Failed to open new window:', e);

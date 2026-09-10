@@ -1,4 +1,5 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message } from '@tauri-apps/plugin-dialog';
 interface PdfFile {
   path: string;
@@ -25,11 +26,24 @@ export const openPdfInWindow = async (file: PdfFile) => {
   }
 
   try {
+    // 현재 창의 위치를 가져와서 같은 모니터에 새 창을 띄움
+    let posX: number | undefined;
+    let posY: number | undefined;
+    try {
+      const currentWin = getCurrentWindow();
+      const position = await currentWin.outerPosition();
+      posX = position.x + 50;
+      posY = position.y + 50;
+    } catch (e) {
+      console.warn('현재 창 위치를 가져올 수 없습니다:', e);
+    }
+
     const webview = new WebviewWindow(windowLabel, {
       url: `viewer.html?pdfPath=${encodeURIComponent(file.path)}&title=${encodeURIComponent(file.name)}`,
       title: file.name,
       width: 1000,
-      height: 800
+      height: 800,
+      ...(posX !== undefined && posY !== undefined ? { x: posX, y: posY } : {})
     });
 
     webview.once('tauri://error', function (e) {
