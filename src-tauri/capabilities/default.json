@@ -96,7 +96,8 @@
         "**"
       ]
     },
-    "shell:default"
+    "shell:default",
+    "core:tray:default"
   ],
   "app": {
     "security": {

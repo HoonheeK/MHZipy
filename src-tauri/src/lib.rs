@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use sysinfo::Disks;
-use tauri::{AppHandle, Emitter, Manager, Window};
+use tauri::{
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, Window, WindowEvent,
+};
 use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::unstable::write::FileOptionsExt;
@@ -988,6 +992,82 @@ fn convert_pptx_to_pdf(
     Ok(target_path_str)
 }
 
+/// Windows 시작 시 자동 실행 여부를 확인합니다.
+fn is_auto_start_enabled() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(key) = hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Run") {
+            return key.get_value::<String, _>("MHZipy").is_ok();
+        }
+    }
+    false
+}
+
+/// Windows 시작 시 자동 실행을 설정하거나 해제합니다.
+fn set_auto_start(enable: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::*;
+        use winreg::RegKey;
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(key) = hkcu.open_subkey_with_flags(
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            KEY_SET_VALUE | KEY_QUERY_VALUE,
+        ) {
+            if enable {
+                // 현재 실행 파일 경로를 레지스트리에 등록
+                if let Ok(exe_path) = std::env::current_exe() {
+                    let _ = key.set_value("MHZipy", &exe_path.to_string_lossy().to_string());
+                }
+            } else {
+                let _ = key.delete_value("MHZipy");
+            }
+        }
+    }
+}
+
+/// PDF 뷰어 윈도우를 생성하는 헬퍼 함수.
+/// 초기 실행 시와 single-instance 콜백 양쪽에서 재사용됩니다.
+fn open_pdf_viewer(app: &AppHandle, pdf_path: &str, pdf_title: Option<&str>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    let title = match pdf_title {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => std::path::Path::new(pdf_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+    };
+
+    let init_script = format!(
+        "window.__PDF_PATH__ = '{}';",
+        pdf_path.replace("\\", "\\\\").replace("'", "\\'")
+    );
+
+    // 고유한 윈도우 라벨 생성 (동시에 여러 PDF를 열 수 있도록)
+    let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+    let window_label = format!("pdf-viewer-{}", count);
+
+    match tauri::WebviewWindowBuilder::new(
+        app,
+        &window_label,
+        tauri::WebviewUrl::App(std::path::PathBuf::from("viewer.html")),
+    )
+    .initialization_script(&init_script)
+    .title(&title)
+    .inner_size(1000.0, 800.0)
+    .build()
+    {
+        Ok(_) => println!("PDF viewer opened: {}", pdf_path),
+        Err(e) => eprintln!("Failed to open PDF viewer: {}", e),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1008,69 +1088,97 @@ pub fn run() {
                 .unwrap()
         })
         .setup(|app| {
-            // CLI 인자 파싱
+            // CLI 인자 파싱 — PDF 파일 경로가 있으면 뷰어 모드로 진입
             let args: Vec<String> = std::env::args().collect();
-            let mut is_pdf_viewer = false;
             let mut pdf_path = String::new();
             let mut pdf_title = String::new();
 
             let mut i = 1;
             while i < args.len() {
                 if args[i] == "--pdf-viewer" && i + 1 < args.len() {
-                    is_pdf_viewer = true;
                     pdf_path = args[i + 1].clone();
                     i += 1;
                 } else if args[i] == "--pdf-title" && i + 1 < args.len() {
                     pdf_title = args[i + 1].clone();
                     i += 1;
                 } else if args[i].to_lowercase().ends_with(".pdf") {
-                    // Windows File Explorer 연동용: 단일 인자로 PDF 경로가 들어왔을 때 자동으로 뷰어 모드로 진입
-                    is_pdf_viewer = true;
                     pdf_path = args[i].clone();
                 }
                 i += 1;
             }
 
-            if is_pdf_viewer {
-                let title = if pdf_title.is_empty() {
-                    std::path::Path::new(&pdf_path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned()
-                } else {
-                    pdf_title
-                };
+            // PDF 경로가 있으면 뷰어 윈도우 열기
+            if !pdf_path.is_empty() {
+                let title_opt = if pdf_title.is_empty() { None } else { Some(pdf_title.as_str()) };
+                open_pdf_viewer(app.handle(), &pdf_path, title_opt);
+            }
 
-                let init_script = format!("window.__PDF_PATH__ = '{}';", pdf_path.replace("\\", "\\\\").replace("'", "\\'"));
-                let window_label = "pdf-viewer-main".to_string();
-                
-                let pdf_window = tauri::WebviewWindowBuilder::new(
-                    app,
-                    window_label,
-                    tauri::WebviewUrl::App(std::path::PathBuf::from("viewer.html"))
-                )
-                .initialization_script(&init_script)
-                .title(&title)
-                .inner_size(1000.0, 800.0)
-                .build()
-                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + 'static>)?;
-
-                pdf_window.on_window_event(|event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        std::process::exit(0);
-                    }
-                });
-
-                if let Some(main_window) = app.get_webview_window("main") {
-                    let _ = main_window.hide();
-                }
-                
-                return Ok(());
-            } else {
+            // 항상 메인 윈도우와 Tray를 설정 (최초 실행 시)
+            {
                 if let Some(main_window) = app.get_webview_window("main") {
                     let _ = main_window.show();
                 }
+
+                // --- System Tray Setup ---
+                let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let show_i = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+                let separator = PredefinedMenuItem::separator(app)?;
+                let auto_start_i = CheckMenuItem::with_id(
+                    app,
+                    "auto_start",
+                    "Launch at Windows Startup",
+                    true,
+                    is_auto_start_enabled(),
+                    None::<&str>,
+                )?;
+                let menu = Menu::with_items(app, &[&show_i, &separator, &auto_start_i, &quit_i])?;
+
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().unwrap().clone())
+                    .tooltip("MHZipy")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        "show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "auto_start" => {
+                            // CheckMenuItem은 클릭 시 자동으로 체크 상태가 토글됨
+                            // 현재 체크 상태를 읽어서 레지스트리에 반영
+                            if let Some(item) = app.menu().and_then(|m| m.get("auto_start")) {
+                                if let Some(check_item) = item.as_check_menuitem() {
+                                    let is_checked = check_item.is_checked().unwrap_or(false);
+                                    set_auto_start(is_checked);
+                                }
+                            }
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                if window.is_visible().unwrap_or(false) {
+                                    let _ = window.hide();
+                                } else {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                            }
+                        }
+                    })
+                    .build(app)?;
             }
 
             let state = AppState {
@@ -1112,12 +1220,103 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
+        // single-instance 플러그인: 두 번째 프로세스가 실행되면 기존 인스턴스로 인자 전달
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            println!("[single-instance] argv: {:?}", argv);
+
+            // argv에서 .pdf 파일 경로를 찾아 PDF 뷰어로 열기
+            let mut pdf_path = String::new();
+            let mut pdf_title = String::new();
+            let mut i = 1;
+            while i < argv.len() {
+                if argv[i] == "--pdf-viewer" && i + 1 < argv.len() {
+                    pdf_path = argv[i + 1].clone();
+                    i += 1;
+                } else if argv[i] == "--pdf-title" && i + 1 < argv.len() {
+                    pdf_title = argv[i + 1].clone();
+                    i += 1;
+                } else if argv[i].to_lowercase().ends_with(".pdf") {
+                    pdf_path = argv[i].clone();
+                }
+                i += 1;
+            }
+
+            if !pdf_path.is_empty() {
+                let title_opt = if pdf_title.is_empty() { None } else { Some(pdf_title.as_str()) };
+                open_pdf_viewer(app, &pdf_path, title_opt);
+            } else {
+                // PDF가 아니면 기존 메인 윈도우를 보여줌
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Hide window on close instead of quitting (tray background mode)
+        // PDF viewer 창은 그냥 닫히고, Main 윈도우는 Tray 방향으로 축소 애니메이션 후 숨김
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let label = window.label();
+                if label.starts_with("pdf-viewer") {
+                    // PDF viewer: 창만 닫음 (Tray 앱은 계속 실행)
+                } else {
+                    // Main window: Tray로 축소되는 애니메이션 후 숨김
+                    api.prevent_close();
+                    let win = window.clone();
+                    std::thread::spawn(move || {
+                        // 현재 윈도우 위치와 크기 저장
+                        let Ok(pos) = win.outer_position() else { let _ = win.hide(); return; };
+                        let Ok(size) = win.outer_size() else { let _ = win.hide(); return; };
+
+                        // 모니터 정보로 Tray 영역(우하단) 좌표 계산
+                        let (target_x, target_y) = if let Ok(Some(monitor)) = win.current_monitor() {
+                            let mp = monitor.position();
+                            let ms = monitor.size();
+                            (
+                                mp.x + ms.width as i32 - 100,
+                                mp.y + ms.height as i32 - 50,
+                            )
+                        } else {
+                            (pos.x + size.width as i32, pos.y + size.height as i32)
+                        };
+
+                        let steps = 12u32;
+                        let delay = std::time::Duration::from_millis(18);
+
+                        for i in 1..=steps {
+                            let t = i as f64 / steps as f64;
+                            let eased = t * t; // ease-in: 점점 빨라짐
+
+                            let scale = 1.0 - eased * 0.95; // 5%까지 축소
+                            let new_w = (size.width as f64 * scale).max(1.0) as u32;
+                            let new_h = (size.height as f64 * scale).max(1.0) as u32;
+
+                            let new_x = pos.x as f64 + (target_x as f64 - pos.x as f64) * eased;
+                            let new_y = pos.y as f64 + (target_y as f64 - pos.y as f64) * eased;
+
+                            let _ = win.set_size(tauri::Size::Physical(
+                                tauri::PhysicalSize::new(new_w, new_h),
+                            ));
+                            let _ = win.set_position(tauri::Position::Physical(
+                                tauri::PhysicalPosition::new(new_x as i32, new_y as i32),
+                            ));
+                            std::thread::sleep(delay);
+                        }
+
+                        // 숨기고 원래 크기/위치 복원 (다음에 show할 때 정상 표시되도록)
+                        let _ = win.hide();
+                        let _ = win.set_size(tauri::Size::Physical(size));
+                        let _ = win.set_position(tauri::Position::Physical(pos));
+                    });
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             compress_files,
             extract_zip,
