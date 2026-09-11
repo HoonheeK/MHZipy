@@ -1133,12 +1133,13 @@ pub fn run() {
                 )?;
                 let menu = Menu::with_items(app, &[&show_i, &separator, &auto_start_i, &quit_i])?;
 
+                let auto_start_ref = auto_start_i.clone();
                 let _tray = TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())
                     .tooltip("MHZipy")
                     .menu(&menu)
                     .show_menu_on_left_click(false)
-                    .on_menu_event(|app, event| match event.id.as_ref() {
+                    .on_menu_event(move |app, event| match event.id.as_ref() {
                         "quit" => {
                             app.exit(0);
                         }
@@ -1150,13 +1151,9 @@ pub fn run() {
                         }
                         "auto_start" => {
                             // CheckMenuItem은 클릭 시 자동으로 체크 상태가 토글됨
-                            // 현재 체크 상태를 읽어서 레지스트리에 반영
-                            if let Some(item) = app.menu().and_then(|m| m.get("auto_start")) {
-                                if let Some(check_item) = item.as_check_menuitem() {
-                                    let is_checked = check_item.is_checked().unwrap_or(false);
-                                    set_auto_start(is_checked);
-                                }
-                            }
+                            // 토글된 후의 체크 상태를 읽어서 레지스트리에 반영
+                            let is_checked = auto_start_ref.is_checked().unwrap_or(false);
+                            set_auto_start(is_checked);
                         }
                         _ => {}
                     })
