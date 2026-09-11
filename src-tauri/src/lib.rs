@@ -1020,7 +1020,8 @@ fn set_auto_start(enable: bool) {
             if enable {
                 // 현재 실행 파일 경로를 레지스트리에 등록
                 if let Ok(exe_path) = std::env::current_exe() {
-                    let _ = key.set_value("MHZipy", &exe_path.to_string_lossy().to_string());
+                    let val = format!("\"{}\" --autostart", exe_path.to_string_lossy());
+                    let _ = key.set_value("MHZipy", &val);
                 }
             } else {
                 let _ = key.delete_value("MHZipy");
@@ -1092,6 +1093,7 @@ pub fn run() {
             let args: Vec<String> = std::env::args().collect();
             let mut pdf_path = String::new();
             let mut pdf_title = String::new();
+            let mut is_autostart = false;
 
             let mut i = 1;
             while i < args.len() {
@@ -1101,6 +1103,8 @@ pub fn run() {
                 } else if args[i] == "--pdf-title" && i + 1 < args.len() {
                     pdf_title = args[i + 1].clone();
                     i += 1;
+                } else if args[i] == "--autostart" {
+                    is_autostart = true;
                 } else if args[i].to_lowercase().ends_with(".pdf") {
                     pdf_path = args[i].clone();
                 }
@@ -1116,7 +1120,9 @@ pub fn run() {
             // 항상 메인 윈도우와 Tray를 설정 (최초 실행 시)
             {
                 if let Some(main_window) = app.get_webview_window("main") {
-                    let _ = main_window.show();
+                    if !is_autostart {
+                        let _ = main_window.show();
+                    }
                 }
 
                 // --- System Tray Setup ---
@@ -1225,6 +1231,7 @@ pub fn run() {
             let mut pdf_path = String::new();
             let mut pdf_title = String::new();
             let mut i = 1;
+            let mut is_autostart = false;
             while i < argv.len() {
                 if argv[i] == "--pdf-viewer" && i + 1 < argv.len() {
                     pdf_path = argv[i + 1].clone();
@@ -1232,6 +1239,8 @@ pub fn run() {
                 } else if argv[i] == "--pdf-title" && i + 1 < argv.len() {
                     pdf_title = argv[i + 1].clone();
                     i += 1;
+                } else if argv[i] == "--autostart" {
+                    is_autostart = true;
                 } else if argv[i].to_lowercase().ends_with(".pdf") {
                     pdf_path = argv[i].clone();
                 }
@@ -1241,7 +1250,7 @@ pub fn run() {
             if !pdf_path.is_empty() {
                 let title_opt = if pdf_title.is_empty() { None } else { Some(pdf_title.as_str()) };
                 open_pdf_viewer(app, &pdf_path, title_opt);
-            } else {
+            } else if !is_autostart {
                 // PDF가 아니면 기존 메인 윈도우를 보여줌
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
