@@ -21,13 +21,41 @@
             flex-direction: column;
         }
         #sidebar.open { width: 260px; min-width: 150px; max-width: 500px; }
-        #sidebar-header { padding: 10px; background: #eee; border-bottom: 1px solid #ddd; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        #sidebar-header { padding: 0; background: #eee; border-bottom: 1px solid #ddd; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+        #sidebar-tabs { display: flex; flex: 1; }
+        .sidebar-tab {
+            flex: 1; padding: 10px 8px; text-align: center; cursor: pointer;
+            font-size: 13px; font-weight: 600; color: #666;
+            border-bottom: 2px solid transparent; transition: all 0.2s;
+            background: transparent; border-top: none; border-left: none; border-right: none;
+        }
+        .sidebar-tab:hover { color: #333; background: #e8e8e8; }
+        .sidebar-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+        .sidebar-panel { display: none; flex: 1; overflow-y: auto; }
+        .sidebar-panel.active { display: block; }
         #outline-container { padding: 10px; flex: 1; overflow-y: auto; }
         .outline-item { cursor: pointer; padding: 4px 0; font-size: 13px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .outline-item:hover { color: #000; background-color: #e2e2e2; }
         .outline-children { margin-left: 16px; display: none; }
         .outline-children.expanded { display: block; }
         .outline-toggle { display: inline-block; width: 16px; text-align: center; cursor: pointer; color: #666; user-select: none; }
+
+        /* Page Thumbnails */
+        #pages-container { padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .thumbnail-item {
+            cursor: pointer; position: relative; border: 2px solid transparent;
+            border-radius: 4px; overflow: hidden; transition: border-color 0.2s, box-shadow 0.2s;
+            background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            width: 100%; max-width: 200px;
+        }
+        .thumbnail-item:hover { border-color: #a0c4ff; box-shadow: 0 2px 6px rgba(0,0,0,0.25); }
+        .thumbnail-item.active { border-color: #1a73e8; box-shadow: 0 0 0 1px #1a73e8, 0 2px 8px rgba(26,115,232,0.3); }
+        .thumbnail-item canvas { display: block; width: 100%; height: auto; }
+        .thumbnail-label {
+            text-align: center; font-size: 11px; color: #555; padding: 3px 0;
+            background: #f5f5f5; border-top: 1px solid #eee;
+        }
+        .thumbnail-item.active .thumbnail-label { color: #1a73e8; font-weight: 600; }
         
         /* Sidebar Resizer */
         #sidebar-resizer {
@@ -42,7 +70,8 @@
         #viewer-content { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 20px; }
         
         /* Page & Canvas */
-        .page-wrapper { position: relative; flex-shrink: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); background: white; }
+        .page-wrapper { position: relative; flex-shrink: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); background: white; cursor: pointer; transition: outline 0.15s, box-shadow 0.15s; outline: 3px solid transparent; outline-offset: 3px; }
+        .page-wrapper.selected { outline: 3px solid #1a73e8; box-shadow: 0 0 18px rgba(26, 115, 232, 0.5); }
         canvas { display: block; }
         
         /* Text Layer */
@@ -242,10 +271,18 @@
     <div id="app-container">
         <div id="sidebar">
             <div id="sidebar-header">
-                <span>Outline</span>
-                <button class="search-btn" id="sidebar-close-btn">✕</button>
+                <div id="sidebar-tabs">
+                    <button class="sidebar-tab active" data-tab="outline">Outline</button>
+                    <button class="sidebar-tab" data-tab="pages">Pages</button>
+                </div>
+                <button class="search-btn" id="sidebar-close-btn" style="margin-right: 8px;">✕</button>
             </div>
-            <div id="outline-container"></div>
+            <div id="outline-panel" class="sidebar-panel active">
+                <div id="outline-container"></div>
+            </div>
+            <div id="pages-panel" class="sidebar-panel">
+                <div id="pages-container"></div>
+            </div>
         </div>
         <div id="sidebar-resizer"></div>
         
@@ -254,7 +291,7 @@
                 <div id="region-select-box"></div>
             </div>
             
-            <button id="sidebar-toggle-btn">☰ Outline</button>
+            <button id="sidebar-toggle-btn">☰ Panel</button>
             
             <div id="search-bar">
                 <div id="search-controls">
@@ -311,6 +348,19 @@
         let currentSearchIndex = -1;
         let currentScale = 1.5; // 기본 스케일
         let currentRotation = 0; // 기본 회전 각도
+        let selectedPageNum = null; // 선택된 페이지 번호 (줌 앵커용)
+
+        function selectPage(pageNum) {
+            selectedPageNum = pageNum;
+            // 모든 페이지의 선택 표시 해제
+            document.querySelectorAll('.page-wrapper.selected').forEach(el => el.classList.remove('selected'));
+            if (pageNum) {
+                const el = document.getElementById(`page-${pageNum}`);
+                if (el) el.classList.add('selected');
+            }
+            // 썸네일도 동기화
+            updateActiveThumbnail(pageNum || parseInt(document.getElementById('current-page')?.textContent) || 1);
+        }
 
         function showPasswordDialog(msg) {
             return new Promise((resolve) => {
@@ -507,6 +557,9 @@
                 // 목차 로드
                 loadOutline();
 
+                // 썸네일 렌더링
+                renderThumbnails();
+
                 // 초기 페이지 표시
                 updatePageIndicator(1);
                 document.getElementById('total-pages').textContent = pdfDoc.numPages;
@@ -541,7 +594,9 @@
         }
 
         // 렌더링 중 스크롤 복원을 위한 상태
-        let _zoomScrollRestore = null; // { pageNum, offsetRatio }
+        // 마우스 앵커 방식: { pageNum, pageFracX, pageFracY, mouseRelX, mouseRelY }
+        // 기본 방식: { pageNum, offsetRatio }
+        let _zoomScrollRestore = null;
 
         // 지연 렌더링을 위한 상태
         let _pageDataList = [];       // 모든 페이지의 메타데이터
@@ -777,6 +832,7 @@
                 // 페이지 래퍼 생성 (빈 플레이스홀더)
                 const pageWrapper = document.createElement('div');
                 pageWrapper.className = 'page-wrapper';
+                if (selectedPageNum === pageNum) pageWrapper.classList.add('selected');
                 pageWrapper.id = `page-${pageNum}`;
                 pageWrapper.style.width = `${viewport.width}px`;
                 pageWrapper.style.height = `${viewport.height}px`;
@@ -807,13 +863,23 @@
 
             // === 스크롤 위치 복원 (플레이스홀더가 모두 배치된 직후) ===
             if (_zoomScrollRestore) {
-                const { pageNum, offsetRatio } = _zoomScrollRestore;
+                const restoreData = _zoomScrollRestore;
                 _zoomScrollRestore = null;
-                const targetEl = document.getElementById(`page-${pageNum}`);
+                const targetEl = document.getElementById(`page-${restoreData.pageNum}`);
                 if (targetEl) {
-                    const scrollOffset = targetEl.offsetTop - scrollContainer.offsetTop + (offsetRatio * targetEl.offsetHeight);
-                    scrollContainer.scrollTop = Math.max(0, scrollOffset);
-                    updatePageIndicator(pageNum);
+                    if (restoreData.mouseRelX !== undefined) {
+                        // 마우스 앵커 방식: 줌 전 마우스가 가리키던 페이지 내 위치가
+                        // 줌 후에도 같은 화면 위치에 오도록 스크롤 조정
+                        const pointX = targetEl.offsetLeft + restoreData.pageFracX * targetEl.offsetWidth;
+                        const pointY = targetEl.offsetTop + restoreData.pageFracY * targetEl.offsetHeight;
+                        scrollContainer.scrollLeft = Math.max(0, pointX - restoreData.mouseRelX);
+                        scrollContainer.scrollTop = Math.max(0, pointY - restoreData.mouseRelY);
+                    } else {
+                        // 기본 방식 (버튼, 키보드 줌)
+                        const scrollOffset = targetEl.offsetTop - scrollContainer.offsetTop + (restoreData.offsetRatio * targetEl.offsetHeight);
+                        scrollContainer.scrollTop = Math.max(0, scrollOffset);
+                    }
+                    updatePageIndicator(restoreData.pageNum);
                 }
             }
 
@@ -876,10 +942,7 @@
                         if (dest) {
                             const pageIndex = await pdfDoc.getPageIndex(dest[0]);
                             const pageNum = pageIndex + 1;
-                            const pageEl = document.getElementById(`page-${pageNum}`);
-                            if (pageEl) {
-                                pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            }
+                            goToPage(pageNum, true);
                         }
                     }
                 };
@@ -899,6 +962,72 @@
 
             outline.forEach(item => {
                 outlineContainer.appendChild(createOutlineItem(item));
+            });
+        }
+
+        // --- 페이지 썸네일 기능 ---
+        let _thumbnailsRendered = false;
+        async function renderThumbnails() {
+            if (!pdfDoc || _thumbnailsRendered) return;
+            _thumbnailsRendered = true;
+
+            const container = document.getElementById('pages-container');
+            container.innerHTML = '';
+
+            const THUMB_WIDTH = 180; // 썸네일 너비(px)
+
+            for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+                const page = await pdfDoc.getPage(pageNum);
+                const unscaledViewport = page.getViewport({ scale: 1.0 });
+                const thumbScale = THUMB_WIDTH / unscaledViewport.width;
+                const viewport = page.getViewport({ scale: thumbScale });
+
+                const item = document.createElement('div');
+                item.className = 'thumbnail-item';
+                item.dataset.page = pageNum;
+                if (pageNum === 1) item.classList.add('active');
+
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                const ctx = canvas.getContext('2d');
+                item.appendChild(canvas);
+
+                const label = document.createElement('div');
+                label.className = 'thumbnail-label';
+                label.textContent = pageNum;
+                item.appendChild(label);
+
+                item.onclick = () => {
+                    goToPage(pageNum, true);
+                };
+
+                container.appendChild(item);
+
+                // 비동기 렌더링 (화면을 블로킹하지 않도록)
+                page.render({ canvasContext: ctx, viewport }).promise.then(() => {
+                    page.cleanup();
+                }).catch(err => {
+                    console.warn(`Thumbnail render failed for page ${pageNum}:`, err);
+                });
+            }
+        }
+
+        function updateActiveThumbnail(pageNum) {
+            const container = document.getElementById('pages-container');
+            if (!container) return;
+            const items = container.querySelectorAll('.thumbnail-item');
+            items.forEach(item => {
+                if (parseInt(item.dataset.page) === pageNum) {
+                    item.classList.add('active');
+                    // 패널이 보이면 스크롤
+                    const panel = document.getElementById('pages-panel');
+                    if (panel && panel.classList.contains('active')) {
+                        item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                } else {
+                    item.classList.remove('active');
+                }
             });
         }
 
@@ -1026,6 +1155,9 @@
             if (pdfDoc) {
                 if (currentPageEl) currentPageEl.textContent = pageNum || 1;
             }
+
+            // 썸네일 활성 상태 업데이트
+            updateActiveThumbnail(pageNum || 1);
         }
 
         let isScrolling = false;
@@ -1066,6 +1198,7 @@
 
         async function goToPage(pageNum, smooth = false) {
             if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= pdfDoc.numPages) {
+                selectPage(pageNum);
                 const pageEl = document.getElementById(`page-${pageNum}`);
                 if (pageEl) {
                     pageEl.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
@@ -1107,15 +1240,15 @@
             input.select();
         }
 
-        async function updateZoom(delta) {
+        async function updateZoom(delta, mouseClientX, mouseClientY) {
             let newScale = currentScale + delta;
             if (newScale < 0.1) newScale = 0.1;
             if (newScale > 10.0) newScale = 10.0;
 
             // 1페이지 높이에 맞춰지는 스케일(Fit Height) 자동 스냅
             if (pdfDoc && pdfDoc.numPages > 0) {
-                const currentPage = parseInt(document.getElementById('current-page').textContent) || 1;
-                const page = await pdfDoc.getPage(currentPage);
+                const currentPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
+                const page = await pdfDoc.getPage(Math.min(pdfDoc.numPages, Math.max(1, currentPage)));
                 const viewport = page.getViewport({ scale: 1.0, rotation: currentRotation });
                 const scrollContainer = document.getElementById('viewer-scroll-container');
                 const containerHeight = scrollContainer.clientHeight - 40;
@@ -1127,31 +1260,74 @@
                 }
             }
 
-            // 현재 보고 있는 페이지 번호와 페이지 내 위치 비율 저장
             const scrollContainer = document.getElementById('viewer-scroll-container');
             const pages = document.querySelectorAll('.page-wrapper');
-            let currentPageNum = 1;
-            let currentPageOffsetRatio = 0;
 
             if (pages.length > 0) {
                 const containerRect = scrollContainer.getBoundingClientRect();
-                let maxVisibility = -1;
-                for (let i = 0; i < pages.length; i++) {
-                    const pageRect = pages[i].getBoundingClientRect();
-                    const visibleTop = Math.max(pageRect.top, containerRect.top);
-                    const visibleBottom = Math.min(pageRect.bottom, containerRect.bottom);
-                    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
-                    if (visibleHeight > maxVisibility) {
-                        maxVisibility = visibleHeight;
-                        currentPageNum = i + 1;
-                        // 페이지 내 스크롤 비율 저장 (컨테이너 상단 기준으로 페이지 어디를 보고 있었는지)
-                        currentPageOffsetRatio = (containerRect.top - pageRect.top) / pageRect.height;
+
+                // 1. 아직 선택된 페이지가 없고 마우스 좌표가 넘어온 경우: 마우스 아래 페이지 자동 선택
+                if (!selectedPageNum && mouseClientX !== undefined && mouseClientY !== undefined) {
+                    for (let i = 0; i < pages.length; i++) {
+                        const pageRect = pages[i].getBoundingClientRect();
+                        if (mouseClientY >= pageRect.top && mouseClientY <= pageRect.bottom &&
+                            mouseClientX >= pageRect.left && mouseClientX <= pageRect.right) {
+                            selectPage(i + 1);
+                            break;
+                        }
                     }
                 }
-            }
 
-            // 스크롤 복원 정보를 renderPages에서 사용할 수 있도록 저장
-            _zoomScrollRestore = { pageNum: currentPageNum, offsetRatio: currentPageOffsetRatio };
+                // 2. 앵커 대상 페이지 결정 (선택된 페이지 우선, 없으면 현재 표시 중인 페이지)
+                let targetPageNum = selectedPageNum;
+                if (!targetPageNum || targetPageNum < 1 || targetPageNum > pages.length) {
+                    targetPageNum = parseInt(document.getElementById('current-page')?.textContent) || 1;
+                }
+                targetPageNum = Math.max(1, Math.min(pages.length, targetPageNum));
+
+                const targetEl = pages[targetPageNum - 1];
+                const pageRect = targetEl.getBoundingClientRect();
+
+                // 마우스가 대상 페이지 내부에 있는지 확인
+                const isMouseInside = (mouseClientX !== undefined && mouseClientY !== undefined &&
+                    mouseClientX >= pageRect.left && mouseClientX <= pageRect.right &&
+                    mouseClientY >= pageRect.top && mouseClientY <= pageRect.bottom);
+
+                if (isMouseInside) {
+                    // 마우스 커서 위치를 정확한 앵커로 유지
+                    const mouseRelX = mouseClientX - containerRect.left;
+                    const mouseRelY = mouseClientY - containerRect.top;
+                    const pageFracX = Math.max(0, Math.min(1, (mouseClientX - pageRect.left) / pageRect.width));
+                    const pageFracY = Math.max(0, Math.min(1, (mouseClientY - pageRect.top) / pageRect.height));
+
+                    _zoomScrollRestore = {
+                        pageNum: targetPageNum,
+                        pageFracX, pageFracY,
+                        mouseRelX, mouseRelY
+                    };
+                } else {
+                    // 마우스가 페이지 바깥에 있거나 버튼/키보드 줌인 경우:
+                    // 대상 페이지의 중심이 뷰포트 내 현재 상대 위치(또는 뷰포트 중앙)에 안정적으로 머물도록 함
+                    const pageCenterX = pageRect.left + pageRect.width / 2;
+                    const pageCenterY = pageRect.top + pageRect.height / 2;
+                    // 페이지가 화면 밖으로 멀리 나갔을 때는 뷰포트 중앙으로 안착
+                    const isVisible = (pageRect.bottom >= containerRect.top && pageRect.top <= containerRect.bottom);
+                    const targetRelX = isVisible 
+                        ? Math.max(20, Math.min(containerRect.width - 20, pageCenterX - containerRect.left))
+                        : containerRect.width / 2;
+                    const targetRelY = isVisible 
+                        ? Math.max(20, Math.min(containerRect.height - 20, pageCenterY - containerRect.top))
+                        : containerRect.height / 2;
+
+                    _zoomScrollRestore = {
+                        pageNum: targetPageNum,
+                        pageFracX: 0.5,
+                        pageFracY: 0.5,
+                        mouseRelX: targetRelX,
+                        mouseRelY: targetRelY
+                    };
+                }
+            }
 
             currentScale = newScale;
             document.getElementById('zoom-level').value = Math.round(currentScale * 100) + '%';
@@ -1433,6 +1609,18 @@
         const searchInput = document.getElementById('search-input');
         const pageInputContainer = document.getElementById('page-input-container');
 
+        // 사이드바 탭 전환
+        document.querySelectorAll('.sidebar-tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                const panelId = tab.dataset.tab + '-panel';
+                const panel = document.getElementById(panelId);
+                if (panel) panel.classList.add('active');
+            };
+        });
+
         window.toggleSidebar = () => {
             sidebar.classList.toggle('open');
             // 토글 시 width 초기화 방지 또는 설정
@@ -1559,6 +1747,16 @@
             if (!contextMenu.contains(e.target)) {
                 contextMenu.style.display = 'none';
             }
+
+            // 페이지 선택 (줌 앵커용)
+            const pageWrapper = e.target.closest('.page-wrapper');
+            if (pageWrapper) {
+                const pageNum = parseInt(pageWrapper.id.replace('page-', ''));
+                selectPage(pageNum);
+            } else if (!e.target.closest('#sidebar') && !e.target.closest('#zoom-controls') && !e.target.closest('#page-indicator')) {
+                // 페이지 바깥 클릭 시 선택 해제
+                selectPage(null);
+            }
         });
 
         document.getElementById('ctx-copy').onclick = () => {
@@ -1596,14 +1794,14 @@
             contextMenu.style.display = 'none';
         };
 
-        // 마우스 휠 줌 (Ctrl + Wheel)
+        // 마우스 휠 줌 (Ctrl + Wheel) - 마우스 커서 기준 앵커 줌
         window.addEventListener('wheel', (e) => {
             if (e.ctrlKey) {
                 e.preventDefault();
                 if (e.deltaY < 0) {
-                    updateZoom(0.25);
+                    updateZoom(0.25, e.clientX, e.clientY);
                 } else {
-                    updateZoom(-0.25);
+                    updateZoom(-0.25, e.clientX, e.clientY);
                 }
             }
         }, { passive: false });

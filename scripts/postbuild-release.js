@@ -127,6 +127,7 @@ async function run() {
     // 로컬 홈페이지 프로젝트의 update.json 파일도 동기화
     const localUpdateJsonPath = path.resolve(__dirname, '../../../HOMEPAGE/marh-software/homepage-files/update.json');
     const localHistoryJsonPath = path.resolve(__dirname, '../../../HOMEPAGE/marh-software/homepage-files/release-history.json');
+    const localMhzipyHistoryPath = path.resolve(__dirname, '../../../HOMEPAGE/marh-software/homepage-files/mhzipy-release-history.json');
     const homepageDir = path.resolve(__dirname, '../../../HOMEPAGE/marh-software');
     
     if (fs.existsSync(path.dirname(localUpdateJsonPath))) {
@@ -135,6 +136,7 @@ async function run() {
         
         if (fs.existsSync(releaseHistoryPath)) {
             fs.copyFileSync(releaseHistoryPath, localHistoryJsonPath);
+            fs.copyFileSync(releaseHistoryPath, localMhzipyHistoryPath);
             console.log("✅ 로컬 release-history.json 파일 동기화 완료");
         }
 
@@ -175,7 +177,7 @@ async function run() {
         // 홈페이지 자동 빌드
         try {
             console.log(`\n홈페이지 프로젝트(${homepageDir}) 빌드를 시작합니다...`);
-            execSync('npm run build', { cwd: homepageDir, stdio: 'inherit' });
+            execSync('npm run release', { cwd: homepageDir, stdio: 'inherit' });
             console.log("✅ 홈페이지 빌드 완료\n");
         } catch (error) {
             console.error("❌ 홈페이지 빌드 중 오류 발생:", error.message);

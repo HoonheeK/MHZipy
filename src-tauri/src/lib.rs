@@ -882,8 +882,55 @@ fn convert_pptx_to_pdf(
                 $ppSaveAsPDF = 32
                 $ppt = New-Object -ComObject PowerPoint.Application
                 $presentation = $ppt.Presentations.Open($SourcePath, $true, $false, $false)
+
+                # Section 정보 추출
+                $sections = @()
+                $sectionCount = $presentation.SectionProperties.Count
+                if ($sectionCount -gt 0) {
+                    for ($i = 1; $i -le $sectionCount; $i++) {
+                        $name = $presentation.SectionProperties.Name($i)
+                        $firstSlide = $presentation.SectionProperties.FirstSlide($i)
+                        $slideCount = $presentation.SectionProperties.SlidesCount($i)
+                        $sections += @{
+                            name = $name
+                            firstSlide = $firstSlide
+                            slideCount = $slideCount
+                        }
+                    }
+                }
+
+                # 슬라이드 제목 정보 추출
+                $slideTitles = @()
+                $totalSlides = $presentation.Slides.Count
+                for ($s = 1; $s -le $totalSlides; $s++) {
+                    $slide = $presentation.Slides.Item($s)
+                    $title = ""
+                    try {
+                        if ($slide.Shapes.HasTitle) {
+                            $rawTitle = $slide.Shapes.Title.TextFrame.TextRange.Text
+                            if ($rawTitle) {
+                                $title = ($rawTitle -replace "[\r\n]+", " ").Trim()
+                            }
+                        }
+                    } catch {}
+                    if ([string]::IsNullOrWhiteSpace($title)) {
+                        $title = "Slide $s"
+                    }
+                    $slideTitles += $title
+                }
+
                 $presentation.SaveAs($TargetPath, $ppSaveAsPDF)
                 $presentation.Close()
+
+                # JSON 출력
+                $result = @{
+                    sections = $sections
+                    slideTitles = $slideTitles
+                    totalSlides = $totalSlides
+                }
+                Write-Output "SECTION_JSON_START"
+                Write-Output ($result | ConvertTo-Json -Depth 5 -Compress)
+                Write-Output "SECTION_JSON_END"
             } catch {
                 Write-Error "Failed to convert PPTX to PDF: $_"
                 exit 1
@@ -910,9 +957,18 @@ fn convert_pptx_to_pdf(
             .output();
 
         let mut com_success = false;
+        let mut section_json: Option<String> = None;
         if let Ok(output) = ps_result {
             if output.status.success() {
                 com_success = true;
+                // stdout에서 Section JSON 추출
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                if let Some(start) = stdout.find("SECTION_JSON_START") {
+                    if let Some(end) = stdout.find("SECTION_JSON_END") {
+                        let json_str = stdout[start + "SECTION_JSON_START".len()..end].trim();
+                        section_json = Some(json_str.to_string());
+                    }
+                }
             } else {
                 println!("COM automation failed: {:?}", String::from_utf8_lossy(&output.stderr));
             }
@@ -957,9 +1013,220 @@ fn convert_pptx_to_pdf(
             }
         };
 
+        // PDF에 Section Outline(북마크) 추가
+        let add_outline = |tgt: &str, json: &str| {
+            use lopdf::{Document, Object, StringFormat, Dictionary};
+
+            #[derive(Debug)]
+            struct SectionInfo {
+                name: String,
+                first_slide: i64,
+                slide_count: i64,
+            }
+
+            // 간단한 JSON 파싱 (serde 없이)
+            let mut sections: Vec<SectionInfo> = Vec::new();
+            let mut slide_titles: Vec<String> = Vec::new();
+
+            // serde_json을 사용하여 파싱
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json) {
+                if let Some(secs) = parsed.get("sections").and_then(|v| v.as_array()) {
+                    for sec in secs {
+                        let name = sec.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let first_slide = sec.get("firstSlide").and_then(|v| v.as_i64()).unwrap_or(1);
+                        let slide_count = sec.get("slideCount").and_then(|v| v.as_i64()).unwrap_or(0);
+                        sections.push(SectionInfo { name, first_slide, slide_count });
+                    }
+                }
+                if let Some(titles) = parsed.get("slideTitles").and_then(|v| v.as_array()) {
+                    for t in titles {
+                        slide_titles.push(t.as_str().unwrap_or("").to_string());
+                    }
+                }
+            }
+
+            if sections.is_empty() && slide_titles.is_empty() {
+                return;
+            }
+
+            if let Ok(mut doc) = Document::load(tgt) {
+                let make_utf16 = |s: &str| -> Vec<u8> {
+                    let mut bytes = vec![0xFE, 0xFF];
+                    for u in s.encode_utf16() {
+                        bytes.push((u >> 8) as u8);
+                        bytes.push((u & 0xFF) as u8);
+                    }
+                    bytes
+                };
+
+                // 각 페이지의 Object ID를 가져옴
+                let page_ids: Vec<(u32, u16)> = doc.page_iter().collect();
+
+                if !sections.is_empty() {
+                    // Section이 있는 경우: Section → Slide 계층 구조
+                    // 섹션별로 슬라이드 아이템 생성
+                    let mut section_items: Vec<((u32, u16), Vec<(u32, u16)>)> = Vec::new();
+
+                    for sec in &sections {
+                        let first = sec.first_slide as usize;
+                        let count = sec.slide_count as usize;
+
+                        // 자식 슬라이드 아이템 생성
+                        let mut child_ids: Vec<(u32, u16)> = Vec::new();
+                        for slide_idx in first..first + count {
+                            if slide_idx < 1 || slide_idx > page_ids.len() {
+                                continue;
+                            }
+                            let page_id = page_ids[slide_idx - 1];
+                            let title = if slide_idx - 1 < slide_titles.len() {
+                                slide_titles[slide_idx - 1].clone()
+                            } else {
+                                format!("Slide {}", slide_idx)
+                            };
+
+                            let mut child_dict = Dictionary::new();
+                            child_dict.set("Title", Object::String(make_utf16(&title), StringFormat::Literal));
+                            // Dest: [pageRef /Fit]
+                            child_dict.set("Dest", Object::Array(vec![
+                                Object::Reference(page_id),
+                                Object::Name(b"Fit".to_vec()),
+                            ]));
+                            child_dict.set("Count", Object::Integer(0));
+                            let child_id = doc.add_object(Object::Dictionary(child_dict));
+                            child_ids.push(child_id);
+                        }
+
+                        // 섹션 아이템 생성
+                        let mut sec_dict = Dictionary::new();
+                        sec_dict.set("Title", Object::String(make_utf16(&sec.name), StringFormat::Literal));
+                        // 첫 슬라이드로 이동
+                        if first >= 1 && first <= page_ids.len() {
+                            sec_dict.set("Dest", Object::Array(vec![
+                                Object::Reference(page_ids[first - 1]),
+                                Object::Name(b"Fit".to_vec()),
+                            ]));
+                        }
+                        // Count: 음수 = 기본적으로 접힌 상태, 양수 = 펼쳐진 상태
+                        sec_dict.set("Count", Object::Integer(-(child_ids.len() as i64)));
+                        let sec_id = doc.add_object(Object::Dictionary(sec_dict));
+                        section_items.push((sec_id, child_ids));
+                    }
+
+                    // 2. 링크드 리스트 구성 (First/Last/Next/Prev/Parent)
+                    // 섹션 간 연결
+                    let section_count = section_items.len();
+                    for i in 0..section_count {
+                        let (sec_id, ref children) = section_items[i];
+
+                        // 자식 간 연결
+                        if !children.is_empty() {
+                            // Parent 설정 및 First/Last
+                            if let Ok(Object::Dictionary(ref mut sec_dict)) = doc.get_object_mut(sec_id) {
+                                sec_dict.set("First", Object::Reference(children[0]));
+                                sec_dict.set("Last", Object::Reference(*children.last().unwrap()));
+                            }
+
+                            for j in 0..children.len() {
+                                if let Ok(Object::Dictionary(ref mut child_dict)) = doc.get_object_mut(children[j]) {
+                                    child_dict.set("Parent", Object::Reference(sec_id));
+                                    if j > 0 {
+                                        child_dict.set("Prev", Object::Reference(children[j - 1]));
+                                    }
+                                    if j + 1 < children.len() {
+                                        child_dict.set("Next", Object::Reference(children[j + 1]));
+                                    }
+                                }
+                            }
+                        }
+
+                        // 섹션 간 Prev/Next
+                        if i > 0 {
+                            let prev_sec_id = section_items[i - 1].0;
+                            if let Ok(Object::Dictionary(ref mut sec_dict)) = doc.get_object_mut(sec_id) {
+                                sec_dict.set("Prev", Object::Reference(prev_sec_id));
+                            }
+                        }
+                        if i + 1 < section_count {
+                            let next_sec_id = section_items[i + 1].0;
+                            if let Ok(Object::Dictionary(ref mut sec_dict)) = doc.get_object_mut(sec_id) {
+                                sec_dict.set("Next", Object::Reference(next_sec_id));
+                            }
+                        }
+                    }
+
+                    // 3. Outlines Dictionary 생성
+                    let mut outlines_dict = Dictionary::new();
+                    outlines_dict.set("Type", Object::Name(b"Outlines".to_vec()));
+                    outlines_dict.set("First", Object::Reference(section_items[0].0));
+                    outlines_dict.set("Last", Object::Reference(section_items.last().unwrap().0));
+                    outlines_dict.set("Count", Object::Integer(section_count as i64));
+                    let outlines_id = doc.add_object(Object::Dictionary(outlines_dict));
+
+                    // 각 섹션의 Parent를 Outlines로 설정
+                    for (sec_id, _) in &section_items {
+                        if let Ok(Object::Dictionary(ref mut sec_dict)) = doc.get_object_mut(*sec_id) {
+                            sec_dict.set("Parent", Object::Reference(outlines_id));
+                        }
+                    }
+
+                    // 4. Catalog에 Outlines 설정
+                    if let Ok(catalog_id) = doc.trailer.get(b"Root").and_then(|o| o.as_reference()) {
+                        if let Ok(Object::Dictionary(ref mut catalog)) = doc.get_object_mut(catalog_id) {
+                            catalog.set("Outlines", Object::Reference(outlines_id));
+                            catalog.set("PageMode", Object::Name(b"UseOutlines".to_vec()));
+                        }
+                    }
+                } else if !slide_titles.is_empty() {
+                    // Section 없이 슬라이드 제목만 있는 경우: 플랫 목록
+                    let mut item_ids: Vec<(u32, u16)> = Vec::new();
+                    for (i, title) in slide_titles.iter().enumerate() {
+                        if i >= page_ids.len() { break; }
+                        let mut item_dict = Dictionary::new();
+                        item_dict.set("Title", Object::String(make_utf16(title), StringFormat::Literal));
+                        item_dict.set("Dest", Object::Array(vec![
+                            Object::Reference(page_ids[i]),
+                            Object::Name(b"Fit".to_vec()),
+                        ]));
+                        item_dict.set("Count", Object::Integer(0));
+                        let item_id = doc.add_object(Object::Dictionary(item_dict));
+                        item_ids.push(item_id);
+                    }
+
+                    if !item_ids.is_empty() {
+                        // 링크드 리스트 연결
+                        let mut outlines_dict = Dictionary::new();
+                        outlines_dict.set("Type", Object::Name(b"Outlines".to_vec()));
+                        outlines_dict.set("First", Object::Reference(item_ids[0]));
+                        outlines_dict.set("Last", Object::Reference(*item_ids.last().unwrap()));
+                        outlines_dict.set("Count", Object::Integer(item_ids.len() as i64));
+                        let outlines_id = doc.add_object(Object::Dictionary(outlines_dict));
+
+                        for i in 0..item_ids.len() {
+                            if let Ok(Object::Dictionary(ref mut d)) = doc.get_object_mut(item_ids[i]) {
+                                d.set("Parent", Object::Reference(outlines_id));
+                                if i > 0 { d.set("Prev", Object::Reference(item_ids[i - 1])); }
+                                if i + 1 < item_ids.len() { d.set("Next", Object::Reference(item_ids[i + 1])); }
+                            }
+                        }
+
+                        if let Ok(catalog_id) = doc.trailer.get(b"Root").and_then(|o| o.as_reference()) {
+                            if let Ok(Object::Dictionary(ref mut catalog)) = doc.get_object_mut(catalog_id) {
+                                catalog.set("Outlines", Object::Reference(outlines_id));
+                            }
+                        }
+                    }
+                }
+
+                let _ = doc.save(tgt);
+            }
+        };
+
         let res = if com_success {
             is_done.store(true, Ordering::SeqCst);
             update_metadata(&tgt_clone, &src_clone);
+            if let Some(ref json) = section_json {
+                add_outline(&tgt_clone, json);
+            }
             let _ = window_clone.emit("pdf-conversion-complete", tgt_clone.clone());
             Ok(())
         } else {
@@ -972,6 +1239,7 @@ fn convert_pptx_to_pdf(
                         Err(e.to_string())
                     } else {
                         update_metadata(&tgt_clone, &src_clone);
+                        // office2pdf fallback에서는 section info 없음
                         let _ = window_clone.emit("pdf-conversion-complete", tgt_clone.clone());
                         Ok(())
                     }
@@ -1103,7 +1371,7 @@ pub fn run() {
                 } else if args[i] == "--pdf-title" && i + 1 < args.len() {
                     pdf_title = args[i + 1].clone();
                     i += 1;
-                } else if args[i] == "--autostart" {
+                } else if args[i].trim().to_lowercase() == "--autostart" {
                     is_autostart = true;
                 } else if args[i].to_lowercase().ends_with(".pdf") {
                     pdf_path = args[i].clone();
@@ -1129,12 +1397,18 @@ pub fn run() {
                 let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
                 let show_i = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
                 let separator = PredefinedMenuItem::separator(app)?;
+                
+                let auto_start_enabled = is_auto_start_enabled();
+                if auto_start_enabled {
+                    set_auto_start(true); // Ensure registry has --autostart flag
+                }
+
                 let auto_start_i = CheckMenuItem::with_id(
                     app,
                     "auto_start",
                     "Launch at Windows Startup",
                     true,
-                    is_auto_start_enabled(),
+                    auto_start_enabled,
                     None::<&str>,
                 )?;
                 let menu = Menu::with_items(app, &[&show_i, &separator, &auto_start_i, &quit_i])?;
@@ -1239,7 +1513,7 @@ pub fn run() {
                 } else if argv[i] == "--pdf-title" && i + 1 < argv.len() {
                     pdf_title = argv[i + 1].clone();
                     i += 1;
-                } else if argv[i] == "--autostart" {
+                } else if argv[i].trim().to_lowercase() == "--autostart" {
                     is_autostart = true;
                 } else if argv[i].to_lowercase().ends_with(".pdf") {
                     pdf_path = argv[i].clone();

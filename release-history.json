@@ -1,5 +1,35 @@
 [
   {
+    "version": "0.9.7",
+    "date": "2026-09-13",
+    "notes": {
+      "ko": [
+        "MHZipy Version 0.9.7 Released!"
+      ],
+      "en": [
+        "MHZipy Version 0.9.7 Released!"
+      ],
+      "ja": [
+        "MHZipy バージョン 0.9.7 がリリースされました!"
+      ]
+    }
+  },
+  {
+    "version": "0.9.7",
+    "date": "2026-09-13",
+    "notes": {
+      "ko": [
+        "Windows Tray 화 기능을 추가"
+      ],
+      "en": [
+        "Add Windows Tray feature"
+      ],
+      "ja": [
+        "Windows Tray 化機能を追加"
+      ]
+    }
+  },
+  {
     "version": "0.9.6",
     "date": "2026-09-10",
     "notes": {
