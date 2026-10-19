@@ -32,9 +32,9 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo, onActivateLicense, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo: _licenseInfo, onActivateLicense: _onActivateLicense, onSave }: PreferenceDialogProps) {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<'General' | 'Folder' | 'License'>('General');
+  const [activeTab, setActiveTab] = useState<'General' | 'Folder'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
   const [quickAccess, setQuickAccess] = useState<string[]>(initialQuickAccessFolders || []);
   const [editable, setEditable] = useState<string[]>(initialEditableFolders || []);
@@ -265,12 +265,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
           >
             {t('preferences.folder')}
           </button>
-          <button
-            className={`preference-tab ${activeTab === 'License' ? 'active' : ''}`}
-            onClick={() => setActiveTab('License')}
-          >
-            {t('preferences.license')}
-          </button>
         </div>
         <div className="preference-body">
           {activeTab === 'General' && (
@@ -281,34 +275,34 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                   <select
                     value={language}
                     onChange={(e) => setLanguage(e.target.value)}
-                    style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', color: '#64748b', fontSize: '0.9rem' }}
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.12)', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.9rem', outline: 'none' }}
                   >
-                    <option value="ar">{t('preferences.lang_ar')}</option>
-                    <option value="de-AT">{t('preferences.lang_de_AT')}</option>
-                    <option value="bn">{t('preferences.lang_bn')}</option>
-                    <option value="my">{t('preferences.lang_my')}</option>
-                    <option value="km">{t('preferences.lang_km')}</option>
-                    <option value="yue">{t('preferences.lang_yue')}</option>
-                    <option value="zh">{t('preferences.lang_zh')}</option>
-                    <option value="cs">{t('preferences.lang_cs')}</option>
-                    <option value="en">{t('preferences.lang_en')}</option>
-                    <option value="fr">{t('preferences.lang_fr')}</option>
-                    <option value="de">{t('preferences.lang_de')}</option>
-                    <option value="el">{t('preferences.lang_el')}</option>
-                    <option value="id">{t('preferences.lang_id')}</option>
-                    <option value="it">{t('preferences.lang_it')}</option>
-                    <option value="ja">{t('preferences.lang_ja')}</option>
-                    <option value="ko">{t('preferences.lang_ko')}</option>
-                    <option value="lo">{t('preferences.lang_lo')}</option>
-                    <option value="ms">{t('preferences.lang_ms')}</option>
-                    <option value="mn">{t('preferences.lang_mn')}</option>
-                    <option value="pl">{t('preferences.lang_pl')}</option>
-                    <option value="ru">{t('preferences.lang_ru')}</option>
-                    <option value="es">{t('preferences.lang_es')}</option>
-                    <option value="zh-TW">{t('preferences.lang_zh_TW')}</option>
-                    <option value="th">{t('preferences.lang_th')}</option>
-                    <option value="tr">{t('preferences.lang_tr')}</option>
-                    <option value="vi">{t('preferences.lang_vi')}</option>
+                    <option value="ar" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_ar')}</option>
+                    <option value="de-AT" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_de_AT')}</option>
+                    <option value="bn" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_bn')}</option>
+                    <option value="my" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_my')}</option>
+                    <option value="km" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_km')}</option>
+                    <option value="yue" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_yue')}</option>
+                    <option value="zh" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_zh')}</option>
+                    <option value="cs" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_cs')}</option>
+                    <option value="en" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_en')}</option>
+                    <option value="fr" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_fr')}</option>
+                    <option value="de" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_de')}</option>
+                    <option value="el" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_el')}</option>
+                    <option value="id" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_id')}</option>
+                    <option value="it" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_it')}</option>
+                    <option value="ja" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_ja')}</option>
+                    <option value="ko" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_ko')}</option>
+                    <option value="lo" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_lo')}</option>
+                    <option value="ms" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_ms')}</option>
+                    <option value="mn" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_mn')}</option>
+                    <option value="pl" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_pl')}</option>
+                    <option value="ru" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_ru')}</option>
+                    <option value="es" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_es')}</option>
+                    <option value="zh-TW" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_zh_TW')}</option>
+                    <option value="th" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_th')}</option>
+                    <option value="tr" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_tr')}</option>
+                    <option value="vi" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('preferences.lang_vi')}</option>
                   </select>
                 </div>
               </div>
@@ -321,8 +315,8 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                   style={{ width: '16px', height: '16px', margin: 0, cursor: 'pointer' }}
                 />
                 <label htmlFor="pdfWorkerCheckbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, flex: 1 }}>
-                  <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#334155' }}>{t('preferences.usePdfWorker', 'Use Built-in PDF Viewer')}</span>
-                  <span style={{ fontSize: '0.85rem', color: '#64748b' }}>- {t('preferences.usePdfWorkerDesc', 'Open PDF files with internal PDF worker by default')}</span>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f8fafc' }}>{t('preferences.usePdfWorker', 'Use Built-in PDF Viewer')}</span>
+                  <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>- {t('preferences.usePdfWorkerDesc', 'Open PDF files with internal PDF worker by default')}</span>
                 </label>
               </div>
               <div className="preference-item" style={{ marginTop: '8px' }}>
@@ -351,9 +345,9 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
               </div>
               <div className="preference-item">
                 <span className="label-text">{t('preferences.columnsTitle')}</span>
-                <div className="column-settings-list" style={{ marginTop: '10px', border: '1px solid #e2e8f0', borderRadius: '6px' }}>
+                <div className="column-settings-list" style={{ marginTop: '10px', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '6px', backgroundColor: '#0b0f19' }}>
                   {columnSettings.map((col, index) => (
-                    <div key={col.key} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: index === columnSettings.length - 1 ? 'none' : '1px solid #f1f5f9' }}>
+                    <div key={col.key} style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: index === columnSettings.length - 1 ? 'none' : '1px solid rgba(255, 255, 255, 0.06)', color: '#f8fafc' }}>
                       <input
                         type="checkbox"
                         checked={col.visible}
@@ -362,13 +356,13 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                       />
                       <span style={{ flex: 1, fontSize: '0.9rem' }}>{columnLabels[col.key]}</span>
                       <div style={{ display: 'flex', gap: '4px' }}>
-                        <button className="btn-mini" onClick={() => handleMoveColumn(index, 'up')} disabled={index === 0}>▲</button>
-                        <button className="btn-mini" onClick={() => handleMoveColumn(index, 'down')} disabled={index === columnSettings.length - 1}>▼</button>
+                        <button className="btn-mini" onClick={() => handleMoveColumn(index, 'up')} disabled={index === 0} style={{ backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}>▲</button>
+                        <button className="btn-mini" onClick={() => handleMoveColumn(index, 'down')} disabled={index === columnSettings.length - 1} style={{ backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '4px', padding: '2px 6px', cursor: 'pointer' }}>▼</button>
                       </div>
                     </div>
                   ))}
                 </div>
-                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '6px' }}>
+                <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '6px' }}>
                   {t('preferences.columnsDesc')}
                 </p>
               </div>
@@ -389,90 +383,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
               {renderFolderList(t('preferences.editableFolders'), editable, handleAddEditableFolder, (f) => handleRemoveFolderList(f, editable, setEditable))}
               {renderFolderList(t('preferences.readonlyFolders'), readonly, handleAddReadonlyFolder, (f) => handleRemoveFolderList(f, readonly, setReadonly))}
             </>
-          )}
-
-          {activeTab === 'License' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', padding: '10px 0' }}>
-              <div className="preference-item" style={{ backgroundColor: '#f1f5f9', padding: '12px', borderRadius: '8px' }}>
-                <span className="label-text">License Status</span>
-                <div style={{ marginTop: '8px', fontSize: '0.95rem', fontWeight: 600 }}>
-                  {licenseInfo?.status === 'Expired' && <span style={{ color: '#ef4444' }}>Expired</span>}
-                  {typeof licenseInfo?.status === 'object' && 'Trial' in licenseInfo.status && <span style={{ color: '#eab308' }}>Trial Mode ({licenseInfo.status.Trial.days_left} days left)</span>}
-                  {typeof licenseInfo?.status === 'object' && 'Activated' in licenseInfo.status && (
-                    <span style={{ color: '#22c55e' }}>
-                      Activated {licenseInfo.status.Activated.expiry_date >= 4000000000
-                        ? '(Permanent)'
-                        : `(Expires: ${new Date(licenseInfo.status.Activated.expiry_date * 1000).toLocaleDateString()})`}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <div className="preference-item">
-                <span className="label-text">Device ID</span>
-                <div className="input-group">
-                  <input type="text" value={licenseInfo?.device_id || ''} readOnly style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
-                  <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(licenseInfo?.device_id || '')}>Copy</button>
-                </div>
-                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px' }}>
-                  This unique ID is generated based on your hardware and will be sent to the license server to bind your license.
-                </p>
-              </div>
-
-              <div className="preference-item">
-                <span className="label-text">{t('preferences.email', 'Email Address')}</span>
-                <div className="input-group">
-                  <input type="email" value={licenseEmail} onChange={(e) => setLicenseEmail(e.target.value)} placeholder="name@example.com" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem' }} />
-                  <button
-                    className="btn-primary"
-                    onClick={async () => {
-                      if (!licenseEmail) {
-                        setAlertMessage({
-                          title: 'Notice',
-                          message: 'Please enter your email address first.'
-                        });
-                        return;
-                      }
-                      setConfirmAction({
-                        title: 'Purchase License',
-                        message: 'You will be redirected to the purchase page. Do you want to continue?',
-                        onConfirm: async () => {
-                          try {
-                            const webAppUrl = await import('@tauri-apps/api/core').then(m => m.invoke<string>('get_web_app_url'));
-                            import('@tauri-apps/plugin-shell').then(({ open }) => {
-                              open(`${webAppUrl}?email=${encodeURIComponent(licenseEmail)}&deviceId=${encodeURIComponent(licenseInfo?.device_id || '')}`);
-                            });
-                          } catch (e) {
-                            console.error("Failed to get web app url", e);
-                          }
-                        }
-                      });
-                    }}
-                  >Buy License</button>
-                </div>
-              </div>
-              <div className="preference-item">
-                <span className="label-text">{t('preferences.licenseCode', 'License Code')}</span>
-                <div className="input-group">
-                  <input type="text" value={licenseCode} onChange={(e) => setLicenseCode(e.target.value)} placeholder="Enter license code" style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0', backgroundColor: '#f8fafc', fontSize: '0.9rem', fontFamily: 'monospace' }} />
-                  <button className="btn-primary" onClick={async () => {
-                    if (!onActivateLicense) return;
-                    try {
-                      await onActivateLicense(licenseEmail, licenseCode);
-                      setAlertMessage({
-                        title: 'Success',
-                        message: 'License activated successfully!'
-                      });
-                    } catch (err) {
-                      setAlertMessage({
-                        title: 'Activation Failed',
-                        message: String(err)
-                      });
-                    }
-                  }}>Activate</button>
-                </div>
-              </div>
-            </div>
           )}
         </div>
         <div className="preference-footer">

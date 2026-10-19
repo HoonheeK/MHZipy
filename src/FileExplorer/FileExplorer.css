@@ -1,93 +1,303 @@
+/* ==========================================================================
+   MHZipy Modern File Explorer Styles
+   Matches Toolbar Aesthetic (Dark Slate & Glassmorphism)
+   ========================================================================== */
+
+:root {
+  --mhz-bg-root: #0b0f19;
+  --mhz-bg-sidebar: #0f172a;
+  --mhz-bg-main: #090d16;
+  --mhz-bg-card: rgba(30, 41, 59, 0.5);
+  --mhz-bg-hover: rgba(255, 255, 255, 0.06);
+  --mhz-bg-selected: rgba(56, 189, 248, 0.15);
+  --mhz-border: rgba(255, 255, 255, 0.08);
+  --mhz-border-light: rgba(255, 255, 255, 0.04);
+  --mhz-text: #f1f5f9;
+  --mhz-text-muted: #94a3b8;
+  --mhz-text-dim: #64748b;
+  --mhz-accent: #38bdf8;
+  --mhz-accent-hover: #0284c7;
+}
+
+/* 1. Main Layout */
 .mhz-explorer {
   display: flex;
-  height: calc(100vh - 56px);
+  height: calc(100vh - 48px);
+  background-color: var(--mhz-bg-root);
+  color: var(--mhz-text);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
+
+/* 2. Left Tree & Quick Access Sidebar */
 .mhz-explorer__tree {
-  width: 260px;
-  border-right: 1px solid rgba(0,0,0,0.06);
-  padding: 12px;
-  overflow: auto;
+  background-color: var(--mhz-bg-sidebar);
+  border-right: 1px solid var(--mhz-border);
+  padding: 8px 6px;
+  overflow: hidden;
+  user-select: none;
+  box-sizing: border-box;
 }
+
+.quick-access-section {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.quick-access-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--mhz-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  margin-top: 6px;
+  padding: 0 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.qa-item {
+  cursor: pointer;
+  padding: 5px 8px;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  color: var(--mhz-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.qa-item:hover {
+  background-color: var(--mhz-bg-hover);
+  color: #ffffff;
+}
+
+.qa-item.selected {
+  background-color: var(--mhz-bg-selected);
+  color: var(--mhz-accent);
+  font-weight: 600;
+}
+
+/* 3. Folder Tree Nodes */
+.folder-tree-node {
+  border-radius: 6px;
+  transition: all 0.12s ease;
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: var(--mhz-text);
+}
+
+.folder-tree-node:hover:not(.selected) {
+  background-color: var(--mhz-bg-hover) !important;
+  color: #ffffff;
+}
+
+.folder-tree-node.selected {
+  background-color: var(--mhz-bg-selected) !important;
+  color: var(--mhz-accent) !important;
+  font-weight: 600;
+}
+
+/* 4. Splitter Resizer */
+.mhz-resizer {
+  position: relative;
+  transition: background-color 0.2s ease;
+  background-color: var(--mhz-border) !important;
+  border-left: none !important;
+  z-index: 10;
+}
+
+.mhz-resizer:hover,
+.mhz-resizer:active {
+  background-color: var(--mhz-accent) !important;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+}
+
+/* 5. Right File List Viewport */
 .mhz-explorer__files {
   flex: 1;
-  padding: 12px;
-  overflow: auto;
-}
-.mhz-explorer__path { font-weight: 600; margin-bottom: 8px }
-.mhz-tree ul { list-style: none; padding-left: 12px; }
-.mhz-folder { padding: 6px 8px; border-radius: 6px; cursor: pointer }
-.mhz-folder:hover { background: rgba(0,0,0,0.03) }
-.mhz-folder.selected { background: rgba(100,120,255,0.12); }
-.mhz-filelist ul { list-style: none; padding: 0 }
-.mhz-fileitem { padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; background: rgba(0,0,0,0.02)}
-
-.mhz-btn {
-  display: block;
-  width: 100%;
-  padding: 10px;
-  margin-bottom: 12px;
-  background-color: #222;
-  color: #eee;
-  border: 1px solid #444;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 1px;
-}
-.mhz-btn:hover {
-  background-color: #333;
-  border-color: #666;
+  background-color: var(--mhz-bg-main);
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
 }
 
+/* Table Header */
+.file-list-header {
+  display: flex;
+  font-weight: 600;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--mhz-border);
+  user-select: none;
+  font-size: 0.8rem;
+  letter-spacing: 0.3px;
+  min-width: fit-content;
+  position: sticky;
+  top: 0;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(8px);
+  color: var(--mhz-text-muted);
+  z-index: 20;
+}
+
+.file-list-header-cell {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  box-sizing: border-box;
+  transition: color 0.15s ease;
+}
+
+.file-list-header-cell:hover {
+  color: #ffffff;
+}
+
+/* File Item Rows */
+.file-list-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--mhz-border-light);
+  font-size: 0.85rem;
+  color: var(--mhz-text);
+  cursor: default;
+  min-width: fit-content;
+  transition: background-color 0.1s ease, color 0.1s ease;
+  user-select: none;
+}
+
+.file-list-row:hover:not(.selected) {
+  background-color: var(--mhz-bg-hover);
+}
+
+.file-list-row.selected {
+  background-color: var(--mhz-bg-selected);
+  color: #ffffff;
+}
+
+.file-list-row.selected span[title] {
+  color: #38bdf8;
+  font-weight: 500;
+}
+
+/* 6. Context Menu */
 .context-menu {
   position: fixed;
-  background-color: white;
-  border: 1px solid #ccc;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   z-index: 1000;
-  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
-  padding: 4px 0;
-  min-width: 180px;
-  border-radius: 4px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.75), 0 0 16px rgba(56, 189, 248, 0.15);
+  padding: 5px;
+  min-width: 190px;
+  border-radius: 8px;
+  color: var(--mhz-text);
+  animation: contextFadeIn 0.12s ease-out;
+}
+
+@keyframes contextFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .context-menu-item {
-  padding: 6px 12px;
+  padding: 6px 10px;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
-}
-
-.context-menu-item:hover {
-  background-color: #f0f0f0;
-}
-
-.context-menu-item.delete { color: #d32f2f; }
-.context-menu-separator { border-top: 1px solid #eee; margin: 4px 0; }
-.shortcut { color: #888; font-size: 11px; margin-left: 16px; }
-
-@keyframes mhz-toast-fade {
-  0% { opacity: 0; transform: translate(-50%, 20px); }
-  10% { opacity: 1; transform: translate(-50%, 0); }
-  90% { opacity: 1; transform: translate(-50%, 0); }
-  100% { opacity: 0; transform: translate(-50%, -10px); }
-}
-
-.mhz-toast {
-  position: fixed;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: rgba(0, 0, 0, 0.8);
-  color: #fff;
-  padding: 10px 24px;
-  border-radius: 24px;
-  z-index: 9999;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  font-size: 0.9rem;
+  font-size: 12.5px;
   font-weight: 500;
-  pointer-events: none;
-  animation: mhz-toast-fade 2.5s ease-in-out forwards;
+  border-radius: 5px;
+  color: var(--mhz-text);
+  transition: all 0.12s ease;
+}
+
+.context-menu-item:hover:not(.disabled) {
+  background-color: rgba(56, 189, 248, 0.16);
+  color: #ffffff;
+}
+
+.context-menu-item.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.context-menu-item.delete {
+  color: #f87171;
+}
+
+.context-menu-item.delete:hover:not(.disabled) {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #ffffff;
+}
+
+.context-menu-separator {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 4px 2px;
+}
+
+.shortcut {
+  color: var(--mhz-text-dim);
+  font-size: 11px;
+  font-family: monospace;
+  margin-left: 14px;
+}
+
+/* 7. Bottom Status Bar */
+.mhz-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background-color: rgba(15, 23, 42, 0.95);
+  border-top: 1px solid var(--mhz-border);
+  font-size: 0.75rem;
+  color: var(--mhz-text-muted);
+  min-height: 24px;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.mhz-statusbar-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mhz-statusbar-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mhz-statusbar-item strong {
+  color: #f1f5f9;
+}
+
+/* 8. Modern Scrollbars */
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
 }

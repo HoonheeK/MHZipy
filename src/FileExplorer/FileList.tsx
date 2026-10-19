@@ -222,6 +222,7 @@ export default function FileList({
   const prevCompressDialogOpen = useRef(compressDialogOpen);
   const prevZipDialogOpen = useRef(zipDialogOpen);
   const prevPathRef = useRef<string | null>(null);
+  const prevSortedFilesRef = useRef<FileData[]>([]);
 
   useEffect(() => {
     if (prevCompressDialogOpen.current && !compressDialogOpen) {
@@ -368,6 +369,7 @@ export default function FileList({
   const handleHeaderContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('mhz-close-context-menu'));
     setContextMenu({ x: e.clientX, y: e.clientY, type: 'header' });
   };
 
@@ -549,37 +551,51 @@ export default function FileList({
       return direction === 'asc' ? result : -result;
     });
 
-  // Auto-select adjacent file after deletion (detected when selected files disappear from list)
+  // Auto-select adjacent file after deletion, or preserve & focus newly pasted/created files
   useEffect(() => {
-    if (sortedFiles.length > 0 && selectedFiles.size > 0 && lastSelectedIndex !== null) {
+    if (sortedFiles.length > 0 && selectedFiles.size > 0) {
       const selectedArray = Array.from(selectedFiles);
-      const anyExist = selectedArray.some(p => sortedFiles.find(f => f.path === p));
+      const anyExist = selectedArray.some(p => sortedFiles.some(f => f.path === p));
       
       if (!anyExist) {
-        // All previously selected files are gone (deleted or moved).
-        // Auto-select the adjacent file.
-        const newIndex = Math.min(lastSelectedIndex, sortedFiles.length - 1);
-        const nextFile = sortedFiles[newIndex];
-        if (nextFile) {
-          onSelectFiles(new Set([nextFile.path]));
-          setLastSelectedIndex(newIndex);
-          setAnchorIndex(newIndex);
-          
-          // Steal focus back to list only if no specific input is focused
-          if (document.activeElement === document.body || document.activeElement?.className.includes('message-dialog-button')) {
-            rootRef.current?.focus();
+        // Only trigger adjacent selection if the selected files were ACTUALLY in the previous list (i.e. deleted)
+        // If they weren't in the previous list, they are newly pasted/created items that are still loading!
+        const wasInPrevList = selectedArray.some(p => prevSortedFilesRef.current.some(f => f.path === p));
+        if (wasInPrevList && lastSelectedIndex !== null) {
+          const newIndex = Math.min(lastSelectedIndex, sortedFiles.length - 1);
+          const nextFile = sortedFiles[newIndex];
+          if (nextFile) {
+            onSelectFiles(new Set([nextFile.path]));
+            setLastSelectedIndex(newIndex);
+            setAnchorIndex(newIndex);
+            
+            if (document.activeElement === document.body || document.activeElement?.className.includes('message-dialog-button')) {
+              rootRef.current?.focus();
+            }
           }
+        }
+      } else {
+        // Files exist in current sortedFiles! Sync lastSelectedIndex and scroll into view if needed
+        const firstMatchingIndex = sortedFiles.findIndex(f => selectedFiles.has(f.path));
+        if (firstMatchingIndex !== -1 && (lastSelectedIndex === null || !selectedFiles.has(sortedFiles[lastSelectedIndex]?.path))) {
+          setLastSelectedIndex(firstMatchingIndex);
+          setAnchorIndex(firstMatchingIndex);
+          const el = fileRefs.current.get(sortedFiles[firstMatchingIndex].path);
+          el?.scrollIntoView({ block: 'nearest' });
         }
       }
     } else if (sortedFiles.length === 0 && selectedFiles.size > 0) {
-      // Everything was deleted
-      onSelectFiles(new Set());
-      setLastSelectedIndex(null);
-      setAnchorIndex(null);
-      if (document.activeElement === document.body || document.activeElement?.className.includes('message-dialog-button')) {
-        rootRef.current?.focus();
+      const wasInPrevList = Array.from(selectedFiles).some(p => prevSortedFilesRef.current.some(f => f.path === p));
+      if (wasInPrevList) {
+        onSelectFiles(new Set());
+        setLastSelectedIndex(null);
+        setAnchorIndex(null);
+        if (document.activeElement === document.body || document.activeElement?.className.includes('message-dialog-button')) {
+          rootRef.current?.focus();
+        }
       }
     }
+    prevSortedFilesRef.current = sortedFiles;
   }, [sortedFiles, selectedFiles, lastSelectedIndex, onSelectFiles]);
 
   useEffect(() => {
@@ -603,11 +619,15 @@ export default function FileList({
     return date.toLocaleString();
   };
 
-  // Close context menu on click
+  // Close context menu on click or external trigger
   useEffect(() => {
-    const handleClick = () => setContextMenu(null);
-    window.addEventListener('click', handleClick);
-    return () => window.removeEventListener('click', handleClick);
+    const handleClose = () => setContextMenu(null);
+    window.addEventListener('click', handleClose);
+    window.addEventListener('mhz-close-context-menu', handleClose);
+    return () => {
+      window.removeEventListener('click', handleClose);
+      window.removeEventListener('mhz-close-context-menu', handleClose);
+    };
   }, []);
 
   // Selection Logic
@@ -902,9 +922,23 @@ export default function FileList({
     setContextMenu(null);
   };
 
+  useEffect(() => {
+    const handleMhzAction = (e: Event) => {
+      const customEvent = e as CustomEvent<{ action: string }>;
+      if (customEvent.detail?.action === 'compress' && canCompress) {
+        performCompress();
+      } else if (customEvent.detail?.action === 'extract' && canExtractHere) {
+        performExtract();
+      }
+    };
+    window.addEventListener('mhz-file-action', handleMhzAction);
+    return () => window.removeEventListener('mhz-file-action', handleMhzAction);
+  }, [canCompress, canExtractHere, performCompress, performExtract]);
+
   const handleContextMenu = (e: React.MouseEvent, file?: FileData, index?: number) => {
     e.preventDefault();
     e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('mhz-close-context-menu'));
 
     if (file && index !== undefined) {
       // 선택되지 않은 파일 위에서 우클릭 시 해당 파일만 선택
@@ -1593,32 +1627,32 @@ export default function FileList({
     const isSize = colKey === 'size';
     const isDate = ['mtime', 'birthtime', 'atime'].includes(colKey);
 
+    const popupWidth = isDate ? '320px' : isSize ? '260px' : '230px';
+
     return (
       <div
         style={{
-          position: 'absolute', top: '100%', left: 0, backgroundColor: 'white',
-          border: '1px solid #ccc', padding: '10px', zIndex: 100,
-          boxShadow: '0 4px 8px rgba(0,0,0,0.1)', minWidth: '220px',
-          cursor: 'default', color: 'black', fontWeight: 'normal'
+          position: 'absolute', top: '100%', left: 0, backgroundColor: '#0f172a',
+          border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '8px', padding: '14px', zIndex: 100,
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.2)', width: popupWidth,
+          cursor: 'default', color: '#f8fafc', fontWeight: 'normal', boxSizing: 'border-box'
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Filter: {colKey}</div> */}
-
         {isSize ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <select
               value={filterState.operator}
               onChange={e => setFilterState({ ...filterState, operator: e.target.value as any })}
-              style={{ width: '100%', padding: '4px' }}
+              style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none' }}
             >
               <option value="gt">Greater than (&gt;)</option>
               <option value="lt">Less than (&lt;)</option>
               <option value="range">Range</option>
             </select>
-            <div style={{ display: 'flex', gap: '5px' }}>
-              <input type="number" value={filterState.value} onChange={e => setFilterState({ ...filterState, value: e.target.value })} style={{ flex: 1, padding: '4px' }} placeholder="Size" />
-              <select value={filterState.unit} onChange={e => setFilterState({ ...filterState, unit: Number(e.target.value) })} style={{ width: '60px' }}>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input type="number" value={filterState.value} onChange={e => setFilterState({ ...filterState, value: e.target.value })} style={{ flex: 1, padding: '6px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none' }} placeholder="Size" />
+              <select value={filterState.unit} onChange={e => setFilterState({ ...filterState, unit: Number(e.target.value) })} style={{ width: '70px', padding: '6px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none' }}>
                 <option value={1}>B</option>
                 <option value={1024}>KB</option>
                 <option value={1024 * 1024}>MB</option>
@@ -1626,23 +1660,33 @@ export default function FileList({
               </select>
             </div>
             {filterState.operator === 'range' && (
-              <input type="number" value={filterState.value2} onChange={e => setFilterState({ ...filterState, value2: e.target.value })} style={{ width: '100%', padding: '4px' }} placeholder="Max Size" />
+              <input type="number" value={filterState.value2} onChange={e => setFilterState({ ...filterState, value2: e.target.value })} style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none', boxSizing: 'border-box' }} placeholder="Max Size" />
             )}
           </div>
         ) : isDate ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <select
               value={filterState.operator}
               onChange={e => setFilterState({ ...filterState, operator: e.target.value as any })}
-              style={{ width: '100%', padding: '4px' }}
+              style={{ width: '100%', padding: '6px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none' }}
             >
               <option value="after">After</option>
               <option value="before">Before</option>
               <option value="between">Between</option>
             </select>
-            <input type="date" value={filterState.value} onChange={e => setFilterState({ ...filterState, value: e.target.value })} style={{ width: '100%', padding: '4px' }} />
+            <input
+              type="date"
+              value={filterState.value}
+              onChange={e => setFilterState({ ...filterState, value: e.target.value })}
+              style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none', colorScheme: 'dark', boxSizing: 'border-box' }}
+            />
             {filterState.operator === 'between' && (
-              <input type="date" value={filterState.value2} onChange={e => setFilterState({ ...filterState, value2: e.target.value })} style={{ width: '100%', padding: '4px' }} />
+              <input
+                type="date"
+                value={filterState.value2}
+                onChange={e => setFilterState({ ...filterState, value2: e.target.value })}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none', colorScheme: 'dark', boxSizing: 'border-box' }}
+              />
             )}
           </div>
         ) : (
@@ -1651,22 +1695,32 @@ export default function FileList({
             value={filterState.value}
             onChange={e => setFilterState({ ...filterState, value: e.target.value })}
             placeholder="Contains..."
-            style={{ width: '100%', padding: '4px', boxSizing: 'border-box' }}
+            style={{ width: '100%', padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none', boxSizing: 'border-box' }}
             autoFocus
           />
         )}
 
-        <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'flex-end', gap: '5px' }}>
-          <button onClick={() => {
-            const newFilters = { ...activeFilters };
-            delete newFilters[colKey];
-            setActiveFilters(newFilters);
-            setOpenFilter(null);
-          }}>Clear</button>
-          <button onClick={() => {
-            setActiveFilters({ ...activeFilters, [colKey]: filterState });
-            setOpenFilter(null);
-          }}>Apply</button>
+        <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button
+            onClick={() => {
+              const newFilters = { ...activeFilters };
+              delete newFilters[colKey];
+              setActiveFilters(newFilters);
+              setOpenFilter(null);
+            }}
+            style={{ padding: '4px 10px', borderRadius: '5px', border: '1px solid rgba(255,255,255,0.12)', backgroundColor: '#1e293b', color: '#94a3b8', cursor: 'pointer', fontSize: '0.85em' }}
+          >
+            Clear
+          </button>
+          <button
+            onClick={() => {
+              setActiveFilters({ ...activeFilters, [colKey]: filterState });
+              setOpenFilter(null);
+            }}
+            style={{ padding: '4px 12px', borderRadius: '5px', border: 'none', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85em' }}
+          >
+            Apply
+          </button>
         </div>
       </div>
     );
@@ -1739,19 +1793,7 @@ export default function FileList({
         onMouseDown={handleMouseDown}
       >
         <div
-          style={{
-            display: 'flex',
-            fontWeight: 'bold',
-            padding: '8px 0',
-            borderBottom: '2px solid #eee',
-            userSelect: 'none',
-            fontSize: '0.9em',
-            minWidth: 'fit-content',
-            position: 'sticky',
-            top: 0,
-            backgroundColor: 'white',
-            zIndex: 20
-          }}
+          className="file-list-header"
           onMouseDown={(e) => e.stopPropagation()}
           onContextMenu={handleHeaderContextMenu}
         >
@@ -1784,6 +1826,7 @@ export default function FileList({
             {sortedFiles.map((file, index) => (
               <li
                 key={file.path}
+                className={`file-list-row ${selectedFiles.has(file.path) ? 'selected' : ''}`}
                 ref={(el) => { if (el) fileRefs.current.set(file.path, el); }}
                 onClick={(e) => handleFileClick(e, file, index)}
                 onDoubleClick={(e) => handleFileDoubleClick(e, file)}
@@ -1802,18 +1845,16 @@ export default function FileList({
                   if (file.isDirectory) handleContainerDrop(e, file.path);
                 }}
                 style={{
-                  padding: '6px 0', borderBottom: '1px solid #f5f5f5', display: 'flex', alignItems: 'center', fontSize: '0.9em',
-                  backgroundColor: selectedFiles.has(file.path) ? '#e6f3ff' : 'transparent',
-                  cursor: 'default', minWidth: 'fit-content',
+                  minWidth: 'fit-content',
                   opacity: (clipboard?.op === 'move' && clipboard.paths.includes(file.path)) ? 0.5 : 1
                 }}
               >
                 {activeColumnSettings.map(col => col.visible && (
-                  <div key={col.key} style={{ ...cellStyle, width: columnWidths[col.key], color: col.key === 'name' ? 'inherit' : '#666' }}>
+                  <div key={col.key} style={{ ...cellStyle, width: columnWidths[col.key], color: col.key === 'name' ? 'inherit' : '#94a3b8' }}>
                     {col.key === 'name' && renamingFile === file.path ? (
                       <input autoFocus value={renameText} onChange={(e) => setRenameText(e.target.value)}
                         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setRenamingFile(null); }}
-                        onBlur={handleRename} onClick={(e) => e.stopPropagation()} style={{ flex: 1 }}
+                        onBlur={handleRename} onClick={(e) => e.stopPropagation()} style={{ flex: 1, backgroundColor: '#0f172a', color: '#f8fafc', border: '1px solid #38bdf8', padding: '2px 4px', borderRadius: '4px' }}
                       />
                     ) : renderCell(file, col.key)}
                   </div>
@@ -1822,6 +1863,34 @@ export default function FileList({
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Modern Status Bar */}
+      <div className="mhz-statusbar">
+        <div className="mhz-statusbar-group">
+          <div className="mhz-statusbar-item">
+            <span>{sortedFiles.length} items</span>
+          </div>
+          {selectedFiles.size > 0 && (
+            <>
+              <span style={{ color: 'rgba(255,255,255,0.2)' }}>•</span>
+              <div className="mhz-statusbar-item">
+                <strong>{selectedFiles.size}</strong> selected
+                {(() => {
+                  let total = 0;
+                  for (const p of selectedFiles) {
+                    const f = files.find(item => item.path === p);
+                    if (f && !f.isDirectory) total += f.size;
+                  }
+                  return total > 0 ? <span style={{ marginLeft: '4px', color: '#38bdf8' }}>({formatSize(total, false)})</span> : null;
+                })()}
+              </div>
+            </>
+          )}
+        </div>
+        <div className="mhz-statusbar-group">
+          <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{path || 'My PC'}</span>
+        </div>
       </div>
 
       {contextMenu && (
@@ -1907,7 +1976,7 @@ export default function FileList({
                   <span>Export To PDF</span>
                 </div>
               )}
-              <div style={{ borderTop: '1px solid #eee', margin: '4px 0' }}></div>
+              <div className="context-menu-separator" />
             </>
           )}
           {contextMenu.type !== 'header' && path && (

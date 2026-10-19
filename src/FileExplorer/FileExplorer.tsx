@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from "react";
 import { useTranslation } from "react-i18next";
 import { dirname, join } from '@tauri-apps/api/path';
 import { mkdir, rename } from '@tauri-apps/plugin-fs';
@@ -12,24 +12,56 @@ import ConfirmDialog from "../common/ConfirmDialog";
 import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
+export interface SelectionStatus {
+  hasSelectedFiles: boolean;
+  isZipSelected: boolean;
+  canPaste: boolean;
+  canGoUp: boolean;
+  currentPath: string;
+}
+
+export interface FileExplorerRef {
+  compress: () => void;
+  extract: () => void;
+  newFolder: () => void;
+  copy: () => void;
+  paste: () => void;
+  deleteSelected: () => void;
+  refresh: () => void;
+  goUp: () => void;
+  navigate: (path: string) => void;
+}
+
 interface FileExplorerProps {
   config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
   onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
+  onSearchChange?: (query: string) => void;
   externalPath?: string;
   externalSelect?: string;
   pdfExportPath?: string;
   onNavigate?: (path: string) => void;
+  onSelectionStatusChange?: (status: SelectionStatus) => void;
 }
 
-export default function FileExplorer({ config, onSaveConfig, currentView, searchQuery, externalPath, externalSelect, pdfExportPath, onNavigate }: FileExplorerProps) {
+const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function FileExplorer({
+  config,
+  onSaveConfig,
+  currentView,
+  searchQuery,
+  onSearchChange,
+  externalPath,
+  externalSelect,
+  pdfExportPath,
+  onNavigate,
+  onSelectionStatusChange
+}, ref) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<string>(externalPath || config.defaultPath || "C:");
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set([externalPath || config.defaultPath || "C:"]));
   const [filesSelected, setFilesSelected] = useState<Set<string>>(new Set());
   const [activePane, setActivePane] = useState<'tree' | 'list'>('tree');
-  const [pathInput, setPathInput] = useState(externalPath || config.defaultPath || "C:");
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; path: string; source?: 'tree' | 'quickAccess' } | null>(null);
   const [clipboard, setClipboard] = useState<{ paths: string[]; op: 'copy' | 'move' } | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -91,11 +123,13 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
   useEffect(() => {
     const closeMenu = () => setContextMenu(null);
-    if (contextMenu) {
-      window.addEventListener('click', closeMenu);
-    }
-    return () => window.removeEventListener('click', closeMenu);
-  }, [contextMenu]);
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('mhz-close-context-menu', closeMenu);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('mhz-close-context-menu', closeMenu);
+    };
+  }, []);
 
   // 시스템 클립보드에 파일이 있는지 확인 (창 포커스 시점)
   useEffect(() => {
@@ -117,7 +151,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
 
       setSelected(externalPath);
       setSelectedPaths(new Set([externalPath]));
-      setPathInput(externalPath); // UI 주소창도 함께 업데이트하여 혼선 방지
 
       if (externalSelect) {
 
@@ -128,10 +161,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
   }, [externalPath, externalSelect]);
 
-  // 현재 탐색 중인 경로(selected)가 변경되면 주소창(pathInput)의 텍스트도 동기화합니다.
-  useEffect(() => {
-    setPathInput(selected);
-  }, [selected]);
 
   useEffect(() => {
     // 외부 명령(URL 파라미터)으로 인한 이동이 아닐 때만 선택을 초기화합니다.
@@ -147,6 +176,70 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   useEffect(() => {
     if (onNavigate) onNavigate(selected);
   }, [selected, onNavigate]);
+
+  const handleGoUp = async () => {
+    if (!selected || selected === 'My PC') return;
+    try {
+      const parent = await dirname(selected);
+      if (parent && parent !== selected) {
+        setSelected(parent);
+        setSelectedPaths(new Set([parent]));
+        if (onNavigate) onNavigate(parent);
+      }
+    } catch (err) {
+      console.error('Failed to go up:', err);
+    }
+  };
+
+  useImperativeHandle(ref, () => ({
+    compress: () => {
+      window.dispatchEvent(new CustomEvent('mhz-file-action', { detail: { action: 'compress' } }));
+    },
+    extract: () => {
+      window.dispatchEvent(new CustomEvent('mhz-file-action', { detail: { action: 'extract' } }));
+    },
+    newFolder: () => {
+      handleCreateFolder(selected);
+    },
+    copy: () => {
+      const targetPaths = filesSelected.size > 0 ? Array.from(filesSelected) : Array.from(selectedPaths);
+      if (targetPaths.length > 0) handleCopy(targetPaths);
+    },
+    paste: () => {
+      handlePaste(selected);
+    },
+    deleteSelected: () => {
+      const targetPaths = filesSelected.size > 0 ? Array.from(filesSelected) : Array.from(selectedPaths);
+      if (targetPaths.length > 0) handleDelete(targetPaths);
+    },
+    refresh: () => {
+      setRefreshTrigger((p) => p + 1);
+    },
+    goUp: () => {
+      handleGoUp();
+    },
+    navigate: (path: string) => {
+      setSelected(path);
+      setSelectedPaths(new Set([path]));
+      if (onNavigate) onNavigate(path);
+    },
+  }));
+
+  useEffect(() => {
+    if (onSelectionStatusChange) {
+      const hasSelected = filesSelected.size > 0;
+      const isZip = Array.from(filesSelected).some((p) => p.toLowerCase().endsWith('.zip'));
+      const canP = (!!clipboard && clipboard.paths.length > 0) || hasSystemClipboardFiles;
+      const canUp = Boolean(selected && selected !== 'My PC' && selected.length > 3);
+      onSelectionStatusChange({
+        hasSelectedFiles: hasSelected,
+        isZipSelected: isZip,
+        canPaste: canP,
+        canGoUp: canUp,
+        currentPath: selected,
+      });
+    }
+  }, [filesSelected, clipboard, hasSystemClipboardFiles, selected, onSelectionStatusChange]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -180,17 +273,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing, isResizingQuickAccess]);
-
-  const handlePathInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPathInput(e.target.value);
-  };
-
-  const handlePathInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      setSelected(pathInput);
-      setSelectedPaths(new Set([pathInput]));
-    }
-  };
 
   const handleSetDefault = (path: string) => {
     onSaveConfig({ defaultPath: path });
@@ -268,11 +350,16 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
   };
 
   const handleTreeContextMenu = (e: React.MouseEvent, path: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('mhz-close-context-menu'));
     setContextMenu({ x: e.clientX, y: e.clientY, path, source: 'tree' });
   };
 
   const handleQuickAccessContextMenu = (e: React.MouseEvent, path: string) => {
     e.preventDefault();
+    e.stopPropagation();
+    window.dispatchEvent(new CustomEvent('mhz-close-context-menu'));
     setContextMenu({ x: e.clientX, y: e.clientY, path, source: 'quickAccess' });
   };
 
@@ -328,10 +415,18 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     }
 
     try {
-      const success = await pasteFiles(systemPaths, targetDir, op);
-      if (success) {
+      const createdPaths = await pasteFiles(systemPaths, targetDir, op);
+      if (createdPaths && createdPaths.length > 0) {
         if (op === 'move') setClipboard(null);
         setRefreshTrigger(p => p + 1);
+        const normTarget = targetDir.replace(/[/\\]+/g, '/').toLowerCase().replace(/\/$/, '');
+        const normSelected = selected.replace(/[/\\]+/g, '/').toLowerCase().replace(/\/$/, '');
+        if (normTarget === normSelected) {
+          setFilesSelected(new Set(createdPaths));
+          setTimeout(() => {
+            setFilesSelected(new Set(createdPaths));
+          }, 80);
+        }
       }
     } catch (e: any) {
       showMessage('Invalid Operation', e.message);
@@ -364,9 +459,17 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       return;
     }
     try {
-      const success = await pasteFiles(sourcePaths, targetDir, op);
-      if (success) {
+      const createdPaths = await pasteFiles(sourcePaths, targetDir, op);
+      if (createdPaths && createdPaths.length > 0) {
         setRefreshTrigger(p => p + 1);
+        const normTarget = targetDir.replace(/[/\\]+/g, '/').toLowerCase().replace(/\/$/, '');
+        const normSelected = selected.replace(/[/\\]+/g, '/').toLowerCase().replace(/\/$/, '');
+        if (normTarget === normSelected) {
+          setFilesSelected(new Set(createdPaths));
+          setTimeout(() => {
+            setFilesSelected(new Set(createdPaths));
+          }, 80);
+        }
       }
     } catch (e: any) {
       showMessage('Invalid Operation', e.message);
@@ -646,6 +749,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
     <div style={{ display: currentView === 'search' ? 'flex' : 'none', flex: 1, minHeight: 0, width: '100%', flexDirection: 'column' }}>
       <SearchView
         searchQuery={searchQuery || ''}
+        onSearchChange={onSearchChange}
         onNavigate={(path) => {
           setSelected(path);
           setSelectedPaths(new Set([path]));
@@ -680,15 +784,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       {searchViewElement}
       <div className="mhz-explorer" style={{ display: currentView === 'search' ? 'none' : 'flex' }}>
         <aside className="mhz-explorer__tree" style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', gap: '5px', padding: '5px', alignItems: 'center', flexShrink: 0 }}>
-            <input
-              type="text"
-              value={pathInput}
-              onChange={handlePathInputChange}
-              onKeyDown={handlePathInputKeyDown}
-              style={{ flex: 1, padding: '4px', border: '1px solid #ccc', borderRadius: '4px' }}
-            />
-          </div>
           {config.quickAccess.length > 0 && (
             <>
               <div
@@ -697,9 +792,9 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                 // tabIndex={0}
                 style={{ padding: '0 10px', height: quickAccessHeight, overflowY: 'auto', flexShrink: 0 }}
               >
-                <div style={{ fontSize: '0.8em', fontWeight: 'bold', color: '#666', marginBottom: '5px', marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="quick-access-title">
                   <span>{t('explorer.quickAccess', { defaultValue: 'Quick Access' })}</span>
-                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontWeight: 'normal' }} title="Show only Quick Access folders in tree">
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontWeight: 'normal', color: 'var(--mhz-text-dim)', fontSize: '0.8rem' }} title="Show only Quick Access folders in tree">
                     <input
                       type="checkbox"
                       checked={filterQuickAccess}
@@ -709,7 +804,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                       style={{ marginRight: '4px' }}
                       tabIndex={-1}
                     />
-                    <span style={{ fontSize: '0.9em' }} >{t('explorer.filterTree', { defaultValue: 'Filter Tree' })}</span>
+                    <span>{t('explorer.filterTree', { defaultValue: 'Filter Tree' })}</span>
                   </label>
                 </div>
                 {config.quickAccess.map((qaPath, index) => (
@@ -724,17 +819,19 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
                     onDragStart={(e) => handleQADragStart(e, index)}
                     onDragOver={handleQADragOver}
                     onDrop={(e) => handleQADrop(e, index)}
-                    style={{ cursor: 'pointer', padding: '4px 5px', fontSize: '0.9em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', borderRadius: '4px', backgroundColor: selected === qaPath ? '#e6f3ff' : 'transparent', opacity: draggedQAIndex === index ? 0.5 : 1 }}
+                    className={`qa-item ${selected === qaPath ? 'selected' : ''}`}
+                    style={{ opacity: draggedQAIndex === index ? 0.5 : 1 }}
                     title={qaPath}
                     tabIndex={-1}
                   >
-                    📁 {qaPath.split(/[/\\]/).pop() || qaPath}
+                    <span>📁</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{qaPath.split(/[/\\]/).pop() || qaPath}</span>
                   </div>
                 ))}
               </div>
               <div
                 onMouseDown={(e) => { e.preventDefault(); setIsResizingQuickAccess(true); }}
-                style={{ height: '4px', cursor: 'row-resize', backgroundColor: '#f0f0f0', borderTop: '1px solid #ddd', borderBottom: '1px solid #ddd', flexShrink: 0 }}
+                style={{ height: '3px', cursor: 'row-resize', backgroundColor: 'var(--mhz-border)', flexShrink: 0 }}
               />
             </>
           )}
@@ -826,7 +923,7 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
             setSidebarWidth(0);
             onSaveConfig({ sidebarWidth: 0 });
           }}
-          style={{ width: '4px', cursor: 'col-resize', backgroundColor: '#f0f0f0', borderLeft: '1px solid #ddd' }}
+          style={{ width: '3px', cursor: 'col-resize' }}
         />
         <section className="mhz-explorer__files" >
           {/* <div className="mhz-explorer__path">{selected}</div> */}
@@ -932,4 +1029,6 @@ export default function FileExplorer({ config, onSaveConfig, currentView, search
       </div>
     </>
   );
-}
+});
+
+export default FileExplorer;

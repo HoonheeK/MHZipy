@@ -55,7 +55,7 @@ export const pasteFiles = async (
   sourcePaths: string[],
   targetDir: string,
   op: 'copy' | 'move'
-): Promise<boolean> => {
+): Promise<string[]> => {
   // Prevent copying/moving a folder into itself or a descendant.
   for (const srcPath of sourcePaths) {
     if (targetDir === srcPath) {
@@ -74,6 +74,7 @@ export const pasteFiles = async (
     }
   }
   try {
+    const createdPaths: string[] = [];
     for (const srcPath of sourcePaths) {
       const srcName = await basename(srcPath);
 
@@ -90,10 +91,11 @@ export const pasteFiles = async (
       } else {
         await rename(srcPath, destPath);
       }
+      createdPaths.push(destPath);
     }
-    return true;
+    return createdPaths;
   } catch (error) {
     console.error('Paste/Move failed:', error);
-    return false;
+    throw error;
   }
 };

@@ -1,11 +1,11 @@
-﻿.preference-overlay {
+.preference-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
+  background-color: transparent; /* Modaless: 뒷배경 투명 */
+  pointer-events: none; /* Modaless: 뒷배경 클릭 및 앱 사용 허용 */
   display: flex;
   justify-content: center;
   align-items: center;
@@ -13,58 +13,106 @@
 }
 
 .preference-modal {
-  background: white;
-  width: 600px;
-  max-height: 85vh;
+  pointer-events: auto; /* 다이얼로그 내부 인터랙션 활성화 */
+  background: #0f172a;
+  color: #f8fafc;
+  width: 640px;
+  height: 600px;
+  min-width: 460px;
+  min-height: 400px;
+  max-width: 95vw;
+  max-height: 95vh;
+  resize: both; /* 화면 사이즈 조정 가능 (Resizable) */
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 24px rgba(56, 189, 248, 0.18);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: modalScaleIn 0.2s ease-out;
+  animation: modalScaleIn 0.18s ease-out;
 }
 
 @keyframes modalScaleIn {
-  from { transform: scale(0.95); opacity: 0; }
+  from { transform: scale(0.96); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
 
 .preference-header {
-  padding: 16px 24px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #f1f5f9;
+  padding: 14px 20px;
+  background-color: #1e293b;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  user-select: none;
 }
 
 .preference-header h3 {
   margin: 0;
-  color: #1e293b;
+  color: #f8fafc;
   font-weight: 700;
-  font-size: 1.25rem;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
 }
 
 .close-btn {
   background: none;
   border: none;
-  font-size: 1.2em;
+  font-size: 1.3em;
   cursor: pointer;
   color: #94a3b8;
-  transition: color 0.2s;
+  transition: all 0.15s;
+  padding: 2px 6px;
+  line-height: 1;
+  border-radius: 4px;
 }
 
 .close-btn:hover {
-  color: #ef4444;
+  color: #f87171;
+  background-color: rgba(248, 113, 113, 0.1);
+}
+
+.preference-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 12px 20px 0 20px;
+  background-color: #0b0f19;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.preference-tab {
+  padding: 8px 18px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  transition: all 0.15s ease;
+  border-radius: 6px 6px 0 0;
+}
+
+.preference-tab:hover {
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.08);
+}
+
+.preference-tab.active {
+  color: #0f172a;
+  border-bottom-color: #38bdf8;
+  background-color: #38bdf8;
+  font-weight: 700;
 }
 
 .preference-body {
-  padding: 24px;
+  padding: 20px 24px;
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
+  background-color: #0f172a;
 }
 
 .preference-item {
@@ -80,14 +128,15 @@
 }
 
 .preference-item .label-text {
-  font-weight: bold;
-  color: #475569;
-  font-size: 0.9rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  font-size: 0.88rem;
 }
 
 .preference-badge {
-  background: #f1f5f9;
-  color: #64748b;
+  background: #1e293b;
+  color: #38bdf8;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 0.75rem;
@@ -99,23 +148,35 @@
   gap: 8px;
 }
 
-.input-group input {
+.input-group input,
+.preference-item select,
+.preference-item input[type="text"],
+.preference-item input[type="password"] {
   flex: 1;
-  padding: 8px;
-  border: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
-  background-color: #f8fafc;
+  background-color: #1e293b;
   font-size: 0.9rem;
-  color: #64748b;
+  color: #f8fafc;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input-group input:focus,
+.preference-item select:focus,
+.preference-item input[type="text"]:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px #38bdf8;
 }
 
 .folder-card-list {
   max-height: 180px;
   overflow-y: auto;
-  border: 1px solid #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  background-color: #f8fafc;
-  padding: 4px;
+  background-color: #0b0f19;
+  padding: 6px;
 }
 
 .folder-card-item {
@@ -123,16 +184,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: white;
+  background: #1e293b;
   border-radius: 6px;
-  margin-bottom: 4px;
-  border: 1px solid #f1f5f9;
-  transition: transform 0.1s, box-shadow 0.1s;
+  margin-bottom: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.15s;
 }
 
 .folder-card-item:hover {
-  border-color: #dbeafe;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  border-color: #38bdf8;
+  background-color: #253347;
 }
 
 .folder-info {
@@ -145,7 +206,7 @@
 .folder-name {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #334155;
+  color: #f8fafc;
 }
 
 .folder-path {
@@ -157,106 +218,77 @@
 }
 
 .preference-footer {
-  padding: 16px 24px;
-  border-top: 1px solid #f1f5f9;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  background-color: #f8fafc;
+  gap: 10px;
+  background-color: #1e293b;
+  user-select: none;
 }
 
 .btn-primary {
-  background-color: #2563eb;
-  color: white;
+  background-color: #38bdf8;
+  color: #0f172a;
   border: none;
   padding: 8px 20px;
   border-radius: 6px;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 0.9rem;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.15s;
 }
 
 .btn-primary:hover {
-  background-color: #1d4ed8;
+  background-color: #7dd3fc;
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.3);
 }
 
 .btn-secondary {
-  background-color: white;
-  color: #475569;
-  border: 1px solid #e2e8f0;
-  padding: 8px 20px;
+  background-color: #0f172a;
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 18px;
   border-radius: 6px;
   font-weight: 600;
+  font-size: 0.9rem;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
 .btn-secondary:hover {
-  background-color: #f1f5f9;
-  border-color: #cbd5e1;
+  background-color: #1e293b;
+  color: #f8fafc;
 }
 
 .btn-add {
   background: none;
-  border: 1px dashed #cbd5e1;
-  color: #2563eb;
-  padding: 6px;
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  padding: 8px;
   border-radius: 6px;
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
 .btn-add:hover {
-  background-color: #eff6ff;
-  border-color: #2563eb;
+  background-color: rgba(56, 189, 248, 0.08);
+  border-color: #38bdf8;
 }
 
 .btn-icon-delete {
   background: none;
   border: none;
-  color: #cbd5e1;
+  color: #94a3b8;
   cursor: pointer;
-  padding: 4px;
+  padding: 4px 6px;
   border-radius: 4px;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
 .btn-icon-delete:hover {
   color: #ef4444;
-  background-color: #fef2f2;
-}
-
-.preference-tabs {
-  display: flex;
-  gap: 8px;
-  padding: 16px 24px 0 24px;
-  background-color: #f8fafc;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.preference-tab {
-  padding: 10px 20px;
-  background: transparent;
-  border: none;
-  border-bottom: 3px solid transparent;
-  cursor: pointer;
-  font-weight: 600;
-  color: #64748b;
-  font-size: 0.95rem;
-  transition: all 0.2s ease;
-  border-radius: 8px 8px 0 0;
-}
-
-.preference-tab:hover {
-  color: #3b82f6;
-  background-color: #eff6ff;
-}
-
-.preference-tab.active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
-  background-color: #ffffff;
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.02);
+  background-color: rgba(239, 68, 68, 0.1);
 }

@@ -1,71 +1,108 @@
+/* ==========================================================================
+   MHZipy Message & Confirm Dialog Styles
+   Modern Dark Slate & Glassmorphism Theme
+   ========================================================================== */
+
 .message-dialog-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
+  background-color: rgba(10, 15, 29, 0.75);
+  backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 2000;
+  z-index: 10000;
+  animation: dialogFadeIn 0.18s ease-out;
 }
 
 .message-dialog {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  width: 400px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.15);
+  width: 420px;
   max-width: 90%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: fadeIn 0.2s ease-out;
+  color: #f8fafc;
+  animation: dialogScaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .message-dialog-header {
-  padding: 12px 16px;
-  background-color: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
+  padding: 14px 18px;
+  background: rgba(17, 24, 39, 0.8);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   font-weight: 600;
-  color: #333;
+  font-size: 1.05rem;
+  color: #f1f5f9;
 }
 
 .message-dialog-body {
-  padding: 20px 16px;
-  color: #495057;
-  font-size: 0.95em;
-  line-height: 1.5;
-  white-space: pre-wrap; /* 줄바꿈 지원 */
-  word-break: break-all; /* 긴 경로 강제 줄바꿈 지원 */
+  padding: 20px 18px;
+  color: #cbd5e1;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
   max-height: 60vh;
   overflow-y: auto;
 }
 
 .message-dialog-footer {
-  padding: 12px 16px;
-  border-top: 1px solid #e9ecef;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   justify-content: flex-end;
-  background-color: #f8f9fa;
+  gap: 10px;
+  background: rgba(17, 24, 39, 0.5);
 }
 
 .message-dialog-button {
-  padding: 6px 16px;
-  background-color: #3b82f6;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  padding: 8px 18px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 0.9em;
-  transition: background-color 0.2s;
+  font-size: 0.88rem;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  user-select: none;
 }
 
-.message-dialog-button:hover {
-  background-color: #2563eb;
+/* OK / Confirm Button */
+.message-dialog-button.ok,
+.message-dialog-button:not(.cancel) {
+  background-color: #38bdf8;
+  color: #0f172a;
+  border: none;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+.message-dialog-button.ok:hover,
+.message-dialog-button:not(.cancel):hover {
+  background-color: #7dd3fc;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+}
+
+/* Cancel Button */
+.message-dialog-button.cancel {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.message-dialog-button.cancel:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialogScaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }

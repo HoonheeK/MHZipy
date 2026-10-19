@@ -43,9 +43,9 @@ export default function ConfirmDialog({ open, title, message, onConfirm, onCance
       <div className="message-dialog" onClick={e => e.stopPropagation()}>
         <div className="message-dialog-header">{title}</div>
         <div className="message-dialog-body">{message}</div>
-        <div className="message-dialog-footer" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button ref={cancelButtonRef} onClick={onCancel} className="message-dialog-button">{cancelLabel}</button>
-          <button ref={okButtonRef} onClick={onConfirm} className="message-dialog-button">{okLabel}</button>
+        <div className="message-dialog-footer">
+          <button ref={cancelButtonRef} onClick={onCancel} className="message-dialog-button cancel">{cancelLabel}</button>
+          <button ref={okButtonRef} onClick={onConfirm} className="message-dialog-button ok">{okLabel}</button>
         </div>
       </div>
     </div>,

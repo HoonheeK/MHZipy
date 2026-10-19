@@ -306,7 +306,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
     <div style={{ marginLeft: isRoot ? '0' : '16px' }}>
       <div
         ref={nodeRef}
-        className="folder-tree-node"
+        className={`folder-tree-node ${isSelected ? 'selected' : ''}`}
         data-path={path}
         tabIndex={0}
         onKeyDown={handleKeyDown}
@@ -322,15 +322,12 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
         style={{
           cursor: 'pointer',
           userSelect: 'none',
-          padding: '2px 4px',
+          padding: '4px 6px',
           display: 'flex',
           alignItems: 'center',
           whiteSpace: 'nowrap',
           outline: 'none',
-          border: '1px solid transparent',
-          backgroundColor: isSelected ? '#cce8ff' : 'transparent',
-          // Gray out folders that are NOT editable (and their descendants)
-          color: !isEditable ? 'gray' : 'inherit',
+          color: !isEditable ? '#64748b' : 'inherit',
           opacity: isCut ? 0.5 : 1,
         }}
       >

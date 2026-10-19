@@ -1,0 +1,408 @@
+/* ==========================================================================
+   MHZipy Modern Toolbar Styles
+   Inspired by MHImageViewer design aesthetic
+   ========================================================================== */
+
+:root {
+  --tb-bg: rgba(17, 24, 39, 0.95);
+  --tb-border: rgba(255, 255, 255, 0.08);
+  --tb-text: #f1f5f9;
+  --tb-text-muted: #94a3b8;
+  --tb-hover-bg: rgba(255, 255, 255, 0.08);
+  --tb-active-bg: rgba(56, 189, 248, 0.15);
+  --tb-accent: #38bdf8;
+  --tb-accent-hover: #0284c7;
+}
+
+.mhz-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--tb-bg);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--tb-border);
+  gap: 8px;
+  z-index: 100;
+  flex-wrap: nowrap;
+  user-select: none;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.mhz-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.mhz-toolbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--tb-border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* 1. Brand Menu Button & Dropdown */
+.brand-menu-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  z-index: 110;
+}
+
+.brand-badge-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px 8px 4px 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.brand-badge-btn:hover,
+.brand-badge-btn.active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.brand-app-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  display: block;
+  object-fit: contain;
+}
+
+.brand-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.brand-arrow {
+  color: var(--tb-text-muted);
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.brand-badge-btn.active .brand-arrow {
+  transform: rotate(180deg);
+}
+
+.brand-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 220px;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(6, 182, 212, 0.25);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1000;
+  animation: brandMenuFadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes brandMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.brand-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--tb-text);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.brand-menu-item:hover {
+  background: rgba(6, 182, 212, 0.15);
+  color: #ffffff;
+}
+
+.brand-menu-item:hover svg {
+  color: var(--tb-accent);
+}
+
+.brand-menu-item .menu-text {
+  flex: 1;
+}
+
+.brand-menu-item .menu-shortcut {
+  font-size: 11px;
+  color: var(--tb-text-muted);
+  font-family: monospace;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.brand-menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 4px 6px;
+}
+
+/* 2. Generic Toolbar Buttons */
+.tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--tb-text);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.tb-btn:hover:not(:disabled) {
+  background: var(--tb-hover-bg);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+.tb-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.tb-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.tb-btn.primary {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.tb-btn.primary:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.25);
+  color: #ffffff;
+  border-color: #38bdf8;
+}
+
+.tb-btn.highlight-zip {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.25) 100%);
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.5);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.2);
+}
+
+.tb-btn.highlight-zip:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.3) 0%, rgba(5, 150, 105, 0.4) 100%);
+  color: #ffffff;
+  border-color: #34d399;
+}
+
+.tb-btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* 3. Address Bar & In-Folder Filter Search */
+.tb-path-search-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 300px;
+  max-width: 550px;
+  margin: 0 6px;
+  min-width: 140px;
+}
+
+.tb-address-bar {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 100px;
+  height: 30px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 0 8px;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.tb-address-bar:focus-within {
+  border-color: #38bdf8;
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+
+.tb-address-input {
+  flex: 1;
+  min-width: 40px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e2e8f0;
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 0;
+}
+
+.tb-search-filter {
+  display: flex;
+  align-items: center;
+  width: 160px;
+  flex-shrink: 0;
+  height: 30px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 0 8px;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.tb-search-filter:focus-within {
+  border-color: #818cf8;
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.2);
+}
+
+.tb-search-input {
+  flex: 1;
+  min-width: 30px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0;
+}
+
+.tb-clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--tb-text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.tb-clear-btn:hover {
+  color: #ffffff;
+}
+
+/* 4. View Switcher Segmented Control */
+.tb-view-switch {
+  display: flex;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.tb-view-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--tb-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.tb-view-option.active {
+  background: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.tb-view-option:hover:not(.active) {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* 5. Responsive Breakpoints */
+@media (max-width: 1280px) {
+  .tb-btn .tb-btn-text {
+    display: none;
+  }
+  .tb-btn {
+    padding: 6px 8px;
+    gap: 0;
+  }
+  .tb-search-filter {
+    width: 120px;
+  }
+}
+
+@media (max-width: 900px) {
+  .tb-search-filter {
+    display: none;
+  }
+  .brand-title {
+    display: none;
+  }
+  .tb-path-search-group {
+    max-width: 250px;
+  }
+}
+
+@media (max-width: 680px) {
+  .tb-path-search-group {
+    display: none;
+  }
+  .mhz-toolbar {
+    padding: 4px 6px;
+    gap: 4px;
+  }
+}

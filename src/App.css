@@ -1,6 +1,20 @@
+:root {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
   overflow: hidden;
+  color-scheme: dark;
+}
+
+input[type="date"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+  cursor: pointer;
 }
 
 .app-wrapper {
@@ -76,21 +90,60 @@ body {
 
 .context-menu {
   position: fixed;
-  background: white;
-  border: 1px solid #ccc;
-  box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
-  z-index: 1000;
-  min-width: 150px;
-  border-radius: 4px;
-  padding: 4px 0;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.15);
+  z-index: 2500;
+  min-width: 180px;
+  border-radius: 8px;
+  padding: 5px;
+  color: #f8fafc;
+  animation: contextFadeIn 0.12s ease-out;
+}
+
+@keyframes contextFadeIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .context-menu-item {
-  padding: 8px 16px;
+  padding: 6px 12px;
   cursor: pointer;
-  font-size: 0.9em;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  border-radius: 5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.12s ease;
 }
 
-.context-menu-item:hover {
-  background-color: #f0f0f0;
+.context-menu-item:hover:not(.disabled) {
+  background-color: rgba(56, 189, 248, 0.18);
+  color: #ffffff;
+}
+
+.context-menu-item.disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.context-menu-item.delete {
+  color: #f87171;
+}
+
+.context-menu-item.delete:hover:not(.disabled) {
+  background-color: rgba(239, 68, 68, 0.2);
+  color: #ffffff;
+}
+
+.context-menu-separator {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 4px 2px;
+}
+
+.context-menu .shortcut {
+  color: #64748b;
+  font-size: 0.8em;
+  margin-left: 12px;
 }

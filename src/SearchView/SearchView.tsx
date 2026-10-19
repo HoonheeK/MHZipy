@@ -29,6 +29,7 @@ interface SearchViewProps {
   onSelectionChange?: (paths: Set<string>) => void;
   usePdfWorker?: boolean;
   pdfExportPath?: string;
+  onSearchChange?: (query: string) => void;
 }
 
 interface FileData {
@@ -99,7 +100,8 @@ export default function SearchView({
   onColumnSettingsChange,
   onSelectionChange,
   usePdfWorker,
-  pdfExportPath
+  pdfExportPath,
+  onSearchChange
 }: SearchViewProps) {
   const { t } = useTranslation();
   const [results, setResults] = useState<FileData[]>([]);
@@ -129,9 +131,22 @@ export default function SearchView({
   const [dateBefore, setDateBefore] = useState(searchConfig?.dateBefore || '');
   const [regexError, setRegexError] = useState<string | null>(null);
 
+  const updateQuery = (newQuery: string) => {
+    setLocalQuery(newQuery);
+    if (!newQuery || !newQuery.trim()) {
+      setIsSearching(false);
+      setResults([]);
+    }
+    onSearchChange?.(newQuery);
+  };
+
   // Sync prop to local state
   useEffect(() => {
     setLocalQuery(searchQuery);
+    if (!searchQuery || !searchQuery.trim()) {
+      setIsSearching(false);
+      setResults([]);
+    }
   }, [searchQuery]);
 
   // 페이지(컴포넌트) 마운트 시 로컬 플래그를 확인해 인덱스 준비 상태를 복원
@@ -279,18 +294,21 @@ export default function SearchView({
   }, [localQuery]); // localQuery가 변경될 때마다 리스너의 로직이 최신 검색어를 참조하도록 함
 
   useEffect(() => {
-    if (!localQuery) {
+    if (!localQuery || !localQuery.trim()) {
       setResults([]);
+      setIsSearching(false);
       return;
     }
 
     if (searchMode === 'index' && !isIndexReady) {
       setResults([]);
+      setIsSearching(false);
       return;
     }
 
     if (searchMode === 'directory' && directorySearchPaths.size === 0) {
       setResults([]);
+      setIsSearching(false);
       return;
     }
 
@@ -453,36 +471,36 @@ export default function SearchView({
   const handleFileListFocus = useCallback(() => { }, []);
 
   return (
-    <div style={{ display: 'flex', flex: 1, minHeight: 0, width: '100%', flexDirection: 'column', backgroundColor: '#f8f9fa' }}>
+    <div style={{ display: 'flex', flex: 1, minHeight: 0, width: '100%', flexDirection: 'column', backgroundColor: '#0b0f19' }}>
       {/* Header & Search Bar Area */}
-      <div style={{ padding: '16px 20px', borderBottom: '1px solid #e0e0e0', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#0f172a', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
         {/* Top Row: Title & Search Mode */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h2 style={{ margin: 0, fontSize: '1.2em', color: '#333', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              🔍 <span style={{ fontWeight: '800', color: '#2563eb' }}>{t('search.title', { defaultValue: 'Quick Access Folder Search' })}</span>
+            <h2 style={{ margin: 0, fontSize: '1.15em', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              🔍 <span style={{ fontWeight: '700', color: '#38bdf8' }}>{t('search.title', { defaultValue: 'Quick Access Folder Search' })}</span>
             </h2>
-            <span style={{ fontSize: '0.85em', color: '#666', fontWeight: '500' }}>{t('search.subtitle', { defaultValue: 'Intelligent File Search' })}</span>
+            <span style={{ fontSize: '0.82em', color: '#94a3b8', fontWeight: '500' }}>{t('search.subtitle', { defaultValue: 'Intelligent File Search' })}</span>
           </div>
 
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <div style={{ display: 'flex', gap: '8px', backgroundColor: '#f1f5f9', padding: '4px', borderRadius: '6px' }}>
-              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '2px 8px', borderRadius: '4px', backgroundColor: searchMode === 'index' ? '#fff' : 'transparent', boxShadow: searchMode === 'index' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '4px', backgroundColor: '#1e293b', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '3px 10px', borderRadius: '6px', backgroundColor: searchMode === 'index' ? '#38bdf8' : 'transparent', transition: 'all 0.15s' }}>
                 <input type="radio" checked={searchMode === 'index'} onChange={() => setSearchMode('index')} style={{ display: 'none' }} />
-                <span style={{ fontSize: '0.85em', fontWeight: searchMode === 'index' ? 'bold' : 'normal', color: searchMode === 'index' ? '#2563eb' : '#64748b' }}>⚡ {t('search.mftIndex', { defaultValue: 'MFT Index' })}</span>
+                <span style={{ fontSize: '0.82em', fontWeight: searchMode === 'index' ? '700' : '500', color: searchMode === 'index' ? '#0f172a' : '#94a3b8' }}>⚡ {t('search.mftIndex', { defaultValue: 'MFT Index' })}</span>
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '2px 8px', borderRadius: '4px', backgroundColor: searchMode === 'directory' ? '#fff' : 'transparent', boxShadow: searchMode === 'directory' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>
+              <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '3px 10px', borderRadius: '6px', backgroundColor: searchMode === 'directory' ? '#38bdf8' : 'transparent', transition: 'all 0.15s' }}>
                 <input type="radio" checked={searchMode === 'directory'} onChange={() => setSearchMode('directory')} style={{ display: 'none' }} />
-                <span style={{ fontSize: '0.85em', fontWeight: searchMode === 'directory' ? 'bold' : 'normal', color: searchMode === 'directory' ? '#2563eb' : '#64748b' }}>📂 {t('search.folder', { defaultValue: 'Folder' })}</span>
+                <span style={{ fontSize: '0.82em', fontWeight: searchMode === 'directory' ? '700' : '500', color: searchMode === 'directory' ? '#0f172a' : '#94a3b8' }}>📂 {t('search.folder', { defaultValue: 'Folder' })}</span>
               </label>
             </div>
             <button
               onClick={() => setShowFilters(!showFilters)}
               style={{
-                display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', borderRadius: '6px',
-                backgroundColor: showFilters ? '#2563eb' : '#fff', color: showFilters ? '#fff' : '#475569',
-                border: '1px solid #cbd5e1', cursor: 'pointer', fontSize: '0.85em', fontWeight: '600', transition: 'all 0.2s'
+                display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', borderRadius: '7px',
+                backgroundColor: showFilters ? '#0284c7' : '#1e293b', color: showFilters ? '#ffffff' : '#94a3b8',
+                border: '1px solid rgba(255, 255, 255, 0.12)', cursor: 'pointer', fontSize: '0.82em', fontWeight: '600', transition: 'all 0.15s'
               }}
             >
               <span>⚙️ {t('search.filterSettings', { defaultValue: 'Filter Settings' })}</span>
@@ -492,49 +510,59 @@ export default function SearchView({
 
         {/* Search Input Row */}
         <div style={{ position: 'relative' }}>
-          <div style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '1.1em' }}>
+          <div style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', fontSize: '1em' }}>
             {isSearching ? '⏳' : '🔎'}
           </div>
           <input
             type="text"
             placeholder={useRegex ? t('search.placeholderRegex', "Search with Regex (e.g. ^report.*\\.pdf$)") : t('search.placeholderNormal', "Enter file name to search...")}
             value={localQuery}
-            onChange={(e) => setLocalQuery(e.target.value)}
+            onChange={(e) => updateQuery(e.target.value)}
             style={{
-              width: '100%', padding: '10px 12px 10px 40px', borderRadius: '8px', border: regexError ? '2px solid #fca5a5' : '2px solid #e2e8f0',
-              fontSize: '1em', outline: 'none', transition: 'border-color 0.2s', boxSizing: 'border-box'
+              width: '100%', padding: '9px 12px 9px 38px', borderRadius: '8px',
+              backgroundColor: '#1e293b',
+              color: '#f8fafc',
+              border: regexError ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.12)',
+              fontSize: '0.95em', outline: 'none', transition: 'all 0.15s', boxSizing: 'border-box'
             }}
-            onFocus={(e) => e.target.style.borderColor = regexError ? '#fca5a5' : '#3b82f6'}
-            onBlur={(e) => e.target.style.borderColor = regexError ? '#fca5a5' : '#e2e8f0'}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = regexError ? '#ef4444' : '#38bdf8';
+              e.currentTarget.style.boxShadow = regexError ? 'none' : '0 0 0 1px #38bdf8';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = regexError ? '#ef4444' : 'rgba(255, 255, 255, 0.12)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+            autoFocus
           />
-          <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: '#f1f5f9', padding: '4px 8px', borderRadius: '4px' }}>
+          <div style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', backgroundColor: '#0f172a', border: '1px solid rgba(255, 255, 255, 0.08)', padding: '3px 8px', borderRadius: '5px' }}>
               <input
                 type="checkbox"
                 checked={useRegex}
                 onChange={(e) => setUseRegex(e.target.checked)}
                 style={{ cursor: 'pointer' }}
               />
-              <span style={{ fontSize: '0.75em', fontWeight: 'bold', color: '#475569' }}>REGEX</span>
+              <span style={{ fontSize: '0.72em', fontWeight: 'bold', color: '#38bdf8' }}>REGEX</span>
             </label>
             {localQuery && (
-              <button onClick={() => setLocalQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '1.1em' }}>✕</button>
+              <button onClick={() => updateQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '1em', padding: '0 4px' }}>✕</button>
             )}
           </div>
         </div>
 
         {regexError && (
-          <div style={{ color: '#ef4444', fontSize: '0.85em', fontWeight: '500', paddingLeft: '4px' }}>
+          <div style={{ color: '#f87171', fontSize: '0.82em', fontWeight: '500', paddingLeft: '4px' }}>
             ⚠️ {regexError}: Invalid Regex format.
           </div>
         )}
 
         {/* Advanced Filters Panel */}
         {showFilters && (
-          <div style={{ backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '16px', marginTop: '4px', animation: 'fadeIn 0.2s' }}>
+          <div style={{ backgroundColor: '#151d2f', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '8px', padding: '14px', marginTop: '2px' }}>
             {/* Helper Tooltip */}
-            <div style={{ backgroundColor: '#eff6ff', border: '1px solid #dbeafe', borderRadius: '6px', padding: '10px', marginBottom: '12px', fontSize: '0.85em', color: '#1e40af' }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>💡 Search Tips</div>
+            <div style={{ backgroundColor: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.2)', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', fontSize: '0.82em', color: '#bae6fd' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '4px', color: '#38bdf8' }}>💡 Search Tips</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
                   <span style={{ fontWeight: '600' }}>Regex:</span> <code>^</code>(Start), <code>$</code>(End), <code>.*</code>(Contains)
@@ -545,48 +573,48 @@ export default function SearchView({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '12px' }}>
               {/* Type Filter */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>📂 {t('search.fileType', { defaultValue: 'File Type' })}</label>
+                <label style={{ fontSize: '0.82em', fontWeight: 'bold', color: '#94a3b8' }}>📂 {t('search.fileType', { defaultValue: 'File Type' })}</label>
                 <select
                   value={selectedType}
                   onChange={(e) => setSelectedType(e.target.value)}
-                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                  style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.12)', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.88em', outline: 'none' }}
                 >
-                  {FILE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  {FILE_TYPES.map(t => <option key={t} value={t} style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t}</option>)}
                 </select>
               </div>
 
               {/* Size Filter */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>⚖️ {t('search.fileSize', { defaultValue: 'File Size' })}</label>
+                <label style={{ fontSize: '0.82em', fontWeight: 'bold', color: '#94a3b8' }}>⚖️ {t('search.fileSize', { defaultValue: 'File Size' })}</label>
                 <input
                   type="text"
                   value={sizeQuery}
                   onChange={(e) => setSizeQuery(e.target.value)}
                   placeholder={t('search.sizePlaceholder', "e.g. > 10MB")}
-                  style={{ width: '100px', padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: '4px', fontSize: '0.9rem' }}
+                  style={{ padding: '6px 10px', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '6px', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.88em', outline: 'none' }}
                 />
               </div>
 
               {/* Date Filters */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>📅 {t('search.dateModifiedAfter', { defaultValue: 'Date Modified (After)' })}</label>
+                <label style={{ fontSize: '0.82em', fontWeight: 'bold', color: '#94a3b8' }}>📅 {t('search.dateModifiedAfter', { defaultValue: 'Date Modified (After)' })}</label>
                 <input
                   type="date"
                   value={dateAfter}
                   onChange={(e) => setDateAfter(e.target.value)}
-                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                  style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.12)', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.88em', outline: 'none', colorScheme: 'dark' }}
                 />
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ fontSize: '0.85em', fontWeight: 'bold', color: '#64748b' }}>📅 {t('search.dateModifiedBefore', { defaultValue: 'Date Modified (Before)' })}</label>
+                <label style={{ fontSize: '0.82em', fontWeight: 'bold', color: '#94a3b8' }}>📅 {t('search.dateModifiedBefore', { defaultValue: 'Date Modified (Before)' })}</label>
                 <input
                   type="date"
                   value={dateBefore}
                   onChange={(e) => setDateBefore(e.target.value)}
-                  style={{ padding: '6px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9em' }}
+                  style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.12)', backgroundColor: '#1e293b', color: '#f8fafc', fontSize: '0.88em', outline: 'none', colorScheme: 'dark' }}
                 />
               </div>
             </div>
@@ -594,21 +622,21 @@ export default function SearchView({
         )}
 
         {/* Context Specific Controls (Index Button or Folder Select) */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
           {searchMode === 'index' ? (
             <button
               onClick={handleBuildIndex}
               disabled={isIndexing}
               style={{
-                padding: '6px 12px',
+                padding: '6px 14px',
                 cursor: isIndexing ? 'wait' : 'pointer',
-                backgroundColor: isIndexing ? '#ccc' : (isIndexReady ? '#10b981' : '#3b82f6'),
+                backgroundColor: isIndexing ? '#475569' : (isIndexReady ? '#10b981' : '#0284c7'),
                 color: 'white',
                 border: 'none',
-                borderRadius: '6px',
-                fontSize: '0.85em',
+                borderRadius: '7px',
+                fontSize: '0.82em',
                 fontWeight: '600',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
               }}
             >
               {isIndexing ? '⏳ Indexing...' : (isIndexReady ? '🔄 Re-index MFT' : '🚀 Run MFT Indexing')}
@@ -618,16 +646,16 @@ export default function SearchView({
               <div
                 onClick={() => setIsFolderSelectOpen(!isFolderSelectOpen)}
                 style={{
-                  border: '1px solid #cbd5e1',
-                  padding: '6px 10px',
-                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  padding: '7px 12px',
+                  borderRadius: '7px',
                   cursor: 'pointer',
-                  backgroundColor: '#fff',
+                  backgroundColor: '#1e293b',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  fontSize: '0.9em',
-                  color: '#334155'
+                  fontSize: '0.88em',
+                  color: '#e2e8f0'
                 }}
               >
                 <span
@@ -638,13 +666,13 @@ export default function SearchView({
                     ? '📂 ' + t('search.selectFolder', { defaultValue: 'Select folder to search (includes Quick Access)...' })
                     : `📂 ${Array.from(directorySearchPaths).join(', ')}`}
                 </span>
-                <span style={{ fontSize: '0.8em', marginLeft: '5px' }}>{isFolderSelectOpen ? '▲' : '▼'}</span>
+                <span style={{ fontSize: '0.8em', marginLeft: '6px', color: '#94a3b8' }}>{isFolderSelectOpen ? '▲' : '▼'}</span>
               </div>
 
               {isFolderSelectOpen && (
-                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, border: '1px solid #cbd5e1', borderTop: 'none', backgroundColor: '#fff', zIndex: 1000, maxHeight: '300px', overflowY: 'auto', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)', borderRadius: '0 0 6px 6px' }}>
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, border: '1px solid rgba(255, 255, 255, 0.15)', borderTop: 'none', backgroundColor: '#1e293b', zIndex: 1000, maxHeight: '300px', overflowY: 'auto', boxShadow: '0 8px 16px rgba(0,0,0,0.4)', borderRadius: '0 0 8px 8px' }}>
                   {[...new Set([...quickAccess, ...directorySearchPaths])].sort().map(path => (
-                    <div key={path} style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                    <div key={path} style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)' }}>
                       <label title={path} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', width: '100%' }}>
                         <input
                           type="checkbox"
@@ -652,12 +680,12 @@ export default function SearchView({
                           onChange={() => handleToggleDirectoryPath(path)}
                           style={{ marginRight: '8px' }}
                         />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.9em', color: '#475569' }}>{path}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.88em', color: '#e2e8f0' }}>{path}</span>
                       </label>
                     </div>
                   ))}
-                  <div style={{ padding: '8px', textAlign: 'center', backgroundColor: '#f8fafc' }}>
-                    <button onClick={handleSelectFolder} style={{ padding: '4px 10px', cursor: 'pointer', fontSize: '0.85em', color: '#2563eb', background: 'none', border: 'none', fontWeight: '600' }}>+ {t('search.browseFolders', { defaultValue: 'Browse other folders...' })}</button>
+                  <div style={{ padding: '8px', textAlign: 'center', backgroundColor: '#151d2f' }}>
+                    <button onClick={handleSelectFolder} style={{ padding: '4px 10px', cursor: 'pointer', fontSize: '0.82em', color: '#38bdf8', background: 'none', border: 'none', fontWeight: '600' }}>+ {t('search.browseFolders', { defaultValue: 'Browse other folders...' })}</button>
                   </div>
                 </div>
               )}
@@ -667,17 +695,17 @@ export default function SearchView({
       </div>
 
       {/* Results Area */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '8px 16px', borderBottom: '1px solid #eee', backgroundColor: '#fff', fontSize: '0.9em', color: '#64748b', display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', backgroundColor: '#0b0f19' }}>
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#0f172a', fontSize: '0.85em', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
           <span>
             {isSearching ? (
-              <span style={{ color: '#2563eb', fontWeight: '600' }}>
+              <span style={{ color: '#38bdf8', fontWeight: '600' }}>
                 🔍 {t('search.searchingFor', { defaultValue: 'Searching for' })} <span style={{ fontStyle: 'italic' }}>"{localQuery}"</span>...
               </span>
             ) : (
               <>
                 {localQuery ? (
-                  <>✅ {t('search.searchResults', { defaultValue: 'Search results:' })} <span style={{ fontWeight: 'bold', color: '#2563eb' }}>{filteredResults.length}</span> {t('search.items', { defaultValue: 'items' })}</>
+                  <>✅ {t('search.searchResults', { defaultValue: 'Search results:' })} <span style={{ fontWeight: 'bold', color: '#38bdf8' }}>{filteredResults.length}</span> {t('search.items', { defaultValue: 'items' })}</>
                 ) : (
                   t('search.enterQuery', { defaultValue: 'Enter a query to start searching' })
                 )}
@@ -685,13 +713,13 @@ export default function SearchView({
             )}
           </span>
           {!isSearching && results.length !== filteredResults.length && (
-            <span style={{ fontSize: '0.85em' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
+            <span style={{ fontSize: '0.82em', color: '#64748b' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
           )}
         </div>
         <div style={{ flex: 1, minHeight: 0, opacity: isSearching ? 0.5 : 1, transition: 'opacity 0.2s', overflowY: 'auto' }}>
           {(!localQuery && recentOpenedFolders && recentOpenedFolders.length > 0) ? (
             <div style={{ padding: '20px' }}>
-              <h3 style={{ margin: '0 0 16px 0', color: '#334155', fontSize: '1.1em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h3 style={{ margin: '0 0 16px 0', color: '#f8fafc', fontSize: '1.05em', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 🕒 Recent Folders
               </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -705,27 +733,27 @@ export default function SearchView({
                     }}
                     style={{
                       padding: '12px 16px',
-                      backgroundColor: '#f8fafc',
-                      border: '1px solid #e2e8f0',
+                      backgroundColor: '#1e293b',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
                       borderRadius: '8px',
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '12px',
-                      transition: 'all 0.2s'
+                      transition: 'all 0.15s'
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f1f5f9';
-                      e.currentTarget.style.borderColor = '#cbd5e1';
+                      e.currentTarget.style.backgroundColor = '#253347';
+                      e.currentTarget.style.borderColor = '#38bdf8';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = '#f8fafc';
-                      e.currentTarget.style.borderColor = '#e2e8f0';
+                      e.currentTarget.style.backgroundColor = '#1e293b';
+                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
                     }}
                     title="Double click to open in App, Right click to open in Windows Explorer"
                   >
                     <span style={{ fontSize: '1.2em' }}>📁</span>
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#475569', fontSize: '0.95em' }}>
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#e2e8f0', fontSize: '0.9em' }}>
                       {folder}
                     </span>
                   </div>

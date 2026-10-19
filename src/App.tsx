@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { appConfigDir, join } from '@tauri-apps/api/path';
 import { readTextFile, writeTextFile, exists } from '@tauri-apps/plugin-fs';
-import Menu from './Menu/Menu';
-import FileExplorer from './FileExplorer/FileExplorer';
+import Toolbar from './components/Toolbar/Toolbar';
+import FileExplorer, { FileExplorerRef, SelectionStatus } from './FileExplorer/FileExplorer';
 import PreferenceDialog from './Menu/PreferenceDialog';
-import FloatingNav from './Menu/FloatingNav';
 import AboutDialog from './Menu/AboutDialog';
 import OpenSourceDialog from './Menu/OpenSourceDialog';
+import LicenseExpiredDialog from './components/LicenseExpiredDialog';
+import LicenseDialog from './components/LicenseDialog';
 import { ensureDir } from './utils/fileOps';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen, UnlistenFn } from '@tauri-apps/api/event';
@@ -71,8 +72,21 @@ function App() {
   const [globalConfirm, setGlobalConfirm] = useState<{title: string, message: string, onConfirm: () => void} | null>(null);
   const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [isOpenSourceOpen, setIsOpenSourceOpen] = useState(false);
+  const [isLicenseOpen, setIsLicenseOpen] = useState(false);
   const [pdfProgressOpen, setPdfProgressOpen] = useState(false);
   const [pdfProgressState, setPdfProgressState] = useState({ progress: 0, filename: '' });
+
+  // FileExplorer ref to command file operations from top toolbar
+  const fileExplorerRef = useRef<FileExplorerRef>(null);
+
+  // Status of selection (to enable/disable/highlight toolbar buttons)
+  const [selectionStatus, setSelectionStatus] = useState<SelectionStatus>({
+    hasSelectedFiles: false,
+    isZipSelected: false,
+    canPaste: false,
+    canGoUp: false,
+    currentPath: '',
+  });
 
   useEffect(() => {
     const unlistenProgress = listen<any>('pdf-conversion-progress', (event: any) => {
@@ -111,16 +125,13 @@ function App() {
 
   useEffect(() => {
     const initConfig = async () => {
-
       try {
         // 1. URL 파라미터 우선 처리 (설정 로드 실패와 무관하게 동작해야 함)
         const params = new URLSearchParams(window.location.search);
         const pathParam = params.get('path');
         const selectParam = params.get('select');
 
-
         if (pathParam) {
-
           setCurrentView('folder');
           setRequestedPath(pathParam);
           if (selectParam) {
@@ -130,7 +141,6 @@ function App() {
 
         const configDir = await appConfigDir();
         const configPath = await join(configDir, 'config.json');
-
 
         if (await exists(configPath)) {
           const content = await readTextFile(configPath);
@@ -143,7 +153,6 @@ function App() {
 
           // URL 경로가 없을 때만 저장된 기본 뷰/경로 사용
           if (!pathParam) {
-
             if (parsed.view) setCurrentView(parsed.view);
             if (parsed.defaultPath && !currentPath) {
               setCurrentPath(parsed.defaultPath);
@@ -161,7 +170,6 @@ function App() {
           }
         } else {
           console.warn('[App] 설정 파일(config.json)이 존재하지 않습니다.');
-          // Default behavior when config is missing
           checkForUpdates(
             false,
             (title, message) => setGlobalAlert({title, message}),
@@ -179,7 +187,6 @@ function App() {
         console.error('[App] 설정 로드 실패:', e);
       } finally {
         setConfigLoaded(true);
-
       }
     };
     initConfig();
@@ -198,6 +205,18 @@ function App() {
     };
   }, []);
 
+  // Global Shortcut: Alt+P to toggle Preferences Dialog
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setIsPrefOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const saveConfig = async (updates: Partial<AppConfig>) => {
     if (updates.view) {
       setCurrentView(updates.view);
@@ -211,13 +230,6 @@ function App() {
       const configDir = await appConfigDir();
       await ensureDir(configDir);
       const configPath = await join(configDir, 'config.json');
-      // Log config path and contents when saving
-      try {
-        // console.log('Saving config.json to:', configPath);
-        // console.log('config.json contents:', JSON.stringify(newConfig, null, 2));
-      } catch (logErr) {
-        console.error('Failed to log config save:', logErr);
-      }
       await writeTextFile(configPath, JSON.stringify(newConfig, null, 2));
     } catch (e) {
       console.error('Failed to save config:', e);
@@ -227,7 +239,6 @@ function App() {
   // 앱 실행 시 백그라운드로 MFT 인덱싱을 자동 실행 (비동기, UI 차단 없음)
   useEffect(() => {
     if (!configLoaded) return;
-    // invoke를 기다리지 않고 백그라운드에서 진행시키되, 완료/오류는 로그로 남김
     invoke<number>('build_mft_index')
       .then((count) => {
         console.log(`Background MFT indexing completed. ${count} files indexed.`);
@@ -247,13 +258,11 @@ function App() {
           console.warn('Failed to persist or emit index-ready flag after failure:', e);
         }
       });
-    // 의도적으로 의존성은 빈 배열이나 configLoaded로 제어: 한번만 실행
   }, [configLoaded]);
 
   const handleFileExplorerNavigate = (path: string) => {
     if (path === currentPath) return;
 
-    // If this navigation matches the requested back navigation
     if (path === requestedPath) {
       setRequestedPath(undefined);
       setRequestedSelect(undefined);
@@ -261,7 +270,6 @@ function App() {
       return;
     }
 
-    // Normal navigation: push current to history
     if (currentPath) {
       setHistory(prev => [...prev, currentPath]);
     }
@@ -289,31 +297,52 @@ function App() {
 
   return (
     <div className="app-wrapper">
-      <FloatingNav 
-        onAbout={() => setIsAboutOpen(true)} 
-        onOpenSource={() => setIsOpenSourceOpen(true)} 
-      />
-      <Menu
+      {/* 1. Modern Unified Toolbar (Inspired by MHImageViewer) */}
+      <Toolbar
+        onAbout={() => setIsAboutOpen(true)}
+        onOpenSource={() => setIsOpenSourceOpen(true)}
         onPreference={() => setIsPrefOpen(true)}
-        currentView={currentView}
-        onToggleView={() => saveConfig({ view: currentView === 'folder' ? 'search' : 'folder' })}
-        onSearch={setSearchQuery}
+        onLicense={() => setIsLicenseOpen(true)}
         onBack={handleBack}
         canGoBack={history.length > 0}
         onNext={handleNext}
         canGoForward={forwardHistory.length > 0}
+        onGoUp={() => fileExplorerRef.current?.goUp()}
+        canGoUp={selectionStatus.canGoUp}
+        onRefresh={() => fileExplorerRef.current?.refresh()}
+        currentPath={currentPath}
+        onNavigatePath={(p) => fileExplorerRef.current?.navigate(p)}
         searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        hasSelectedFiles={selectionStatus.hasSelectedFiles}
+        isZipSelected={selectionStatus.isZipSelected}
+        onCompress={() => fileExplorerRef.current?.compress()}
+        onExtract={() => fileExplorerRef.current?.extract()}
+        onNewFolder={() => fileExplorerRef.current?.newFolder()}
+        onCopy={() => fileExplorerRef.current?.copy()}
+        onPaste={() => fileExplorerRef.current?.paste()}
+        canPaste={selectionStatus.canPaste}
+        onDelete={() => fileExplorerRef.current?.deleteSelected()}
+        currentView={currentView}
+        onToggleView={(view) => saveConfig({ view })}
       />
+
+      {/* 2. Main File Explorer Pane */}
       <FileExplorer
+        ref={fileExplorerRef}
         config={config}
         onSaveConfig={saveConfig}
         currentView={currentView}
         searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
         externalPath={requestedPath}
         externalSelect={requestedSelect}
         pdfExportPath={config.pdfExportPath}
         onNavigate={handleFileExplorerNavigate}
+        onSelectionStatusChange={setSelectionStatus}
       />
+
+      {/* 3. Preferences Dialog */}
       <PreferenceDialog
         isOpen={isPrefOpen}
         onClose={() => setIsPrefOpen(false)}
@@ -350,70 +379,39 @@ function App() {
         }}
       />
 
+      {/* 4. Dedicated License Dialog */}
+      <LicenseDialog
+        isOpen={isLicenseOpen}
+        onClose={() => setIsLicenseOpen(false)}
+        licenseInfo={licenseInfo}
+        defaultEmail={config.licenseEmail}
+        defaultCode={config.licenseCode}
+        onActivate={(newInfo, email, code) => {
+          setLicenseInfo(newInfo);
+          saveConfig({
+            licenseEmail: email,
+            licenseCode: code,
+          });
+        }}
+      />
+
+      {/* 5. License Expired Blocking Overlay */}
       {licenseInfo && licenseInfo.status === 'Expired' && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.95)', zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#f8fafc', padding: '20px' }}>
-          <h1 style={{ fontSize: '2rem', marginBottom: '10px', color: '#f87171' }}>License Expired</h1>
-          <p style={{ fontSize: '1.1rem', marginBottom: '30px', textAlign: 'center', maxWidth: '500px' }}>
-            Your trial or purchased license has expired. To continue using MHZipy, please purchase a license.
-          </p>
-          <div style={{ width: '100%', maxWidth: '400px', backgroundColor: '#1e293b', padding: '20px', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Device ID (Copy to purchase)</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input type="text" value={licenseInfo.device_id} readOnly style={{ flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
-                <button className="btn-secondary" onClick={() => navigator.clipboard.writeText(licenseInfo.device_id)}>Copy</button>
-              </div>
-            </div>
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Email Address</label>
-              <input type="email" id="blockingEmail" defaultValue={config.licenseEmail || ''} placeholder="name@example.com" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc' }} />
-            </div>
-            <button
-              className="btn-primary"
-              style={{ width: '100%', padding: '12px', fontSize: '1rem', marginBottom: '20px' }}
-              onClick={() => {
-                const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
-                if (!email) { alert('Please enter your email.'); return; }
-                import('@tauri-apps/plugin-shell').then(async ({ open }) => {
-                  const webAppUrl = await import('@tauri-apps/api/core').then(m => m.invoke<string>('get_web_app_url'));
-                  open(`${webAppUrl}?email=${encodeURIComponent(email)}&deviceId=${encodeURIComponent(licenseInfo.device_id)}`);
-                });
-              }}
-            >Buy License</button>
-
-            <hr style={{ borderColor: '#334155', margin: '20px 0' }} />
-
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontSize: '0.9rem', color: '#cbd5e1' }}>Have a license code?</label>
-              <input type="text" id="blockingCode" defaultValue={config.licenseCode || ''} placeholder="Enter license code" style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid #334155', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: 'monospace' }} />
-            </div>
-            <button
-              className="btn-secondary"
-              style={{ width: '100%', padding: '12px', fontSize: '1rem' }}
-              onClick={async () => {
-                const email = (document.getElementById('blockingEmail') as HTMLInputElement).value;
-                const code = (document.getElementById('blockingCode') as HTMLInputElement).value;
-                if (!email || !code) { alert('Please enter both email and code.'); return; }
-                try {
-                  const newInfo: LicenseInfo = await invoke('activate_license', { email, code });
-                  setLicenseInfo(newInfo);
-                  alert('License activated successfully!');
-
-                  // Update config with the new license data
-                  saveConfig({
-                    ...config,
-                    licenseEmail: email,
-                    licenseCode: code,
-                  });
-                } catch (err) {
-                  alert('Failed to activate: ' + err);
-                }
-              }}
-            >Activate</button>
-          </div>
-        </div>
+        <LicenseExpiredDialog
+          licenseInfo={licenseInfo}
+          defaultEmail={config.licenseEmail}
+          defaultCode={config.licenseCode}
+          onActivated={(newInfo, email, code) => {
+            setLicenseInfo(newInfo);
+            saveConfig({
+              licenseEmail: email,
+              licenseCode: code,
+            });
+          }}
+        />
       )}
 
+      {/* 5. About & Open Source Dialogs */}
       <AboutDialog 
         isOpen={isAboutOpen} 
         onClose={() => setIsAboutOpen(false)} 
@@ -422,33 +420,49 @@ function App() {
       />
       <OpenSourceDialog isOpen={isOpenSourceOpen} onClose={() => setIsOpenSourceOpen(false)} />
 
-      {/* Global Custom Alert Modal */}
+      {/* 6. Global Custom Alert Modal */}
       {globalAlert && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
-          <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#0f172a', fontSize: '1.2rem', fontWeight: 600 }}>{globalAlert.title}</h3>
-            <p style={{ color: '#475569', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{globalAlert.message}</p>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(10, 15, 29, 0.75)', backdropFilter: 'blur(10px)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid rgba(255, 255, 255, 0.12)', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '420px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8), 0 0 24px rgba(56, 189, 248, 0.15)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#f1f5f9', fontSize: '1.15rem', fontWeight: 600 }}>{globalAlert.title}</h3>
+            <p style={{ color: '#cbd5e1', marginBottom: '24px', fontSize: '0.92rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>{globalAlert.message}</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="btn-primary" onClick={() => setGlobalAlert(null)}>OK</button>
+              <button
+                style={{ padding: '8px 20px', backgroundColor: '#38bdf8', color: '#0f172a', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => setGlobalAlert(null)}
+              >
+                OK
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Global Custom Confirm Modal */}
+      {/* 7. Global Custom Confirm Modal */}
       {globalConfirm && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.6)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
-          <div style={{ backgroundColor: '#ffffff', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '400px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)' }}>
-            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#0f172a', fontSize: '1.2rem', fontWeight: 600 }}>{globalConfirm.title}</h3>
-            <p style={{ color: '#475569', marginBottom: '24px', fontSize: '0.95rem', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>{globalConfirm.message}</p>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(10, 15, 29, 0.75)', backdropFilter: 'blur(10px)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', animation: 'fadeIn 0.2s ease' }}>
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid rgba(255, 255, 255, 0.12)', padding: '24px', borderRadius: '12px', minWidth: '320px', maxWidth: '420px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.8), 0 0 24px rgba(56, 189, 248, 0.15)' }}>
+            <h3 style={{ marginTop: 0, marginBottom: '12px', color: '#f1f5f9', fontSize: '1.15rem', fontWeight: 600 }}>{globalConfirm.title}</h3>
+            <p style={{ color: '#cbd5e1', marginBottom: '24px', fontSize: '0.92rem', lineHeight: '1.6', whiteSpace: 'pre-wrap' }}>{globalConfirm.message}</p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button className="btn-secondary" onClick={() => setGlobalConfirm(null)}>Cancel</button>
-              <button className="btn-primary" onClick={() => { globalConfirm.onConfirm(); setGlobalConfirm(null); }}>Continue</button>
+              <button
+                style={{ padding: '8px 18px', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '6px', fontWeight: 500, cursor: 'pointer' }}
+                onClick={() => setGlobalConfirm(null)}
+              >
+                Cancel
+              </button>
+              <button
+                style={{ padding: '8px 20px', backgroundColor: '#38bdf8', color: '#0f172a', border: 'none', borderRadius: '6px', fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => { globalConfirm.onConfirm(); setGlobalConfirm(null); }}
+              >
+                Continue
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* 8. PDF Progress Modal */}
       <PdfProgressDialog 
         isOpen={pdfProgressOpen} 
         onClose={() => setPdfProgressOpen(false)} 
