@@ -6,8 +6,131 @@
     <style>
         body { margin: 0; background-color: #525659; font-family: sans-serif; overflow: hidden; }
         
-        /* Layout */
-        #app-container { display: flex; height: 100vh; width: 100vw; }
+        /* Custom Window Header for Frameless PDF Viewer */
+        #pdf-custom-header {
+            height: 38px;
+            background: #111827;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            color: #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 8px 0 14px;
+            user-select: none;
+            z-index: 2000;
+            box-sizing: border-box;
+            width: 100vw;
+        }
+        #pdf-header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+            max-width: 75%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #pdf-header-filename {
+            font-weight: 600;
+            color: #f8fafc;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #pdf-header-path {
+            font-size: 11px;
+            font-weight: 400;
+            color: #64748b;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #pdf-header-drag-spacer {
+            flex: 1;
+            height: 100%;
+            min-width: 24px;
+            cursor: grab;
+            -webkit-app-region: drag;
+        }
+        #pdf-header-drag-spacer:active {
+            cursor: grabbing;
+        }
+        #pdf-window-controls {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            -webkit-app-region: no-drag;
+        }
+        .pdf-win-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            width: 32px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            padding: 0;
+        }
+        .pdf-win-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+        }
+        .pdf-win-btn:active {
+            transform: scale(0.95);
+        }
+        .pdf-win-btn.close:hover {
+            background: #e11d48 !important;
+            color: #ffffff !important;
+        }
+
+        /* Status Bar at the bottom */
+        #pdf-status-bar {
+            height: 24px;
+            background: #090d16;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 14px;
+            font-size: 11px;
+            user-select: none;
+            box-sizing: border-box;
+            width: 100vw;
+            z-index: 100;
+        }
+        #pdf-status-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 75%;
+        }
+        #pdf-status-source {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #pdf-status-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #64748b;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+
+        /* Layout (38px Header + 24px Status Bar = 62px) */
+        #app-container { display: flex; height: calc(100vh - 62px); width: 100vw; }
         
         /* Sidebar (Outline) */
         #sidebar {
@@ -70,12 +193,21 @@
         #viewer-content { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 20px; }
         
         /* Page & Canvas */
-        .page-wrapper { position: relative; flex-shrink: 0; box-shadow: 0 0 10px rgba(0,0,0,0.5); background: white; cursor: pointer; transition: outline 0.15s, box-shadow 0.15s; outline: 3px solid transparent; outline-offset: 3px; }
+        .page-wrapper {
+            position: relative;
+            flex-shrink: 0;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            background: white;
+            cursor: text; /* Selection Mode default: I-beam cursor */
+            transition: outline 0.15s, box-shadow 0.15s;
+            outline: 3px solid transparent;
+            outline-offset: 3px;
+        }
         .page-wrapper.selected { outline: 3px solid #1a73e8; box-shadow: 0 0 18px rgba(26, 115, 232, 0.5); }
         canvas { display: block; }
         
         /* Text Layer */
-        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; line-height: 1.0; opacity: 0.2; }
+        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; line-height: 1.0; opacity: 0.2; cursor: text; }
         .textLayer > span { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
         ::selection { background: rgba(0, 89, 255, 0.3); }
 
@@ -186,10 +318,24 @@
         }
         .context-menu-item:hover { background-color: #f0f0f0; }
 
-        /* Pan Mode */
-        .pan-mode { cursor: grab !important; user-select: none; }
-        .pan-mode.grabbing { cursor: grabbing !important; }
-        .pan-mode .textLayer { pointer-events: none; }
+        /* Pan Mode & Hand Tool Cursors */
+        #viewer-scroll-container.pan-mode,
+        #viewer-scroll-container.pan-mode .page-wrapper,
+        #viewer-scroll-container.pan-mode canvas,
+        #viewer-scroll-container.pan-mode .textLayer,
+        #viewer-scroll-container.pan-mode .textLayer * {
+            cursor: grab !important;
+            user-select: none !important;
+        }
+        #viewer-scroll-container.pan-mode.grabbing,
+        #viewer-scroll-container.pan-mode.grabbing *,
+        #viewer-scroll-container.pan-mode.grabbing .page-wrapper,
+        #viewer-scroll-container.pan-mode.grabbing canvas,
+        #viewer-scroll-container.pan-mode.grabbing .textLayer {
+            cursor: grabbing !important;
+            user-select: none !important;
+        }
+        #viewer-scroll-container.pan-mode .textLayer { pointer-events: none !important; }
 
         /* Annotation Layer (Links) */
         .annotationLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; }
@@ -268,6 +414,32 @@
     </style>
 </head>
 <body>
+    <header id="pdf-custom-header">
+        <div id="pdf-header-left">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span id="pdf-header-filename">PDF Viewer</span>
+            <span id="pdf-header-path"></span>
+        </div>
+        <div id="pdf-header-drag-spacer" data-tauri-drag-region title="Drag to move window, double-click to toggle maximize"></div>
+        <div id="pdf-window-controls">
+            <button type="button" class="pdf-win-btn" id="pdf-btn-minimize" title="Minimize">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            <button type="button" class="pdf-win-btn" id="pdf-btn-maximize" title="Maximize">
+                <svg id="pdf-icon-max" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+            </button>
+            <button type="button" class="pdf-win-btn close" id="pdf-btn-close" title="Close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+        </div>
+    </header>
+
     <div id="app-container">
         <div id="sidebar">
             <div id="sidebar-header">
@@ -316,16 +488,17 @@
                 <span id="total-pages"></span>
             </div>
             <div id="zoom-controls">
-                <button class="zoom-btn" id="mode-toggle" title="Text Selection Mode">👆</button>
-                <button class="zoom-btn" id="capture-full" title="현재 화면 캡쳐">📷</button>
-                <button class="zoom-btn" id="capture-region" title="영역 선택 캡쳐">🔲</button>
+                <button class="zoom-btn" id="mode-toggle" title="Text Selection Mode (Click to switch to Hand Tool)">👆</button>
+                <button class="zoom-btn" id="capture-full" title="Capture Page (Click page to copy)">📷</button>
+                <button class="zoom-btn" id="capture-region" title="Capture Region (Drag box to copy)">🔲</button>
                 <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
                 <button class="zoom-btn" id="rotate-ccw" title="Rotate Counter-Clockwise">↺</button>
                 <button class="zoom-btn" id="rotate-cw" title="Rotate Clockwise">↻</button>
                 <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
-                <button class="zoom-btn" id="zoom-out">−</button>
+                <button class="zoom-btn" id="zoom-out" title="Zoom Out">−</button>
                 <input type="text" id="zoom-level" value="150%">
-                <button class="zoom-btn" id="zoom-in">+</button>
+                <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
+                <button class="zoom-btn" id="fit-width" title="Fit to Width">↔</button>
             </div>
         </div>
 
@@ -334,6 +507,16 @@
             <button class="context-menu-item" id="ctx-highlight">Highlight</button>
         </div>
     </div>
+
+    <!-- Bottom Status Bar -->
+    <footer id="pdf-status-bar">
+        <div id="pdf-status-left">
+            <span id="pdf-status-source"></span>
+        </div>
+        <div id="pdf-status-right">
+            <span id="pdf-status-info">Ready</span>
+        </div>
+    </footer>
 
     <!-- pdf.js 라이브러리를 로드합니다. 프로젝트의 버전에 맞게 수정할 수 있습니다. -->
     <script type="module">
@@ -349,6 +532,31 @@
         let currentScale = 1.5; // 기본 스케일
         let currentRotation = 0; // 기본 회전 각도
         let selectedPageNum = null; // 선택된 페이지 번호 (줌 앵커용)
+        let isFitWidthMode = true; // 기본 모드: 화면 폭 맞춤 (Fit to Width)
+
+        // 화면 폭에 맞춰 스케일 계산 함수
+        async function fitToWidth() {
+            if (!pdfDoc || pdfDoc.numPages === 0) return;
+            const scrollContainer = document.getElementById('viewer-scroll-container');
+            if (!scrollContainer) return;
+
+            const curPageNum = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
+            const page = await pdfDoc.getPage(Math.min(pdfDoc.numPages, Math.max(1, curPageNum)));
+            const viewport = page.getViewport({ scale: 1.0, rotation: currentRotation });
+
+            // 좌우 패딩(20px * 2) 및 스크롤바 너비 고려
+            const availableWidth = Math.max(200, scrollContainer.clientWidth - 48);
+            const calculatedScale = availableWidth / viewport.width;
+
+            if (calculatedScale > 0) {
+                currentScale = Math.max(0.2, Math.min(calculatedScale, 5.0));
+                const zoomInput = document.getElementById('zoom-level');
+                if (zoomInput) {
+                    zoomInput.value = Math.round(currentScale * 100) + '%';
+                }
+                updatePageIndicator(curPageNum);
+            }
+        }
 
         function selectPage(pageNum) {
             selectedPageNum = pageNum;
@@ -549,6 +757,7 @@
                     const sourceStr = info.Source || info.Subject || info.Keywords || '';
                     if (sourceStr && sourceStr.includes('Source: ')) {
                         window.__SOURCE_PPTX_PATH__ = sourceStr.replace('Source: ', '').trim();
+                        updateStatusBarSource(window.__SOURCE_PPTX_PATH__);
                     }
                 } catch (err) {
                     console.warn('Failed to load metadata', err);
@@ -564,20 +773,9 @@
                 updatePageIndicator(1);
                 document.getElementById('total-pages').textContent = pdfDoc.numPages;
 
-                // Landscape(가로 모드)인 경우 첫 페이지가 한 화면에 다 들어오도록 스케일 조정
+                // 기본 모드: 화면 폭에 맞춘 자동 확대/축소 (Fit to Width)
                 if (pdfDoc.numPages > 0) {
-                    const firstPage = await pdfDoc.getPage(1);
-                    const viewport1 = firstPage.getViewport({ scale: 1.0, rotation: currentRotation });
-                    if (viewport1.width > viewport1.height) {
-                        const scrollContainer = document.getElementById('viewer-scroll-container');
-                        const containerWidth = scrollContainer.clientWidth - 40; // 좌우 패딩 20px씩
-                        const containerHeight = scrollContainer.clientHeight - 40; // 상하 여백
-                        const scaleWidth = containerWidth / viewport1.width;
-                        const scaleHeight = containerHeight / viewport1.height;
-                        // 너비와 높이 중 더 작은 쪽에 맞추어 전체 페이지가 다 보이도록 함
-                        currentScale = Math.min(scaleWidth, scaleHeight);
-                        document.getElementById('zoom-level').value = Math.round(currentScale * 100) + '%';
-                    }
+                    await fitToWidth();
                 }
 
                 await renderPages();
@@ -840,22 +1038,8 @@
 
                 _pageDataList.push({ pageNum, page, viewport, pageWrapper });
 
-                // 첫 페이지 왼쪽 아래에 조그맣게 Source 표시
                 if (pageNum === 1 && window.__SOURCE_PPTX_PATH__) {
-                    const infoEl = document.createElement('div');
-                    infoEl.style.position = 'absolute';
-                    infoEl.style.bottom = '10px';
-                    infoEl.style.left = '10px';
-                    infoEl.style.backgroundColor = 'rgba(0,0,0,0.5)';
-                    infoEl.style.color = '#fff';
-                    infoEl.style.padding = '4px 8px';
-                    infoEl.style.borderRadius = '4px';
-                    infoEl.style.fontSize = '11px';
-                    infoEl.style.zIndex = '100';
-                    infoEl.style.pointerEvents = 'none';
-                    infoEl.style.whiteSpace = 'nowrap';
-                    infoEl.textContent = `Source PPTX: ${window.__SOURCE_PPTX_PATH__}`;
-                    pageWrapper.appendChild(infoEl);
+                    updateStatusBarSource(window.__SOURCE_PPTX_PATH__);
                 }
             }
 
@@ -1153,7 +1337,12 @@
 
             const currentPageEl = document.getElementById('current-page');
             if (pdfDoc) {
-                if (currentPageEl) currentPageEl.textContent = pageNum || 1;
+                const cur = pageNum || 1;
+                if (currentPageEl) currentPageEl.textContent = cur;
+                const statusInfo = document.getElementById('pdf-status-info');
+                if (statusInfo) {
+                    statusInfo.textContent = `Page ${cur} / ${pdfDoc.numPages} | ${Math.round(currentScale * 100)}%`;
+                }
             }
 
             // 썸네일 활성 상태 업데이트
@@ -1241,6 +1430,7 @@
         }
 
         async function updateZoom(delta, mouseClientX, mouseClientY) {
+            isFitWidthMode = false; // 수동 줌 조작 시 폭 맞춤 모드 해제
             let newScale = currentScale + delta;
             if (newScale < 0.1) newScale = 0.1;
             if (newScale > 10.0) newScale = 10.0;
@@ -1372,17 +1562,22 @@
             if (isPanMode) {
                 viewerContainer.classList.add('pan-mode');
                 modeToggleBtn.textContent = '✋';
-                modeToggleBtn.title = "손바닥 도구 (패닝)";
-                window.getSelection().removeAllRanges(); // 기존 선택 해제
+                modeToggleBtn.title = "Hand Tool / Pan Mode (Click to switch to Text Selection)";
+                window.getSelection()?.removeAllRanges(); // 기존 선택 해제
             } else {
                 viewerContainer.classList.remove('pan-mode');
+                viewerContainer.classList.remove('grabbing');
                 modeToggleBtn.textContent = '👆';
-                modeToggleBtn.title = "텍스트 선택 모드";
+                modeToggleBtn.title = "Text Selection Mode (Click to switch to Hand Tool)";
             }
         };
 
         viewerContainer.addEventListener('mousedown', (e) => {
             if (!isPanMode) return;
+            if (e.button !== 0) return; // 좌클릭만 처리
+            // 플로팅 컨트롤러나 툴바 클릭 시 패닝 무시
+            if (e.target.closest('#zoom-controls') || e.target.closest('#page-indicator') || e.target.closest('#sidebar-toggle-btn') || e.target.closest('#search-bar')) return;
+
             isPanning = true;
             viewerContainer.classList.add('grabbing');
             startX = e.clientX;
@@ -1392,24 +1587,26 @@
             e.preventDefault();
         });
 
-        const stopPanning = () => {
-            isPanning = false;
-            viewerContainer.classList.remove('grabbing');
-        };
-
-        viewerContainer.addEventListener('mouseleave', stopPanning);
-        viewerContainer.addEventListener('mouseup', stopPanning);
-
-        viewerContainer.addEventListener('mousemove', (e) => {
+        const onPanMove = (e) => {
             if (!isPanning) return;
             e.preventDefault();
             const x = e.clientX;
             const y = e.clientY;
-            const walkX = (x - startX);
-            const walkY = (y - startY);
+            const walkX = x - startX;
+            const walkY = y - startY;
             viewerContainer.scrollLeft = scrollLeft - walkX;
             viewerContainer.scrollTop = scrollTop - walkY;
-        });
+        };
+
+        const onPanEnd = () => {
+            if (isPanning) {
+                isPanning = false;
+                viewerContainer.classList.remove('grabbing');
+            }
+        };
+
+        window.addEventListener('mousemove', onPanMove);
+        window.addEventListener('mouseup', onPanEnd);
 
         // --- 캡쳐 기능 ---
         function playFlashEffect() {
@@ -1426,7 +1623,7 @@
                 await navigator.clipboard.write([item]);
             } catch (err) {
                 console.error('Clipboard copy failed:', err);
-                alert('클립보드 복사에 실패했습니다: ' + err.message);
+                alert('Failed to copy to clipboard: ' + err.message);
             }
         }
 
@@ -1844,6 +2041,27 @@
         document.getElementById('zoom-in').onclick = () => updateZoom(0.25);
         document.getElementById('zoom-out').onclick = () => updateZoom(-0.25);
 
+        const fitWidthBtn = document.getElementById('fit-width');
+        if (fitWidthBtn) {
+            fitWidthBtn.onclick = async () => {
+                isFitWidthMode = true;
+                await fitToWidth();
+                await renderPages();
+            };
+        }
+
+        // 창 크기 변경 시 폭 맞춤 모드 유지 (디바운스 처리)
+        let _resizeTimer = null;
+        window.addEventListener('resize', () => {
+            if (isFitWidthMode && pdfDoc) {
+                clearTimeout(_resizeTimer);
+                _resizeTimer = setTimeout(async () => {
+                    await fitToWidth();
+                    await renderPages();
+                }, 120);
+            }
+        });
+
         const zoomInput = document.getElementById('zoom-level');
         zoomInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -1855,6 +2073,7 @@
                 }
                 val = Math.max(10, Math.min(1000, val));
                 const newScale = val / 100;
+                isFitWidthMode = false;
                 updateZoom(newScale - currentScale);
                 zoomInput.blur();
             }
@@ -1913,6 +2132,138 @@
                 pdfDoc = null;
             }
         });
+
+        // Status bar source updater
+        function updateStatusBarSource(sourcePath) {
+            const el = document.getElementById('pdf-status-source');
+            if (el && sourcePath) {
+                el.innerHTML = `<span style="color: #64748b;">Source PPTX:</span> <span style="color: #38bdf8; font-weight: 500;" title="${sourcePath}">${sourcePath}</span>`;
+            }
+        }
+
+        // --- PDF Viewer Custom Window Controls ---
+        const initPdfWindowControls = () => {
+            const filenameEl = document.getElementById('pdf-header-filename');
+            const pathEl = document.getElementById('pdf-header-path');
+
+            const fullPath = pdfPath || fileUrl || '';
+            let fileName = title || 'PDF Viewer';
+            if (fullPath) {
+                const parts = fullPath.split(/[/\\]/);
+                if (parts.length > 0 && parts[parts.length - 1]) {
+                    fileName = parts[parts.length - 1];
+                }
+            }
+
+            if (filenameEl) filenameEl.textContent = fileName;
+            if (pathEl && fullPath) {
+                pathEl.textContent = `— ${fullPath}`;
+                pathEl.title = fullPath;
+            }
+
+            const btnMin = document.getElementById('pdf-btn-minimize');
+            const btnMax = document.getElementById('pdf-btn-maximize');
+            const btnClose = document.getElementById('pdf-btn-close');
+            const dragSpacer = document.getElementById('pdf-header-drag-spacer');
+            const iconMax = document.getElementById('pdf-icon-max');
+
+            const getTauriInvoke = () => window.__TAURI__?.core?.invoke;
+            const getTauriWindow = () => window.__TAURI__?.window?.getCurrentWindow?.();
+
+            let isMax = false;
+            const updateMaxState = async () => {
+                try {
+                    const invoke = getTauriInvoke();
+                    if (invoke) {
+                        isMax = await invoke('is_window_maximized');
+                    } else {
+                        const win = getTauriWindow();
+                        if (win) isMax = await win.isMaximized();
+                    }
+                    if (iconMax) {
+                        if (isMax) {
+                            btnMax.title = "Restore Down";
+                            iconMax.innerHTML = '<rect x="5" y="7" width="13" height="13" rx="1.5" ry="1.5" /><polyline points="8 5 19 5 19 16" />';
+                        } else {
+                            btnMax.title = "Maximize";
+                            iconMax.innerHTML = '<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />';
+                        }
+                    }
+                } catch (e) {}
+            };
+
+            updateMaxState();
+
+            try {
+                const win = getTauriWindow();
+                if (win && win.onResized) {
+                    win.onResized(updateMaxState);
+                }
+            } catch (e) {}
+
+            if (btnMin) {
+                btnMin.onclick = async (e) => {
+                    e.stopPropagation();
+                    try {
+                        const invoke = getTauriInvoke();
+                        if (invoke) await invoke('minimize_window');
+                        else getTauriWindow()?.minimize();
+                    } catch (err) {
+                        getTauriWindow()?.minimize();
+                    }
+                };
+            }
+
+            const toggleMax = async (e) => {
+                if (e) e.stopPropagation();
+                try {
+                    const invoke = getTauriInvoke();
+                    if (invoke) {
+                        isMax = await invoke('toggle_maximize');
+                    } else {
+                        const win = getTauriWindow();
+                        if (win) {
+                            await win.toggleMaximize();
+                            isMax = await win.isMaximized();
+                        }
+                    }
+                    updateMaxState();
+                } catch (err) {
+                    getTauriWindow()?.toggleMaximize();
+                    updateMaxState();
+                }
+            };
+
+            if (btnMax) {
+                btnMax.onclick = toggleMax;
+            }
+
+            if (btnClose) {
+                btnClose.onclick = async (e) => {
+                    e.stopPropagation();
+                    try {
+                        const invoke = getTauriInvoke();
+                        if (invoke) await invoke('close_window');
+                        else getTauriWindow()?.close();
+                    } catch (err) {
+                        getTauriWindow()?.close();
+                    }
+                };
+            }
+
+            if (dragSpacer) {
+                dragSpacer.onmousedown = (e) => {
+                    if (e.button === 0) {
+                        try {
+                            getTauriWindow()?.startDragging();
+                        } catch {}
+                    }
+                };
+                dragSpacer.ondblclick = toggleMax;
+            }
+        };
+
+        initPdfWindowControls();
     </script>
 </body>
 </html>

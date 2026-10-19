@@ -236,9 +236,14 @@ function App() {
     }
   };
 
-  // 앱 실행 시 백그라운드로 MFT 인덱싱을 자동 실행 (비동기, UI 차단 없음)
+  // 앱 실행 시 MFT 인덱스 상태 확인 (기존 인덱스가 준비되어 있지 않을 때만 최초 1회 백그라운드 인덱싱 시도)
   useEffect(() => {
     if (!configLoaded) return;
+    const isReady = localStorage.getItem('mft_index_ready');
+    if (isReady === 'true') {
+      return; // 이미 인덱스가 저장되어 있으므로 백엔드의 setup(load_from_disk)에서 자동 로드됨
+    }
+
     invoke<number>('build_mft_index')
       .then((count) => {
         console.log(`Background MFT indexing completed. ${count} files indexed.`);
@@ -250,13 +255,7 @@ function App() {
         }
       })
       .catch((err) => {
-        console.error('Background MFT indexing failed:', err);
-        try {
-          localStorage.setItem('mft_index_ready', 'false');
-          emit('index-ready', false);
-        } catch (e) {
-          console.warn('Failed to persist or emit index-ready flag after failure:', e);
-        }
+        console.warn('Initial background MFT indexing skipped or failed:', err);
       });
   }, [configLoaded]);
 

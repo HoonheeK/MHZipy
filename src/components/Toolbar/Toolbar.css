@@ -30,6 +30,30 @@
   box-sizing: border-box;
 }
 
+/* 툴바 중앙의 빈 공간: 마우스 드래그로 윈도우 이동 */
+.mhz-toolbar-drag-spacer {
+  flex: 1;
+  height: 100%;
+  min-width: 24px;
+  cursor: grab;
+  -webkit-app-region: drag;
+}
+
+.mhz-toolbar-drag-spacer:active {
+  cursor: grabbing;
+}
+
+/* 툴바 내 인터랙티브 요소는 드래그 방지 및 정상적인 클릭 허용 */
+.mhz-toolbar button,
+.mhz-toolbar input,
+.mhz-toolbar select,
+.mhz-toolbar .brand-dropdown-menu,
+.mhz-toolbar .tb-view-switch,
+.mhz-toolbar .mhz-window-controls,
+.mhz-toolbar .mhz-right-controls {
+  -webkit-app-region: no-drag;
+}
+
 .mhz-toolbar-group {
   display: flex;
   align-items: center;
@@ -43,6 +67,51 @@
   background: var(--tb-border);
   margin: 0 4px;
   flex-shrink: 0;
+}
+
+/* 우측 통합 컨트롤: Folder/Search 전환 버튼 + 창 확대/축소 및 Close 버튼 */
+.mhz-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* 윈도우 창 제어 컨트롤러 (최대화/복원, Close) */
+.mhz-window-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+}
+
+.mhz-win-ctrl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--tb-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.mhz-win-ctrl-btn:hover {
+  background: var(--tb-hover-bg);
+  color: #ffffff;
+}
+
+.mhz-win-ctrl-btn:active {
+  transform: scale(0.95);
+}
+
+.mhz-win-ctrl-close:hover {
+  background: #e11d48 !important; /* Windows 모던 레드 클로즈 */
+  color: #ffffff !important;
 }
 
 /* 1. Brand Menu Button & Dropdown */

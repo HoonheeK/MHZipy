@@ -43,6 +43,7 @@ export const openPdfInWindow = async (file: PdfFile) => {
       title: file.name,
       width: 1000,
       height: 800,
+      decorations: false,
       ...(posX !== undefined && posY !== undefined ? { x: posX, y: posY } : {})
     });
 

@@ -42,11 +42,16 @@ pub struct FileChange {
     pub is_dir: bool,
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 // 전역 인덱스 저장소 (FRN -> FileEntry)
 pub struct MftIndex {
     pub entries: DashMap<u64, FileEntry>,
     search_index: RwLock<Vec<(u64, String)>>,
     pub drive_letter: String,
+    pub is_indexing: Arc<AtomicBool>,
+    pub stop_monitoring: Arc<AtomicBool>,
 }
 
 impl MftIndex {
@@ -55,6 +60,8 @@ impl MftIndex {
             entries: DashMap::new(),
             search_index: RwLock::new(Vec::new()),
             drive_letter,
+            is_indexing: Arc::new(AtomicBool::new(false)),
+            stop_monitoring: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -78,7 +85,7 @@ impl MftIndex {
             )
             .map_err(|e| {
                 format!(
-                    "Failed to open volume handle: {}. Admin rights required?",
+                    "Failed to open volume handle (Administrator privileges required): {}.\nTo perform direct MFT reading, MHZipy must be run as Administrator.",
                     e
                 )
             })
@@ -120,6 +127,25 @@ impl MftIndex {
 
     // 2. MFT 인덱싱 (FSCTL_ENUM_USN_DATA)
     pub fn build_index(&self) -> Result<(usize, i64, u64), String> {
+        // 이미 인덱싱 중이면 중복 실행 방지
+        if self.is_indexing.swap(true, Ordering::SeqCst) {
+            return Err("MFT indexing is already in progress. Please wait until it completes.".to_string());
+        }
+
+        // 인덱싱 종료 시 is_indexing을 false로 되돌리는 RAII 가드
+        struct IndexingGuard(Arc<AtomicBool>);
+        impl Drop for IndexingGuard {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = IndexingGuard(self.is_indexing.clone());
+
+        // 기존에 동작 중인 모니터링 스레드가 있다면 중단 신호 전송
+        self.stop_monitoring.store(true, Ordering::SeqCst);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        self.stop_monitoring.store(false, Ordering::SeqCst);
+
         let handle = self.get_volume_handle()?;
         self.entries.clear();
 
@@ -250,6 +276,12 @@ impl MftIndex {
             let mut bytes_returned = 0u32;
 
             loop {
+                // 모니터링 중단 요청이 있으면 즉시 종료
+                if self.stop_monitoring.load(Ordering::SeqCst) {
+                    let _ = unsafe { CloseHandle(handle) };
+                    break;
+                }
+
                 let result = unsafe {
                     DeviceIoControl(
                         handle,

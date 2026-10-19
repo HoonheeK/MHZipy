@@ -18,7 +18,10 @@ import {
   ShieldCheck,
   ChevronDown,
   X,
+  Square,
 } from 'lucide-react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import logoImg from '../../assets/logo.png';
 import './Toolbar.css';
 
@@ -135,6 +138,81 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       }
     } else if (e.key === 'Escape') {
       setAddressInput(currentPath);
+    }
+  };
+
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // 창 최대화 상태 감지
+  useEffect(() => {
+    let isMounted = true;
+    const checkMaximized = async () => {
+      try {
+        const max = await invoke<boolean>('is_window_maximized');
+        if (isMounted) setIsMaximized(max);
+      } catch {
+        try {
+          const appWindow = getCurrentWindow();
+          const max = await appWindow.isMaximized();
+          if (isMounted) setIsMaximized(max);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    checkMaximized();
+
+    try {
+      const appWindow = getCurrentWindow();
+      const unlistenPromise = appWindow.onResized(() => {
+        checkMaximized();
+      });
+
+      return () => {
+        isMounted = false;
+        unlistenPromise.then((unlisten) => unlisten()).catch(() => {});
+      };
+    } catch {
+      // fallback
+    }
+  }, []);
+
+  const handleToggleMaximize = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    try {
+      const newMax = await invoke<boolean>('toggle_maximize');
+      setIsMaximized(newMax);
+    } catch (err) {
+      console.warn('Rust toggle_maximize fallback to getCurrentWindow:', err);
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.toggleMaximize();
+        setIsMaximized(await appWindow.isMaximized());
+      } catch (e2) {
+        console.error('Failed to toggle maximize:', e2);
+      }
+    }
+  };
+
+  const handleCloseWindow = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    try {
+      await invoke('close_window');
+    } catch (err) {
+      console.warn('Rust close_window fallback to getCurrentWindow:', err);
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.close();
+      } catch (e2) {
+        console.error('Failed to close window:', e2);
+      }
     }
   };
 
@@ -377,10 +455,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
-      {/* 4. Right Group: View Switcher & Settings */}
-      <div className="mhz-toolbar-group">
+      {/* 4. Drag Spacer: 빈 공간을 마우스로 잡고 창 이동 & 더블클릭 시 최대화/원래사이즈 토글 */}
+      <div
+        className="mhz-toolbar-drag-spacer"
+        data-tauri-drag-region
+        onMouseDown={(e) => {
+          if (e.button === 0) {
+            try {
+              getCurrentWindow().startDragging();
+            } catch {}
+          }
+        }}
+        onDoubleClick={handleToggleMaximize}
+        title="Drag to move window, double-click to toggle maximize"
+      />
+
+      {/* 5. Right Unified Controls: Folder/Search Button + Maximize/Close Buttons */}
+      <div className="mhz-toolbar-group mhz-right-controls" onMouseDown={(e) => e.stopPropagation()}>
         <div className="mhz-toolbar-divider" />
 
+        {/* Folder / Search Button Switcher */}
         <div className="tb-view-switch">
           <button
             type="button"
@@ -399,6 +493,33 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           >
             <Search size={13} />
             <span>Search</span>
+          </button>
+        </div>
+
+        {/* Window Controls: 바로 옆에 확대/원래사이즈 토글 및 Close(트레이) 버튼 배치 */}
+        <div className="mhz-window-controls">
+          <button
+            type="button"
+            className="mhz-win-ctrl-btn"
+            onClick={handleToggleMaximize}
+            onMouseDown={(e) => e.stopPropagation()}
+            title={isMaximized ? 'Restore Down' : 'Maximize'}
+          >
+            {isMaximized ? (
+              <Copy size={13} style={{ transform: 'rotate(180deg)' }} />
+            ) : (
+              <Square size={12} />
+            )}
+          </button>
+
+          <button
+            type="button"
+            className="mhz-win-ctrl-btn mhz-win-ctrl-close"
+            onClick={handleCloseWindow}
+            onMouseDown={(e) => e.stopPropagation()}
+            title="Close to System Tray"
+          >
+            <X size={15} />
           </button>
         </div>
       </div>

@@ -127,6 +127,33 @@ async fn search_mft(
         .collect())
 }
 
+#[tauri::command]
+fn toggle_maximize(window: Window) -> Result<bool, String> {
+    let is_max = window.is_maximized().map_err(|e| e.to_string())?;
+    if is_max {
+        window.unmaximize().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        window.maximize().map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+#[tauri::command]
+fn is_window_maximized(window: Window) -> Result<bool, String> {
+    window.is_maximized().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn minimize_window(window: Window) -> Result<(), String> {
+    window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn close_window(window: Window) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
+}
+
 // 압축 명령어
 #[tauri::command]
 fn compress_files(
@@ -1330,6 +1357,7 @@ fn open_pdf_viewer(app: &AppHandle, pdf_path: &str, pdf_title: Option<&str>) {
     .initialization_script(&init_script)
     .title(&title)
     .inner_size(1000.0, 800.0)
+    .decorations(false)
     .build()
     {
         Ok(_) => println!("PDF viewer opened: {}", pdf_path),
@@ -1615,7 +1643,11 @@ pub fn run() {
             get_license_info,
             activate_license,
             get_web_app_url,
-            convert_pptx_to_pdf
+            convert_pptx_to_pdf,
+            toggle_maximize,
+            is_window_maximized,
+            minimize_window,
+            close_window
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

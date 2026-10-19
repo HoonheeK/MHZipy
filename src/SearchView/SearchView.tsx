@@ -6,6 +6,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 import FileList from '../FileExplorer/FileList';
 import { SearchConfig } from '../App';
+import MessageDialog from '../common/MessageDialog';
 
 interface SearchViewProps {
   searchQuery: string;
@@ -115,6 +116,13 @@ export default function SearchView({
   const folderSelectRef = useRef<HTMLDivElement>(null);
   const [localRefresh, setLocalRefresh] = useState(0);
 
+  // 커스텀 다이얼로그 상태
+  const [dialogState, setDialogState] = useState<{ open: boolean; title: string; message: string }>({
+    open: false,
+    title: '',
+    message: '',
+  });
+
   useEffect(() => {
     if (onSelectionChange) {
       onSelectionChange(selectedFiles);
@@ -217,15 +225,24 @@ export default function SearchView({
 
   // MFT 인덱싱 실행 함수
   const handleBuildIndex = async () => {
+    if (isIndexing) return;
     setIsIndexing(true);
-    setIsIndexReady(false); // 인덱싱 시작 시 준비 안된 상태로 변경
     try {
       const count = await invoke<number>('build_mft_index');
-      alert(`Indexing complete: Found ${count} files.`);
-      setIsIndexReady(true); // 인덱싱 완료 후 준비 상태로 변경
+      setIsIndexReady(true);
+      setDialogState({
+        open: true,
+        title: 'MFT Indexing Complete',
+        message: `MFT indexing completed successfully.\nIndexed ${count.toLocaleString()} files and folders in total.`,
+      });
     } catch (error) {
       console.error('Indexing failed:', error);
-      alert(`Indexing failed: ${String(error)}`);
+      setIsIndexReady(false);
+      setDialogState({
+        open: true,
+        title: 'MFT Indexing Error',
+        message: `An error occurred during MFT indexing:\n\n${String(error)}\n\n💡 Tip: Direct access to volume MFT (e.g., C:) may require running MHZipy as Administrator.`,
+      });
     } finally {
       setIsIndexing(false);
     }
@@ -481,10 +498,34 @@ export default function SearchView({
             <h2 style={{ margin: 0, fontSize: '1.15em', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
               🔍 <span style={{ fontWeight: '700', color: '#38bdf8' }}>{t('search.title', { defaultValue: 'Quick Access Folder Search' })}</span>
             </h2>
-            <span style={{ fontSize: '0.82em', color: '#94a3b8', fontWeight: '500' }}>{t('search.subtitle', { defaultValue: 'Intelligent File Search' })}</span>
           </div>
 
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            {searchMode === 'index' && (
+              <button
+                onClick={handleBuildIndex}
+                disabled={isIndexing}
+                title="Re-index NTFS Master File Table"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '5px 12px',
+                  cursor: isIndexing ? 'wait' : 'pointer',
+                  backgroundColor: isIndexing ? '#475569' : (isIndexReady ? '#10b981' : '#0284c7'),
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '7px',
+                  fontSize: '0.82em',
+                  fontWeight: '600',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                  transition: 'all 0.15s'
+                }}
+              >
+                {isIndexing ? '⏳ Indexing...' : (isIndexReady ? '🔄 Re-index MFT' : '🚀 Run MFT Indexing')}
+              </button>
+            )}
+
             <div style={{ display: 'flex', gap: '4px', backgroundColor: '#1e293b', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
               <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: '3px 10px', borderRadius: '6px', backgroundColor: searchMode === 'index' ? '#38bdf8' : 'transparent', transition: 'all 0.15s' }}>
                 <input type="radio" checked={searchMode === 'index'} onChange={() => setSearchMode('index')} style={{ display: 'none' }} />
@@ -495,6 +536,7 @@ export default function SearchView({
                 <span style={{ fontSize: '0.82em', fontWeight: searchMode === 'directory' ? '700' : '500', color: searchMode === 'directory' ? '#0f172a' : '#94a3b8' }}>📂 {t('search.folder', { defaultValue: 'Folder' })}</span>
               </label>
             </div>
+
             <button
               onClick={() => setShowFilters(!showFilters)}
               style={{
@@ -621,27 +663,9 @@ export default function SearchView({
           </div>
         )}
 
-        {/* Context Specific Controls (Index Button or Folder Select) */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
-          {searchMode === 'index' ? (
-            <button
-              onClick={handleBuildIndex}
-              disabled={isIndexing}
-              style={{
-                padding: '6px 14px',
-                cursor: isIndexing ? 'wait' : 'pointer',
-                backgroundColor: isIndexing ? '#475569' : (isIndexReady ? '#10b981' : '#0284c7'),
-                color: 'white',
-                border: 'none',
-                borderRadius: '7px',
-                fontSize: '0.82em',
-                fontWeight: '600',
-                boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-              }}
-            >
-              {isIndexing ? '⏳ Indexing...' : (isIndexReady ? '🔄 Re-index MFT' : '🚀 Run MFT Indexing')}
-            </button>
-          ) : (
+        {/* Context Specific Controls (Folder Select in Directory Mode) */}
+        {searchMode === 'directory' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
             <div style={{ position: 'relative', width: '100%' }} ref={folderSelectRef}>
               <div
                 onClick={() => setIsFolderSelectOpen(!isFolderSelectOpen)}
@@ -690,8 +714,8 @@ export default function SearchView({
                 </div>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Results Area */}
@@ -788,6 +812,13 @@ export default function SearchView({
           )}
         </div>
       </div>
+
+      <MessageDialog
+        open={dialogState.open}
+        title={dialogState.title}
+        message={dialogState.message}
+        onClose={() => setDialogState((prev) => ({ ...prev, open: false }))}
+      />
     </div>
   );
 }

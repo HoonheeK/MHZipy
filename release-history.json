@@ -1,5 +1,20 @@
 [
   {
+    "version": "0.9.8",
+    "date": "2026-10-19",
+    "notes": {
+      "ko": [
+        "UI 디자인 개선"
+      ],
+      "en": [
+        "UI design improvements"
+      ],
+      "ja": [
+        "UIデザインの改善"
+      ]
+    }
+  },
+  {
     "version": "0.9.7",
     "date": "2026-09-27",
     "notes": {
