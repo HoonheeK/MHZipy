@@ -11,6 +11,7 @@ import LicenseDialog from './components/LicenseDialog';
 import { ensureDir } from './utils/fileOps';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen, UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useTranslation } from 'react-i18next';
 import { checkForUpdates } from './utils/updater';
 import PdfProgressDialog from './common/PdfProgressDialog';
@@ -53,10 +54,15 @@ interface AppConfig {
   recentOpenedFolders?: string[];
   disableUpdateCheck?: boolean;
   pdfExportPath?: string;
+  zoomLevel?: number;
 }
 
 function App() {
   const [config, setConfig] = useState<AppConfig>({ defaultPath: 'C:', quickAccess: [] });
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const [showZoomHud, setShowZoomHud] = useState<boolean>(false);
+  const zoomHudTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isPrefOpen, setIsPrefOpen] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [currentView, setCurrentView] = useState<'folder' | 'search'>('folder');
@@ -87,6 +93,72 @@ function App() {
     canGoUp: false,
     currentPath: '',
   });
+
+  const applyZoom = async (zoom: number) => {
+    let tauriApplied = false;
+    try {
+      const webview = getCurrentWebviewWindow();
+      if (webview && typeof webview.setZoom === 'function') {
+        await webview.setZoom(zoom);
+        tauriApplied = true;
+      }
+    } catch (err) {
+      console.warn('[App] Tauri webview setZoom failed, using CSS zoom fallback:', err);
+    }
+
+    if (!tauriApplied) {
+      (document.documentElement.style as any).zoom = `${zoom}`;
+    } else {
+      (document.documentElement.style as any).zoom = '';
+    }
+  };
+
+  const saveConfig = async (updates: Partial<AppConfig>) => {
+    if (updates.view) {
+      setCurrentView(updates.view);
+    }
+    if (updates.language) {
+      i18n.changeLanguage(updates.language);
+    }
+    setConfig(prev => {
+      const newConfig = { ...prev, ...updates };
+      (async () => {
+        try {
+          const configDir = await appConfigDir();
+          await ensureDir(configDir);
+          const configPath = await join(configDir, 'config.json');
+          await writeTextFile(configPath, JSON.stringify(newConfig, null, 2));
+        } catch (e) {
+          console.error('Failed to save config:', e);
+        }
+      })();
+      return newConfig;
+    });
+  };
+
+  const triggerZoomChange = (delta: number | 'reset') => {
+    setZoomLevel(prev => {
+      let next: number;
+      if (delta === 'reset') {
+        next = 1.0;
+      } else {
+        next = Math.max(0.5, Math.min(2.5, Math.round((prev + delta) * 10) / 10));
+      }
+
+      applyZoom(next);
+
+      setShowZoomHud(true);
+      if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current);
+      zoomHudTimeoutRef.current = setTimeout(() => setShowZoomHud(false), 1600);
+
+      if (zoomSaveTimeoutRef.current) clearTimeout(zoomSaveTimeoutRef.current);
+      zoomSaveTimeoutRef.current = setTimeout(() => {
+        saveConfig({ zoomLevel: next });
+      }, 500);
+
+      return next;
+    });
+  };
 
   useEffect(() => {
     const unlistenProgress = listen<any>('pdf-conversion-progress', (event: any) => {
@@ -161,6 +233,10 @@ function App() {
           if (parsed.search && parsed.search.query) {
             setSearchQuery(parsed.search.query);
           }
+          if (typeof parsed.zoomLevel === 'number' && parsed.zoomLevel >= 0.5 && parsed.zoomLevel <= 2.5) {
+            setZoomLevel(parsed.zoomLevel);
+            applyZoom(parsed.zoomLevel);
+          }
           if (!parsed.disableUpdateCheck) {
             checkForUpdates(
               false,
@@ -205,36 +281,52 @@ function App() {
     };
   }, []);
 
-  // Global Shortcut: Alt+P to toggle Preferences Dialog
+  // Ctrl + Mouse Wheel Zoom
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.1 : -0.1;
+        triggerZoomChange(delta);
+      }
+    };
+
+    window.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      window.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
+
+  // Global Shortcuts: Alt+P (Preferences), Ctrl+Plus/Minus/0 (Zoom In/Out/Reset)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setIsPrefOpen(prev => !prev);
+      } else if (e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.key === '=' || e.key === '+' || e.key === 'Add') {
+          e.preventDefault();
+          triggerZoomChange(0.1);
+        } else if (e.key === '-' || e.key === 'Subtract') {
+          e.preventDefault();
+          triggerZoomChange(-0.1);
+        } else if (e.key === '0') {
+          e.preventDefault();
+          triggerZoomChange('reset');
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const saveConfig = async (updates: Partial<AppConfig>) => {
-    if (updates.view) {
-      setCurrentView(updates.view);
-    }
-    if (updates.language) {
-      i18n.changeLanguage(updates.language);
-    }
-    const newConfig = { ...config, ...updates };
-    setConfig(newConfig);
-    try {
-      const configDir = await appConfigDir();
-      await ensureDir(configDir);
-      const configPath = await join(configDir, 'config.json');
-      await writeTextFile(configPath, JSON.stringify(newConfig, null, 2));
-    } catch (e) {
-      console.error('Failed to save config:', e);
-    }
-  };
+  // Cleanup timeout references on unmount
+  useEffect(() => {
+    return () => {
+      if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current);
+      if (zoomSaveTimeoutRef.current) clearTimeout(zoomSaveTimeoutRef.current);
+    };
+  }, []);
 
   // 앱 실행 시 MFT 인덱스 상태 확인 (기존 인덱스가 준비되어 있지 않을 때만 최초 1회 백그라운드 인덱싱 시도)
   useEffect(() => {
@@ -468,6 +560,45 @@ function App() {
         progress={pdfProgressState.progress} 
         filename={pdfProgressState.filename} 
       />
+
+      {/* 9. Zoom Indicator HUD */}
+      {showZoomHud && (
+        <div
+          className="zoom-hud"
+          onMouseEnter={() => {
+            if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current);
+          }}
+          onMouseLeave={() => {
+            if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current);
+            zoomHudTimeoutRef.current = setTimeout(() => setShowZoomHud(false), 1200);
+          }}
+        >
+          <span>🔍 {Math.round(zoomLevel * 100)}%</span>
+          <button
+            className="zoom-hud-btn"
+            title="Zoom Out (Ctrl -)"
+            onClick={() => triggerZoomChange(-0.1)}
+          >
+            -
+          </button>
+          <button
+            className="zoom-hud-btn"
+            title="Zoom In (Ctrl +)"
+            onClick={() => triggerZoomChange(0.1)}
+          >
+            +
+          </button>
+          {zoomLevel !== 1.0 && (
+            <button
+              className="zoom-hud-btn"
+              title="Reset Zoom (Ctrl 0)"
+              onClick={() => triggerZoomChange('reset')}
+            >
+              100%
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

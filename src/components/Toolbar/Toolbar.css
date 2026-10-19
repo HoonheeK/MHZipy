@@ -75,6 +75,7 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
+  flex-shrink: 0 !important;
 }
 
 /* 윈도우 창 제어 컨트롤러 (최대화/복원, Close) */
@@ -83,14 +84,18 @@
   align-items: center;
   gap: 2px;
   margin-left: 2px;
+  flex-shrink: 0 !important;
 }
 
 .mhz-win-ctrl-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 28px;
+  width: 32px !important;
+  height: 28px !important;
+  min-width: 32px !important;
+  max-width: 32px !important;
+  flex-shrink: 0 !important;
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -441,8 +446,8 @@
 }
 
 /* 5. Responsive Breakpoints */
-@media (max-width: 1280px) {
-  .tb-btn .tb-btn-text {
+@media (max-width: 1260px) {
+  .mhz-action-buttons .tb-btn-text {
     display: none;
   }
   .tb-btn {
@@ -450,11 +455,18 @@
     gap: 0;
   }
   .tb-search-filter {
-    width: 120px;
+    width: 130px;
   }
 }
 
-@media (max-width: 900px) {
+/* 화면이 줄어들 때 압축하기/풀기, 폴더 만들기, Copy, Paste, Delete 액션 버튼 숨김 */
+@media (max-width: 1100px) {
+  .mhz-action-buttons {
+    display: none !important;
+  }
+}
+
+@media (max-width: 860px) {
   .tb-search-filter {
     display: none;
   }
@@ -466,7 +478,7 @@
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 660px) {
   .tb-path-search-group {
     display: none;
   }
@@ -475,3 +487,4 @@
     gap: 4px;
   }
 }
+

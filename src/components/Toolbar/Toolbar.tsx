@@ -380,7 +380,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       )}
 
       {/* 3. Action Buttons Group */}
-      <div className="mhz-toolbar-group">
+      <div className="mhz-toolbar-group mhz-action-buttons">
         <div className="mhz-toolbar-divider" />
 
         {/* Compress Action */}
