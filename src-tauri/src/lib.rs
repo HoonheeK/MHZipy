@@ -154,6 +154,29 @@ fn close_window(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn read_text_file_content(path: String) -> Result<String, String> {
+    match fs::read(&path) {
+        Ok(bytes) => {
+            let slice = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+                &bytes[3..]
+            } else {
+                &bytes[..]
+            };
+            match std::str::from_utf8(slice) {
+                Ok(s) => Ok(s.to_string()),
+                Err(_) => Ok(String::from_utf8_lossy(slice).to_string()),
+            }
+        }
+        Err(e) => Err(format!("Failed to read file: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn save_text_file_content(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content.as_bytes()).map_err(|e| format!("Failed to save file: {}", e))
+}
+
 // 압축 명령어
 #[tauri::command]
 fn compress_files(
@@ -1647,7 +1670,9 @@ pub fn run() {
             toggle_maximize,
             is_window_maximized,
             minimize_window,
-            close_window
+            close_window,
+            read_text_file_content,
+            save_text_file_content
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

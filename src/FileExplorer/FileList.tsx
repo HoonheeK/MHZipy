@@ -9,8 +9,15 @@ import ErrorDialog from './ErrorDialog';
 import { basename, dirname, join } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
 import { openPdfInWindow } from '../PDFViewer/PDFViewer';
+import { openMarkdownInWindow } from '../MarkdownEditor/openMarkdownInWindow';
 import MessageDialog from '../common/MessageDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
+
+const isMarkdownOrText = (fileName: string) => {
+  const ext = fileName.toLowerCase().split('.').pop() || '';
+  return ['md', 'markdown', 'txt', 'text'].includes(ext);
+};
+
 
 interface FileListProps {
   path: string | null;
@@ -1017,6 +1024,8 @@ export default function FileList({
       await openZipFile(file);
     } else if (file.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
       await openPdfInWindow({ path: file.path, name: file.name });
+    } else if (isMarkdownOrText(file.name)) {
+      await openMarkdownInWindow({ path: file.path, name: file.name });
     } else {
       setOpeningFiles(prev => {
         const next = new Set(prev);
@@ -1052,6 +1061,8 @@ export default function FileList({
         await openZipFile(item);
       } else if (item.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
         await openPdfInWindow({ path: item.path, name: item.name });
+      } else if (isMarkdownOrText(item.name)) {
+        await openMarkdownInWindow({ path: item.path, name: item.name });
       } else {
         setOpeningFiles(prev => {
           const next = new Set(prev);
@@ -1965,6 +1976,17 @@ export default function FileList({
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
                 <div className={`context-menu-item ${!canExtractHere ? 'disabled' : ''}`} onClick={canExtractHere ? performExtract : undefined} style={{ padding: '2px 10px' }}>
                   <span>{t('contextMenu.extractHere')}</span> <span className="shortcut">Alt+E</span>
+                </div>
+              )}
+              {selectedFiles.size === 1 && isMarkdownOrText(Array.from(selectedFiles)[0]) && (
+                <div className="context-menu-item" onClick={async () => {
+                  const firstPath = Array.from(selectedFiles)[0];
+                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
+                  const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
+                  await openMarkdownInWindow({ path: firstPath, name: fileName });
+                  setContextMenu(null);
+                }} style={{ padding: '2px 10px' }}>
+                  <span>{t('contextMenu.openInMarkdownEditor', 'Edit with Markdown Editor')}</span>
                 </div>
               )}
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.pptx') && (

@@ -130,7 +130,8 @@
     "addToQuickAccess": "빠른 실행에 추가",
     "setAsEditable": "편집 가능으로 설정",
     "setAsReadOnly": "읽기 전용으로 설정",
-    "clearPermission": "권한 지우기"
+    "clearPermission": "권한 지우기",
+    "openInMarkdownEditor": "마크다운 편집기로 열기"
   },
   "search": {
     "placeholderRegex": "정규식(Regex)으로 검색 (예: ^report.*\\.pdf$)",

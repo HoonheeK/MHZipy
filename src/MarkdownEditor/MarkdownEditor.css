@@ -1,0 +1,606 @@
+/* MHZipy Markdown Editor Stylesheet - Modern Slate/Zinc Dark Aesthetic */
+
+.mhz-md-root {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background-color: #0b1120;
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  user-select: none;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-sizing: border-box;
+}
+
+/* 1. Custom Frameless Titlebar */
+.mhz-md-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 40px;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 0 4px 0 12px;
+  user-select: none;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.mhz-md-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #f8fafc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mhz-md-app-icon {
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+}
+
+.mhz-md-title-filename {
+  font-weight: 600;
+  color: #f8fafc;
+  letter-spacing: -0.01em;
+}
+
+.mhz-md-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.mhz-md-status-badge.saved {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.mhz-md-status-badge.dirty {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.mhz-md-titlebar-center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 16px;
+  cursor: default;
+}
+
+.mhz-md-titlebar-right {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.mhz-md-win-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 38px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mhz-md-win-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.mhz-md-win-btn.close:hover {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+/* 2. Top Action Toolbar */
+.mhz-md-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background-color: #111827;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  gap: 12px;
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.mhz-md-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mhz-md-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background-color: rgba(148, 163, 184, 0.2);
+  margin: 0 4px;
+}
+
+.mhz-md-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 8px;
+  min-height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mhz-md-tool-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.mhz-md-tool-btn:active {
+  transform: translateY(1px);
+}
+
+.mhz-md-tool-btn.primary {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  border: 1px solid #38bdf8;
+  font-weight: 600;
+  padding: 5px 12px;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);
+}
+
+.mhz-md-tool-btn.primary:hover {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  box-shadow: 0 3px 10px rgba(14, 165, 233, 0.4);
+}
+
+.mhz-md-tool-btn.primary.has-changes {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  border-color: #fbbf24;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.mhz-md-tool-btn.active {
+  background-color: rgba(56, 189, 248, 0.18);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.mhz-md-tool-btn kbd {
+  font-size: 10px;
+  opacity: 0.65;
+  background-color: rgba(0, 0, 0, 0.3);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+
+/* 3. Main Editor Body (Split view) */
+.mhz-md-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background-color: #0b1120;
+}
+
+/* Editor Pane */
+.mhz-md-pane.editor-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+.mhz-md-editor-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background-color: #0b1120;
+}
+
+/* Line Numbers */
+.mhz-md-line-numbers {
+  width: 48px;
+  padding: 12px 6px 12px 0;
+  text-align: right;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #475569;
+  background-color: #090e1a;
+  border-right: 1px solid rgba(148, 163, 184, 0.1);
+  user-select: none;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mhz-md-line-numbers div {
+  height: 20.8px; /* line-height 1.6 * 13px font */
+}
+
+/* Textarea */
+.mhz-md-textarea {
+  flex: 1;
+  height: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  color: #f1f5f9;
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, Menlo, Monaco, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  border: none;
+  outline: none;
+  resize: none;
+  white-space: pre;
+  tab-size: 2;
+  overflow-y: auto;
+  overflow-x: auto;
+  box-sizing: border-box;
+}
+
+.mhz-md-textarea.wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Divider / Resizer */
+.mhz-md-resizer {
+  width: 6px;
+  background-color: #0f172a;
+  cursor: col-resize;
+  border-left: 1px solid rgba(148, 163, 184, 0.12);
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  transition: background-color 0.15s ease;
+  user-select: none;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.mhz-md-resizer:hover,
+.mhz-md-resizer.resizing {
+  background-color: #38bdf8;
+  border-color: #38bdf8;
+}
+
+/* Preview Pane */
+.mhz-md-pane.preview-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  background-color: #0a0f1d;
+}
+
+.mhz-md-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background-color: #090e1a;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.mhz-md-preview-content {
+  flex: 1;
+  padding: 24px 32px;
+  overflow-y: auto;
+  overflow-x: auto;
+  user-select: text;
+  color: #e2e8f0;
+  line-height: 1.7;
+}
+
+/* Markdown Rendered Typography */
+.mhz-md-preview-content h1,
+.mhz-md-preview-content h2,
+.mhz-md-preview-content h3,
+.mhz-md-preview-content h4,
+.mhz-md-preview-content h5,
+.mhz-md-preview-content h6 {
+  color: #f8fafc;
+  font-weight: 700;
+  margin-top: 1.6em;
+  margin-bottom: 0.6em;
+  line-height: 1.3;
+}
+
+.mhz-md-preview-content h1 {
+  font-size: 1.85rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  padding-bottom: 0.3em;
+}
+
+.mhz-md-preview-content h2 {
+  font-size: 1.45rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  padding-bottom: 0.25em;
+}
+
+.mhz-md-preview-content h3 {
+  font-size: 1.2rem;
+}
+
+.mhz-md-preview-content p {
+  margin: 0.8em 0;
+}
+
+.mhz-md-preview-content a {
+  color: #38bdf8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.mhz-md-preview-content a:hover {
+  color: #7dd3fc;
+}
+
+.mhz-md-preview-content code {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.9em;
+  padding: 2px 6px;
+  background-color: rgba(30, 41, 59, 0.85);
+  color: #38bdf8;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+}
+
+.mhz-md-preview-content pre {
+  background-color: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 6px;
+  padding: 14px 18px;
+  overflow-x: auto;
+  position: relative;
+  margin: 1.2em 0;
+}
+
+.mhz-md-preview-content pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #e2e8f0;
+  font-size: 0.92em;
+}
+
+.mhz-md-preview-content blockquote {
+  margin: 1em 0;
+  padding: 8px 18px;
+  border-left: 4px solid #38bdf8;
+  background-color: rgba(30, 41, 59, 0.4);
+  color: #94a3b8;
+  border-radius: 0 4px 4px 0;
+}
+
+.mhz-md-preview-content ul,
+.mhz-md-preview-content ol {
+  padding-left: 1.8em;
+  margin: 0.8em 0;
+}
+
+.mhz-md-preview-content li {
+  margin: 0.35em 0;
+}
+
+.mhz-md-preview-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.4em 0;
+  font-size: 0.95em;
+}
+
+.mhz-md-preview-content th,
+.mhz-md-preview-content td {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.mhz-md-preview-content th {
+  background-color: #1e293b;
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.mhz-md-preview-content tr:nth-child(even) {
+  background-color: rgba(30, 41, 59, 0.25);
+}
+
+.mhz-md-preview-content hr {
+  border: none;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.2);
+  margin: 2em 0;
+}
+
+.mhz-md-preview-content img {
+  max-width: 100%;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* 4. Bottom Status Bar */
+.mhz-md-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 12px;
+  background-color: #090e1a;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 11px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.mhz-md-statusbar-left,
+.mhz-md-statusbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mhz-md-statusbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mhz-md-statusbar-item strong {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+/* 5. Custom Modal (Confirmation on close with unsaved changes) */
+.mhz-md-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.mhz-md-modal {
+  width: 440px;
+  background-color: #1e293b;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 8px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mhz-md-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mhz-md-modal-body {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.mhz-md-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mhz-md-modal-btn {
+  padding: 6px 14px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.mhz-md-modal-btn.save {
+  background-color: #0284c7;
+  color: #ffffff;
+  border-color: #38bdf8;
+}
+
+.mhz-md-modal-btn.save:hover {
+  background-color: #0369a1;
+}
+
+.mhz-md-modal-btn.discard {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+.mhz-md-modal-btn.discard:hover {
+  background-color: #dc2626;
+}
+
+.mhz-md-modal-btn.cancel {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.mhz-md-modal-btn.cancel:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+/* Custom Scrollbars */
+.mhz-md-textarea::-webkit-scrollbar,
+.mhz-md-preview-content::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.mhz-md-textarea::-webkit-scrollbar-track,
+.mhz-md-preview-content::-webkit-scrollbar-track {
+  background: #090e1a;
+}
+
+.mhz-md-textarea::-webkit-scrollbar-thumb,
+.mhz-md-preview-content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 5px;
+  border: 2px solid #090e1a;
+}
+
+.mhz-md-textarea::-webkit-scrollbar-thumb:hover,
+.mhz-md-preview-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+}

@@ -128,7 +128,8 @@
     "addToQuickAccess": "Add to Quick Access",
     "setAsEditable": "Set as Editable",
     "setAsReadOnly": "Set as Read-only",
-    "clearPermission": "Clear Permission"
+    "clearPermission": "Clear Permission",
+    "openInMarkdownEditor": "Edit with Markdown Editor"
   },
   "search": {
     "placeholderRegex": "Search with Regex (e.g. ^report.*\\.pdf$)",
