@@ -21,7 +21,8 @@ import {
   Minus,
   Columns,
   Eye,
-  Edit3,
+  Code2,
+  PenTool,
   Copy,
   WrapText,
   ZoomIn,
@@ -34,9 +35,29 @@ import {
 } from 'lucide-react';
 import './MarkdownEditor.css';
 
+import { Block, parseMarkdownToBlocks, serializeBlocksToMarkdown } from './markdownBlockUtils';
+import { TreeEditableCell } from './TreeEditableCell';
+
 interface MarkdownEditorProps {
   initialFilePath?: string;
 }
+
+/**
+ * Robust markdown renderer with GFM and formatting normalization.
+ * Handles - **ABC**, **bold**, lists, and tables seamlessly.
+ */
+const renderMarkdown = (text: string): string => {
+  if (!text || !text.trim()) return '';
+  // Normalize hyphen without space before bold: '-**' -> '- **'
+  let normalized = text.replace(/^-(\*\*|__)/gm, '- $1');
+  // Normalize spaces inside bold asterisks: '** foo **' -> '**foo**'
+  normalized = normalized.replace(/\*\*\s+([^\s*](?:[\s\S]*?[^\s*])?)\s+\*\*/g, '**$1**');
+  try {
+    return marked.parse(normalized, { breaks: true, gfm: true }) as string;
+  } catch {
+    return marked.parse(text, { breaks: true, gfm: true }) as string;
+  }
+};
 
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath }) => {
   const [filePath, setFilePath] = useState<string>(initialFilePath || '');
@@ -45,7 +66,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [saveNotification, setSaveNotification] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'split' | 'edit' | 'preview'>('split');
+  const [viewMode, setViewMode] = useState<'wysiwyg' | 'split' | 'edit' | 'preview'>('wysiwyg');
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [fontSize, setFontSize] = useState<number>(13);
   const [wordWrap, setWordWrap] = useState<boolean>(true);
@@ -53,6 +74,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
   const [isResizing, setIsResizing] = useState<boolean>(false);
   const [showConfirmClose, setShowConfirmClose] = useState<boolean>(false);
   const [cursorPos, setCursorPos] = useState<{ line: number; col: number }>({ line: 1, col: 1 });
+
+  // WYSIWYG Block/Cell Editing states (Inspired by TreeDiadev's EditableCell)
+  const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdownToBlocks(''));
 
   // Undo / Redo history
   const [history, setHistory] = useState<string[]>([]);
@@ -73,7 +97,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
   // Load File Content on Mount
   useEffect(() => {
-    // If no initialFilePath is passed, check query params
     let targetPath = initialFilePath;
     if (!targetPath) {
       const params = new URLSearchParams(window.location.search);
@@ -88,21 +111,25 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         .then((text) => {
           setContent(text);
           setSavedContent(text);
+          setBlocks(parseMarkdownToBlocks(text));
           setHistory([text]);
           setHistoryIndex(0);
         })
         .catch((err) => {
           console.error('Failed to read text file:', err);
-          setContent(`// 파일 열기 실패: ${String(err)}`);
-          setSavedContent(`// 파일 열기 실패: ${String(err)}`);
+          const errorMsg = `// Failed to open file: ${String(err)}`;
+          setContent(errorMsg);
+          setSavedContent(errorMsg);
+          setBlocks(parseMarkdownToBlocks(errorMsg));
         })
         .finally(() => {
           setIsLoading(false);
         });
     } else {
-      const defaultText = `# 새 문서\n\n여기에 마크다운을 작성하세요.`;
+      const defaultText = `# Welcome\n\nStart typing markdown or text here.`;
       setContent(defaultText);
       setSavedContent(defaultText);
+      setBlocks(parseMarkdownToBlocks(defaultText));
       setHistory([defaultText]);
       setHistoryIndex(0);
       setIsLoading(false);
@@ -134,9 +161,30 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     };
   }, []);
 
-  // Update history on content changes (debounced)
+  // Update blocks from TreeEditableCell
+  const handleUpdateBlocks = useCallback((newBlocks: Block[]) => {
+    setBlocks(newBlocks);
+    const serialized = serializeBlocksToMarkdown(newBlocks);
+    setContent(serialized);
+  }, []);
+
+  // Sync Blocks when switching to WYSIWYG mode
+  const handleSwitchToWysiwyg = () => {
+    setBlocks(parseMarkdownToBlocks(content));
+    setViewMode('wysiwyg');
+  };
+
+  // Sync Raw Content when switching from WYSIWYG mode
+  const handleSwitchFromWysiwyg = (targetMode: 'split' | 'edit' | 'preview') => {
+    const newContent = serializeBlocksToMarkdown(blocks);
+    setContent(newContent);
+    setViewMode(targetMode);
+  };
+
+  // Update history on content changes
   const updateContentWithHistory = useCallback((newText: string) => {
     setContent(newText);
+    setBlocks(parseMarkdownToBlocks(newText));
     setHistory(prev => {
       const sliced = prev.slice(0, historyIndex + 1);
       return [...sliced, newText];
@@ -150,6 +198,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       const newIdx = historyIndex - 1;
       setHistoryIndex(newIdx);
       setContent(history[newIdx]);
+      setBlocks(parseMarkdownToBlocks(history[newIdx]));
     }
   }, [historyIndex, history]);
 
@@ -158,6 +207,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       const newIdx = historyIndex + 1;
       setHistoryIndex(newIdx);
       setContent(history[newIdx]);
+      setBlocks(parseMarkdownToBlocks(history[newIdx]));
     }
   }, [historyIndex, history]);
 
@@ -166,20 +216,29 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     if (!filePath) return;
     setIsSaving(true);
     try {
-      await invoke('save_text_file_content', { path: filePath, content });
-      setSavedContent(content);
-      setSaveNotification('저장 완료');
+      const textToSave = viewMode === 'wysiwyg' ? serializeBlocksToMarkdown(blocks) : content;
+      await invoke('save_text_file_content', { path: filePath, content: textToSave });
+      setSavedContent(textToSave);
+      setContent(textToSave);
+      setSaveNotification('Saved');
       setTimeout(() => setSaveNotification(null), 2500);
     } catch (err) {
       console.error('Failed to save file:', err);
-      alert(`저장 중 오류가 발생했습니다: ${String(err)}`);
+      alert(`Save error: ${String(err)}`);
     } finally {
       setIsSaving(false);
     }
-  }, [filePath, content]);
+  }, [filePath, content, viewMode, blocks]);
 
-  // Text selection & insertion helper
+  // Text selection & insertion helper for raw textarea or toolbar actions
   const insertText = useCallback((prefix: string, suffix: string = '', defaultText: string = '') => {
+    if (viewMode === 'wysiwyg') {
+      const updated = content ? `${content}\n${prefix}${defaultText}${suffix}` : `${prefix}${defaultText}${suffix}`;
+      setContent(updated);
+      setBlocks(parseMarkdownToBlocks(updated));
+      return;
+    }
+
     const textarea = textareaRef.current;
     if (!textarea) return;
 
@@ -192,7 +251,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
     updateContentWithHistory(newContent);
 
-    // Reposition cursor
     setTimeout(() => {
       textarea.focus();
       textarea.setSelectionRange(
@@ -200,53 +258,56 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         start + prefix.length + selectedText.length
       );
     }, 0);
-  }, [content, updateContentWithHistory]);
+  }, [content, viewMode, updateContentWithHistory]);
 
-  // Formatting Shortcuts & Key handling
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Ctrl+S / Cmd+S
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-      e.preventDefault();
-      handleSave();
-      return;
-    }
-    // Ctrl+Z
+  // Global Keydown Handler (Save shortcut)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+S / Cmd+S
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSave();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [handleSave]);
+
+  // Textarea Shortcuts in Source mode
+  const handleSourceKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
       e.preventDefault();
       handleUndo();
       return;
     }
-    // Ctrl+Y or Ctrl+Shift+Z
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
       e.preventDefault();
       handleRedo();
       return;
     }
-    // Ctrl+B (Bold)
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
       e.preventDefault();
-      insertText('**', '**', '굵은 텍스트');
+      insertText('**', '**', 'bold text');
       return;
     }
-    // Ctrl+I (Italic)
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
       e.preventDefault();
-      insertText('*', '*', '기울임 텍스트');
+      insertText('*', '*', 'italic text');
       return;
     }
-    // Ctrl+K (Link)
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      insertText('[', '](https://)', '링크 텍스트');
+      insertText('[', '](https://)', 'link text');
       return;
     }
-    // Tab key
     if (e.key === 'Tab') {
       e.preventDefault();
       insertText('  ', '', '');
       return;
     }
-  }, [handleSave, handleUndo, handleRedo, insertText]);
+  };
 
   // Cursor position tracking
   const handleTextareaSelect = () => {
@@ -264,6 +325,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
   const handleScroll = () => {
     if (textareaRef.current && lineNumbersRef.current) {
       lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
+    }
+  };
+
+  // Window Drag Handler (Robust Webview dragging for Windows)
+  const handleTitlebarMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0 && !(e.target as HTMLElement).closest('button, input, select, a, .mhz-md-status-badge')) {
+      try {
+        getCurrentWindow().startDragging();
+      } catch (err) {
+        console.warn('startDragging error:', err);
+      }
     }
   };
 
@@ -333,23 +405,25 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
   // Statistics
   const stats = useMemo(() => {
-    const lines = content.split('\n').length;
-    const chars = content.length;
-    const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+    const text = viewMode === 'wysiwyg' ? serializeBlocksToMarkdown(blocks) : content;
+    const lines = text.split('\n').length;
+    const chars = text.length;
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     return { lines, chars, words };
-  }, [content]);
+  }, [content, blocks, viewMode]);
 
-  // Rendered HTML via marked
-  const renderedHtml = useMemo(() => {
-    if (!content.trim()) {
-      return '<p style="color: #64748b; font-style: italic;">내용이 없습니다. 편집기에 마크다운을 입력하세요.</p>';
+  // Rendered preview HTML for Split or Preview mode
+  const renderedFullHtml = useMemo(() => {
+    const text = viewMode === 'wysiwyg' ? serializeBlocksToMarkdown(blocks) : content;
+    if (!text.trim()) {
+      return '';
     }
     try {
-      return marked.parse(content, { breaks: true, gfm: true }) as string;
+      return renderMarkdown(text);
     } catch (e) {
-      return `<p style="color: #ef4444;">렌더링 에러: ${String(e)}</p>`;
+      return `<p style="color: #ef4444;">Rendering Error: ${String(e)}</p>`;
     }
-  }, [content]);
+  }, [content, blocks, viewMode]);
 
   // Line count for gutter
   const lineNumbersArray = useMemo(() => {
@@ -359,10 +433,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
   return (
     <div className="mhz-md-root">
-      {/* 1. Custom Frameless Titlebar */}
+      {/* 1. Custom Frameless Titlebar with Window Dragging */}
       <div
         className="mhz-md-titlebar"
         data-tauri-drag-region
+        onMouseDown={handleTitlebarMouseDown}
         onDoubleClick={handleToggleMaximize}
       >
         <div className="mhz-md-titlebar-left" data-tauri-drag-region>
@@ -371,7 +446,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           </div>
           <span className="mhz-md-title-filename">{fileName}</span>
           <span className={`mhz-md-status-badge ${isDirty ? 'dirty' : 'saved'}`}>
-            {isDirty ? '● 저장되지 않음' : '✓ 저장됨'}
+            {isDirty ? '● Unsaved' : '✓ Saved'}
           </span>
           {saveNotification && (
             <span style={{ fontSize: '11px', color: '#38bdf8', fontWeight: 600 }}>
@@ -380,7 +455,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           )}
         </div>
 
-        <div className="mhz-md-titlebar-center" data-tauri-drag-region title={filePath}>
+        <div
+          className="mhz-md-titlebar-center"
+          data-tauri-drag-region
+          onMouseDown={handleTitlebarMouseDown}
+          onDoubleClick={handleToggleMaximize}
+          title="Drag to move window, double-click to toggle maximize"
+        >
           {filePath}
         </div>
 
@@ -388,21 +469,21 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           <button
             className="mhz-md-win-btn"
             onClick={handleMinimize}
-            title="최소화"
+            title="Minimize"
           >
             <WindowMinIcon size={14} />
           </button>
           <button
             className="mhz-md-win-btn"
             onClick={handleToggleMaximize}
-            title={isMaximized ? "이전 크기로 복원" : "최대화"}
+            title={isMaximized ? "Restore" : "Maximize"}
           >
             {isMaximized ? <WindowRestoreIcon size={13} /> : <Square size={13} />}
           </button>
           <button
             className="mhz-md-win-btn close"
             onClick={handleCloseWindow}
-            title="닫기"
+            title="Close"
           >
             <X size={15} />
           </button>
@@ -417,10 +498,10 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
             className={`mhz-md-tool-btn primary ${isDirty ? 'has-changes' : ''}`}
             onClick={handleSave}
             disabled={isSaving}
-            title="저장 (Ctrl+S)"
+            title="Save (Ctrl+S)"
           >
             <Save size={14} />
-            <span>저장</span>
+            <span>Save</span>
             <kbd>Ctrl+S</kbd>
           </button>
           <div className="mhz-md-toolbar-sep" />
@@ -428,7 +509,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
             className="mhz-md-tool-btn"
             onClick={handleUndo}
             disabled={historyIndex <= 0}
-            title="실행 취소 (Ctrl+Z)"
+            title="Undo (Ctrl+Z)"
           >
             <Undo2 size={14} />
           </button>
@@ -436,7 +517,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
             className="mhz-md-tool-btn"
             onClick={handleRedo}
             disabled={historyIndex >= history.length - 1}
-            title="다시 실행 (Ctrl+Y)"
+            title="Redo (Ctrl+Y)"
           >
             <Redo2 size={14} />
           </button>
@@ -444,112 +525,112 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
         <div className="mhz-md-toolbar-sep" />
 
-        {/* Markdown Syntax Tools */}
+        {/* Markdown & Cell Formatting Tools */}
         <div className="mhz-md-toolbar-group">
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('# ', '', '제목 1')}
-            title="제목 1 (H1)"
+            onClick={() => insertText('# ', '', 'Heading 1')}
+            title="Heading 1 (H1)"
           >
             <strong style={{ fontSize: '13px' }}>H1</strong>
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('## ', '', '제목 2')}
-            title="제목 2 (H2)"
+            onClick={() => insertText('## ', '', 'Heading 2')}
+            title="Heading 2 (H2)"
           >
             <strong style={{ fontSize: '13px' }}>H2</strong>
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('### ', '', '제목 3')}
-            title="제목 3 (H3)"
+            onClick={() => insertText('### ', '', 'Heading 3')}
+            title="Heading 3 (H3)"
           >
             <strong style={{ fontSize: '12px' }}>H3</strong>
           </button>
           <div className="mhz-md-toolbar-sep" />
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('**', '**', '굵은 텍스트')}
-            title="굵게 (Ctrl+B)"
+            onClick={() => insertText('**', '**', 'bold text')}
+            title="Bold (Ctrl+B)"
           >
             <Bold size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('*', '*', '기울임 텍스트')}
-            title="기울임 (Ctrl+I)"
+            onClick={() => insertText('*', '*', 'italic text')}
+            title="Italic (Ctrl+I)"
           >
             <Italic size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('~~', '~~', '취소선 텍스트')}
-            title="취소선"
+            onClick={() => insertText('~~', '~~', 'strikethrough text')}
+            title="Strikethrough"
           >
             <Strikethrough size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('`', '`', '인라인 코드')}
-            title="인라인 코드"
+            onClick={() => insertText('`', '`', 'inline code')}
+            title="Inline Code"
           >
             <Code size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('```\n', '\n```', '코드 블록 내용')}
-            title="코드 블록"
+            onClick={() => insertText('```\n', '\n```', 'code block')}
+            title="Code Block"
           >
             <FileCode size={14} />
           </button>
           <div className="mhz-md-toolbar-sep" />
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('> ', '', '인용구')}
-            title="인용문"
+            onClick={() => insertText('> ', '', 'quote')}
+            title="Blockquote"
           >
             <Quote size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('- ', '', '목록 항목')}
-            title="글머리 기호 목록"
+            onClick={() => insertText('- ', '', 'list item')}
+            title="Bullet List"
           >
             <List size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('1. ', '', '번호 매기기 항목')}
-            title="번호 매기기 목록"
+            onClick={() => insertText('1. ', '', 'numbered item')}
+            title="Numbered List"
           >
             <ListOrdered size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('- [ ] ', '', '할 일 항목')}
-            title="체크리스트"
+            onClick={() => insertText('- [ ] ', '', 'task item')}
+            title="Task Checklist"
           >
             <CheckSquare size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('[', '](https://)', '링크 텍스트')}
-            title="링크 삽입 (Ctrl+K)"
+            onClick={() => insertText('[', '](https://)', 'link text')}
+            title="Insert Link (Ctrl+K)"
           >
             <LinkIcon size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
-            onClick={() => insertText('\n| 제목 1 | 제목 2 |\n| --- | --- |\n| 항목 1 | 항목 2 |\n')}
-            title="표(Table) 삽입"
+            onClick={() => insertText('\n| Header 1 | Header 2 |\n| --- | --- |\n| Cell 1 | Cell 2 |\n')}
+            title="Insert Table"
           >
             <Table size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
             onClick={() => insertText('\n---\n')}
-            title="구분선 삽입"
+            title="Horizontal Rule"
           >
             <Minus size={14} />
           </button>
@@ -560,59 +641,68 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         {/* View Mode & Editor Settings */}
         <div className="mhz-md-toolbar-group">
           <button
+            className={`mhz-md-tool-btn ${viewMode === 'wysiwyg' ? 'active' : ''}`}
+            onClick={handleSwitchToWysiwyg}
+            title="WYSIWYG Cell Mode (Editable Blocks with F2)"
+          >
+            <PenTool size={14} />
+            <span>WYSIWYG</span>
+          </button>
+          <button
             className={`mhz-md-tool-btn ${viewMode === 'split' ? 'active' : ''}`}
-            onClick={() => setViewMode('split')}
-            title="분할 뷰 (편집기 + 미리보기)"
+            onClick={() => handleSwitchFromWysiwyg('split')}
+            title="Split View (Source + Preview)"
           >
             <Columns size={14} />
-            <span>분할</span>
+            <span>Split</span>
           </button>
           <button
             className={`mhz-md-tool-btn ${viewMode === 'edit' ? 'active' : ''}`}
-            onClick={() => setViewMode('edit')}
-            title="편집기 전용"
+            onClick={() => handleSwitchFromWysiwyg('edit')}
+            title="Source Code Only"
           >
-            <Edit3 size={14} />
-            <span>편집</span>
+            <Code2 size={14} />
+            <span>Source</span>
           </button>
           <button
             className={`mhz-md-tool-btn ${viewMode === 'preview' ? 'active' : ''}`}
-            onClick={() => setViewMode('preview')}
-            title="미리보기 전용"
+            onClick={() => handleSwitchFromWysiwyg('preview')}
+            title="Preview Only"
           >
             <Eye size={14} />
-            <span>미리보기</span>
+            <span>Preview</span>
           </button>
           <div className="mhz-md-toolbar-sep" />
           <button
             className={`mhz-md-tool-btn ${wordWrap ? 'active' : ''}`}
             onClick={() => setWordWrap(!wordWrap)}
-            title="자동 줄바꿈 토글"
+            title="Toggle Word Wrap"
           >
             <WrapText size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
             onClick={() => setFontSize(prev => Math.max(10, prev - 1))}
-            title="글꼴 축소"
+            title="Decrease Font Size"
           >
             <ZoomOut size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
             onClick={() => setFontSize(prev => Math.min(24, prev + 1))}
-            title="글꼴 확대"
+            title="Increase Font Size"
           >
             <ZoomIn size={14} />
           </button>
           <button
             className="mhz-md-tool-btn"
             onClick={() => {
-              navigator.clipboard.writeText(content);
-              setSaveNotification('마크다운 복사됨');
+              const textToCopy = viewMode === 'wysiwyg' ? serializeBlocksToMarkdown(blocks) : content;
+              navigator.clipboard.writeText(textToCopy);
+              setSaveNotification('Markdown copied');
               setTimeout(() => setSaveNotification(null), 2000);
             }}
-            title="전체 마크다운 복사"
+            title="Copy Markdown to Clipboard"
           >
             <Copy size={14} />
           </button>
@@ -624,78 +714,90 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         {isLoading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: '8px' }}>
             <FileText size={18} className="animate-spin" />
-            <span>파일을 불러오는 중...</span>
+            <span>Loading file...</span>
           </div>
         ) : (
           <>
-            {/* Editor Pane */}
+            {/* WYSIWYG Mode Pane with TreeDiadev-inspired TreeEditableCell */}
+            {viewMode === 'wysiwyg' && (
+              <div className="mhz-md-pane wysiwyg-pane">
+                <TreeEditableCell
+                  blocks={blocks}
+                  onUpdateBlocks={handleUpdateBlocks}
+                  fontSize={fontSize}
+                />
+              </div>
+            )}
+
+            {/* Split or Source Code Pane */}
             {(viewMode === 'split' || viewMode === 'edit') && (
               <div
                 className="mhz-md-pane editor-pane"
                 style={{ width: viewMode === 'split' ? `${splitRatio}%` : '100%' }}
               >
-            <div className="mhz-md-editor-container">
-              {/* Line Numbers */}
-              <div
-                ref={lineNumbersRef}
-                className="mhz-md-line-numbers"
-                style={{ fontSize: `${fontSize}px` }}
-              >
-                {lineNumbersArray.map((lineNum) => (
-                  <div key={lineNum} style={{ height: `${fontSize * 1.6}px` }}>
-                    {lineNum}
+                <div className="mhz-md-editor-container">
+                  {/* Line Numbers */}
+                  <div
+                    ref={lineNumbersRef}
+                    className="mhz-md-line-numbers"
+                    style={{ fontSize: `${fontSize}px` }}
+                  >
+                    {lineNumbersArray.map((lineNum) => (
+                      <div key={lineNum} style={{ height: `${fontSize * 1.6}px` }}>
+                        {lineNum}
+                      </div>
+                    ))}
                   </div>
-                ))}
+
+                  {/* Raw Textarea */}
+                  <textarea
+                    ref={textareaRef}
+                    className={`mhz-md-textarea ${wordWrap ? 'wrap' : ''}`}
+                    style={{
+                      fontSize: `${fontSize}px`,
+                      lineHeight: 1.6
+                    }}
+                    value={content}
+                    onChange={(e) => updateContentWithHistory(e.target.value)}
+                    onKeyDown={handleSourceKeyDown}
+                    onSelect={handleTextareaSelect}
+                    onKeyUp={handleTextareaSelect}
+                    onClick={handleTextareaSelect}
+                    onScroll={handleScroll}
+                    placeholder="Start typing markdown or text here..."
+                    spellCheck={false}
+                    autoFocus
+                  />
+                </div>
               </div>
+            )}
 
-              {/* Textarea */}
-              <textarea
-                ref={textareaRef}
-                className={`mhz-md-textarea ${wordWrap ? 'wrap' : ''}`}
-                style={{
-                  fontSize: `${fontSize}px`,
-                  lineHeight: 1.6
-                }}
-                value={content}
-                onChange={(e) => updateContentWithHistory(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onSelect={handleTextareaSelect}
-                onKeyUp={handleTextareaSelect}
-                onClick={handleTextareaSelect}
-                onScroll={handleScroll}
-                placeholder="마크다운 또는 일반 텍스트를 입력하세요..."
-                spellCheck={false}
-                autoFocus
+            {/* Resizer Divider */}
+            {viewMode === 'split' && (
+              <div
+                className={`mhz-md-resizer ${isResizing ? 'resizing' : ''}`}
+                onMouseDown={handleMouseDownResizer}
               />
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Resizer Divider */}
-        {viewMode === 'split' && (
-          <div
-            className={`mhz-md-resizer ${isResizing ? 'resizing' : ''}`}
-            onMouseDown={handleMouseDownResizer}
-          />
-        )}
-
-        {/* Preview Pane */}
-        {(viewMode === 'split' || viewMode === 'preview') && (
-          <div
-            className="mhz-md-pane preview-pane"
-            style={{ width: viewMode === 'split' ? `${100 - splitRatio}%` : '100%' }}
-          >
-            <div className="mhz-md-preview-header">
-              <span>실시간 마크다운 미리보기</span>
-              <span style={{ fontSize: '10px', color: '#475569' }}>GitHub Flavored Markdown</span>
-            </div>
-            <div
-              ref={previewRef}
-              className="mhz-md-preview-content"
-              dangerouslySetInnerHTML={{ __html: renderedHtml }}
-            />
-          </div>
-        )}
+            {/* Preview Pane */}
+            {(viewMode === 'split' || viewMode === 'preview') && (
+              <div
+                className="mhz-md-pane preview-pane"
+                style={{ width: viewMode === 'split' ? `${100 - splitRatio}%` : '100%' }}
+              >
+                <div className="mhz-md-preview-header">
+                  <span>Live Markdown Preview</span>
+                  <span style={{ fontSize: '10px', color: '#475569' }}>GitHub Flavored Markdown</span>
+                </div>
+                <div
+                  ref={previewRef}
+                  className="mhz-md-preview-content"
+                  style={{ fontSize: `${fontSize}px` }}
+                  dangerouslySetInnerHTML={{ __html: renderedFullHtml || '<p style="color: #64748b; font-style: italic;">No content to preview.</p>' }}
+                />
+              </div>
+            )}
           </>
         )}
       </div>
@@ -707,25 +809,30 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
             Ln <strong>{cursorPos.line}</strong>, Col <strong>{cursorPos.col}</strong>
           </span>
           <span className="mhz-md-statusbar-item">
-            줄 수: <strong>{stats.lines}</strong>
+            Lines: <strong>{stats.lines}</strong>
           </span>
           <span className="mhz-md-statusbar-item">
-            단어 수: <strong>{stats.words}</strong>
+            Words: <strong>{stats.words}</strong>
           </span>
           <span className="mhz-md-statusbar-item">
-            글자 수: <strong>{stats.chars}</strong>
+            Characters: <strong>{stats.chars}</strong>
           </span>
+          {viewMode === 'wysiwyg' && (
+            <span className="mhz-md-statusbar-item">
+              Cells: <strong>{blocks.length}</strong>
+            </span>
+          )}
         </div>
 
         <div className="mhz-md-statusbar-right">
           <span className="mhz-md-statusbar-item">
-            인코딩: <strong>UTF-8</strong>
+            Encoding: <strong>UTF-8</strong>
           </span>
           <span className="mhz-md-statusbar-item">
-            크기: <strong>{fontSize}px</strong>
+            Font: <strong>{fontSize}px</strong>
           </span>
           <span className="mhz-md-statusbar-item">
-            상태: <strong style={{ color: isDirty ? '#fbbf24' : '#34d399' }}>{isDirty ? '수정됨' : '저장됨'}</strong>
+            Status: <strong style={{ color: isDirty ? '#fbbf24' : '#34d399' }}>{isDirty ? 'Modified' : 'Saved'}</strong>
           </span>
         </div>
       </div>
@@ -736,11 +843,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           <div className="mhz-md-modal">
             <div className="mhz-md-modal-header">
               <AlertCircle size={20} color="#f59e0b" />
-              <span>저장되지 않은 변경사항</span>
+              <span>Unsaved Changes</span>
             </div>
             <div className="mhz-md-modal-body">
-              <strong>'{fileName}'</strong> 파일의 변경 내용이 아직 저장되지 않았습니다.<br />
-              종료하기 전에 변경 사항을 저장하시겠습니까?
+              Do you want to save the changes you made to <strong>'{fileName}'</strong>?<br />
+              Your changes will be lost if you close without saving.
             </div>
             <div className="mhz-md-modal-actions">
               <button
@@ -751,7 +858,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
                   executeClose();
                 }}
               >
-                저장 후 닫기
+                Save & Close
               </button>
               <button
                 className="mhz-md-modal-btn discard"
@@ -760,13 +867,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
                   executeClose();
                 }}
               >
-                저장 안 함
+                Don't Save
               </button>
               <button
                 className="mhz-md-modal-btn cancel"
                 onClick={() => setShowConfirmClose(false)}
               >
-                취소
+                Cancel
               </button>
             </div>
           </div>

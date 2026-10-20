@@ -1594,58 +1594,58 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let label = window.label();
-                if label.starts_with("pdf-viewer") {
-                    // PDF viewer: 창만 닫음 (Tray 앱은 계속 실행)
-                } else {
-                    // Main window: Tray로 축소되는 애니메이션 후 숨김
-                    api.prevent_close();
-                    let win = window.clone();
-                    std::thread::spawn(move || {
-                        // 현재 윈도우 위치와 크기 저장
-                        let Ok(pos) = win.outer_position() else { let _ = win.hide(); return; };
-                        let Ok(size) = win.outer_size() else { let _ = win.hide(); return; };
-
-                        // 모니터 정보로 Tray 영역(우하단) 좌표 계산
-                        let (target_x, target_y) = if let Ok(Some(monitor)) = win.current_monitor() {
-                            let mp = monitor.position();
-                            let ms = monitor.size();
-                            (
-                                mp.x + ms.width as i32 - 100,
-                                mp.y + ms.height as i32 - 50,
-                            )
-                        } else {
-                            (pos.x + size.width as i32, pos.y + size.height as i32)
-                        };
-
-                        let steps = 12u32;
-                        let delay = std::time::Duration::from_millis(18);
-
-                        for i in 1..=steps {
-                            let t = i as f64 / steps as f64;
-                            let eased = t * t; // ease-in: 점점 빨라짐
-
-                            let scale = 1.0 - eased * 0.95; // 5%까지 축소
-                            let new_w = (size.width as f64 * scale).max(1.0) as u32;
-                            let new_h = (size.height as f64 * scale).max(1.0) as u32;
-
-                            let new_x = pos.x as f64 + (target_x as f64 - pos.x as f64) * eased;
-                            let new_y = pos.y as f64 + (target_y as f64 - pos.y as f64) * eased;
-
-                            let _ = win.set_size(tauri::Size::Physical(
-                                tauri::PhysicalSize::new(new_w, new_h),
-                            ));
-                            let _ = win.set_position(tauri::Position::Physical(
-                                tauri::PhysicalPosition::new(new_x as i32, new_y as i32),
-                            ));
-                            std::thread::sleep(delay);
-                        }
-
-                        // 숨기고 원래 크기/위치 복원 (다음에 show할 때 정상 표시되도록)
-                        let _ = win.hide();
-                        let _ = win.set_size(tauri::Size::Physical(size));
-                        let _ = win.set_position(tauri::Position::Physical(pos));
-                    });
+                if label != "main" {
+                    // Auxiliary windows (e.g., md-editor, pdf-viewer): simply close without tray animation
+                    return;
                 }
+                // Main window: Tray로 축소되는 애니메이션 후 숨김
+                api.prevent_close();
+                let win = window.clone();
+                std::thread::spawn(move || {
+                    // 현재 윈도우 위치와 크기 저장
+                    let Ok(pos) = win.outer_position() else { let _ = win.hide(); return; };
+                    let Ok(size) = win.outer_size() else { let _ = win.hide(); return; };
+
+                    // 모니터 정보로 Tray 영역(우하단) 좌표 계산
+                    let (target_x, target_y) = if let Ok(Some(monitor)) = win.current_monitor() {
+                        let mp = monitor.position();
+                        let ms = monitor.size();
+                        (
+                            mp.x + ms.width as i32 - 100,
+                            mp.y + ms.height as i32 - 50,
+                        )
+                    } else {
+                        (pos.x + size.width as i32, pos.y + size.height as i32)
+                    };
+
+                    let steps = 12u32;
+                    let delay = std::time::Duration::from_millis(18);
+
+                    for i in 1..=steps {
+                        let t = i as f64 / steps as f64;
+                        let eased = t * t; // ease-in: 점점 빨라짐
+
+                        let scale = 1.0 - eased * 0.95; // 5%까지 축소
+                        let new_w = (size.width as f64 * scale).max(1.0) as u32;
+                        let new_h = (size.height as f64 * scale).max(1.0) as u32;
+
+                        let new_x = pos.x as f64 + (target_x as f64 - pos.x as f64) * eased;
+                        let new_y = pos.y as f64 + (target_y as f64 - pos.y as f64) * eased;
+
+                        let _ = win.set_size(tauri::Size::Physical(
+                            tauri::PhysicalSize::new(new_w, new_h),
+                        ));
+                        let _ = win.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition::new(new_x as i32, new_y as i32),
+                        ));
+                        std::thread::sleep(delay);
+                    }
+
+                    // 숨기고 원래 크기/위치 복원 (다음에 show할 때 정상 표시되도록)
+                    let _ = win.hide();
+                    let _ = win.set_size(tauri::Size::Physical(size));
+                    let _ = win.set_position(tauri::Position::Physical(pos));
+                });
             }
         })
         .invoke_handler(tauri::generate_handler![
