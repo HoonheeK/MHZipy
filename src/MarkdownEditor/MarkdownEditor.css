@@ -472,8 +472,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  width: 24px;
-  min-width: 24px;
+  width: 38px;
+  min-width: 38px;
   margin-right: 6px;
   align-self: center;
   user-select: none;
@@ -490,6 +490,59 @@
   line-height: 1;
 }
 
+.mhz-td-fold-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.mhz-td-block-row:hover .mhz-td-fold-btn,
+.mhz-td-fold-btn.collapsed {
+  opacity: 1;
+}
+
+.mhz-td-fold-btn:hover {
+  color: #38bdf8;
+  background-color: rgba(56, 189, 248, 0.15);
+}
+
+.mhz-td-fold-btn.collapsed {
+  color: #38bdf8;
+}
+
+.mhz-td-fold-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 7px;
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  vertical-align: middle;
+}
+
+.mhz-td-fold-pill:hover {
+  background: rgba(56, 189, 248, 0.3);
+  border-color: #38bdf8;
+  transform: scale(1.05);
+}
+
 .mhz-td-grip {
   color: #64748b;
   opacity: 0;
@@ -504,6 +557,12 @@
 .mhz-td-block-row.focused .mhz-td-grip,
 .mhz-td-block-row.selected .mhz-td-grip {
   opacity: 1;
+}
+
+.mhz-td-block-row.selected {
+  background-color: rgba(56, 189, 248, 0.14) !important;
+  border-color: rgba(56, 189, 248, 0.35) !important;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2) !important;
 }
 
 /* Right-Click Grip Context Menu & Action items */

@@ -556,6 +556,9 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
   const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
   const [lastAnchorBlockId, setLastAnchorBlockId] = useState<string | null>(null);
+  const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(new Set());
+  const lastAltArrowRef = useRef<{ key: 'ArrowLeft' | 'ArrowRight'; time: number; type: BlockType; blockId: string } | null>(null);
+  const lastCtrlATimeRef = useRef<number>(0);
   const [gripMenuState, setGripMenuState] = useState<{ x: number; y: number; blockId: string } | null>(null);
   const [slashMenuState, setSlashMenuState] = useState<SlashMenuState | null>(null);
   const [menuPlacement, setMenuPlacement] = useState<'bottom' | 'top'>('bottom');
@@ -565,6 +568,53 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
 
   const blocksRef = useRef<Block[]>(blocks);
   blocksRef.current = blocks;
+
+  // Heading folding calculation:
+  // H1 folds until next H1. H2 folds until next H1 or H2. H3 folds until next H1, H2, or H3.
+  const getHeadingLevel = (type: BlockType): number => {
+    if (type === 'h1') return 1;
+    if (type === 'h2') return 2;
+    if (type === 'h3') return 3;
+    if (type === 'h4') return 4;
+    if (type === 'h5') return 5;
+    if (type === 'h6') return 6;
+    return 999;
+  };
+
+  const hiddenBlockIds = React.useMemo(() => {
+    const hidden = new Set<string>();
+    if (collapsedHeadingIds.size === 0) return hidden;
+
+    const stack: { id: string; level: number; isCollapsed: boolean }[] = [];
+    for (const block of blocks) {
+      const level = getHeadingLevel(block.type);
+      if (level <= 6) {
+        while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+          stack.pop();
+        }
+      }
+      if (stack.some(h => h.isCollapsed)) {
+        hidden.add(block.id);
+      }
+      if (level <= 3) {
+        stack.push({
+          id: block.id,
+          level,
+          isCollapsed: collapsedHeadingIds.has(block.id)
+        });
+      }
+    }
+    return hidden;
+  }, [blocks, collapsedHeadingIds]);
+
+  const toggleHeadingFold = useCallback((headingBlockId: string) => {
+    setCollapsedHeadingIds(prev => {
+      const next = new Set(prev);
+      if (next.has(headingBlockId)) next.delete(headingBlockId);
+      else next.add(headingBlockId);
+      return next;
+    });
+  }, []);
 
   // Auto-adjust slash menu placement if close to bottom of screen
   useLayoutEffect(() => {
@@ -611,6 +661,37 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
   // Apply text or background color to selection or block
   const applyColor = useCallback((type: 'text' | 'bg', color: string, blockId: string) => {
     const current = blocksRef.current;
+    const targetIds = selectedBlockIds.size > 1 && (selectedBlockIds.has(blockId) || !blockId)
+      ? selectedBlockIds
+      : null;
+
+    // Apply color to all selected blocks
+    if (targetIds) {
+      const styleAttr = type === 'text'
+        ? `color: ${color};`
+        : `background-color: ${color}; padding: 2px 6px; border-radius: 4px;`;
+
+      const next = current.map(b => {
+        if (!targetIds.has(b.id)) return b;
+        const c = document.getElementById(`edit-${b.id}`);
+        let raw = (c ? c.innerHTML : b.html)
+          .replace(/<span class="mhz-td-empty-hint">.*?<\/span>/gi, '')
+          .replace(/\/([a-zA-Z0-9_\-]*)$/g, '')
+          .replace(/^\/([a-zA-Z0-9_\-]*)/g, '')
+          .replace(/\u200B/g, '')
+          .trim();
+        const innerContent = raw || '\u200B';
+        const styledHtml = `<span style="${styleAttr}">${innerContent}</span>`;
+        if (c) c.innerHTML = styledHtml;
+        return { ...b, html: styledHtml, isRaw: false };
+      });
+
+      onUpdateBlocks(next);
+      setSlashMenuState(null);
+      setContextMenuState(null);
+      return;
+    }
+
     const idx = current.findIndex(b => b.id === blockId);
     if (idx === -1) return;
     const block = current[idx];
@@ -677,7 +758,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     setSlashMenuState(null);
     setContextMenuState(null);
     focusBlock(block.id, raw.length);
-  }, [onUpdateBlocks]);
+  }, [onUpdateBlocks, selectedBlockIds]);
 
   // Insert a clean 3x3 table
   const insertTable = useCallback((blockId: string) => {
@@ -731,14 +812,14 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     }
   }, []);
 
-  // Handle right-click context menu on selected text
+  // Handle right-click context menu on selected text or multiple blocks
   const handleBlockContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>, blockId: string) => {
     const sel = window.getSelection();
     let text = sel ? sel.toString().trim() : '';
     if (!text && savedSelectionRef.current && savedSelectionRef.current.blockId === blockId) {
       text = savedSelectionRef.current.range.toString().trim();
     }
-    if (text.length > 0) {
+    if (text.length > 0 || selectedBlockIds.size > 1) {
       e.preventDefault();
       e.stopPropagation();
       if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
@@ -753,7 +834,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
       setContextMenuState({ x, y, blockId });
     }
-  }, []);
+  }, [selectedBlockIds]);
 
   // Click outside to dismiss menus
   useEffect(() => {
@@ -831,6 +912,113 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       setSlashMenuState(null);
     }
   }, [onUpdateBlocks, slashMenuState]);
+
+  // Select block helper (supports Shift range select and Ctrl toggle select)
+  const handleSelectBlock = useCallback((blockId: string, e?: React.MouseEvent) => {
+    const current = blocksRef.current;
+    if (e?.shiftKey && lastAnchorBlockId) {
+      const idx1 = current.findIndex(b => b.id === lastAnchorBlockId);
+      const idx2 = current.findIndex(b => b.id === blockId);
+      if (idx1 !== -1 && idx2 !== -1) {
+        const start = Math.min(idx1, idx2);
+        const end = Math.max(idx1, idx2);
+        const newSet = new Set<string>();
+        for (let i = start; i <= end; i++) {
+          newSet.add(current[i].id);
+        }
+        setSelectedBlockIds(newSet);
+        return;
+      }
+    }
+
+    if (e?.ctrlKey || e?.metaKey) {
+      setSelectedBlockIds(prev => {
+        const next = new Set(prev);
+        if (next.has(blockId)) next.delete(blockId);
+        else next.add(blockId);
+        return next.size > 0 ? next : new Set([blockId]);
+      });
+      setLastAnchorBlockId(blockId);
+      return;
+    }
+
+    setSelectedBlockIds(new Set([blockId]));
+    setLastAnchorBlockId(blockId);
+  }, [lastAnchorBlockId]);
+
+  // Multi-block indent/outdent helper (Tab / Shift+Tab)
+  const indentSelectedBlocks = useCallback((direction: 1 | -1) => {
+    const current = blocksRef.current;
+    const targetIds = selectedBlockIds.size > 0 ? selectedBlockIds : (focusedBlockId ? new Set([focusedBlockId]) : new Set<string>());
+    if (targetIds.size === 0) return;
+
+    const newBlocks = current.map(b => {
+      if (targetIds.has(b.id)) {
+        const nextIndent = Math.max(0, Math.min(6, b.indent + direction));
+        return { ...b, indent: nextIndent };
+      }
+      return b;
+    });
+    onUpdateBlocks(newBlocks);
+  }, [selectedBlockIds, focusedBlockId, onUpdateBlocks]);
+
+  // Multi-block move helper (Ctrl+ArrowUp / Ctrl+ArrowDown)
+  const moveSelectedBlocks = useCallback((direction: 'up' | 'down') => {
+    const current = [...blocksRef.current];
+    const targetIds = selectedBlockIds.size > 0 ? selectedBlockIds : (focusedBlockId ? new Set([focusedBlockId]) : new Set<string>());
+    if (targetIds.size === 0) return;
+
+    const indices = current
+      .map((b, idx) => (targetIds.has(b.id) ? idx : -1))
+      .filter(idx => idx !== -1);
+
+    if (indices.length === 0) return;
+
+    if (direction === 'up') {
+      if (indices[0] === 0) return;
+      for (const idx of indices) {
+        const temp = current[idx];
+        current[idx] = current[idx - 1];
+        current[idx - 1] = temp;
+      }
+    } else {
+      if (indices[indices.length - 1] === current.length - 1) return;
+      for (let i = indices.length - 1; i >= 0; i--) {
+        const idx = indices[i];
+        const temp = current[idx];
+        current[idx] = current[idx + 1];
+        current[idx + 1] = temp;
+      }
+    }
+
+    onUpdateBlocks(current);
+  }, [selectedBlockIds, focusedBlockId, onUpdateBlocks]);
+
+  // Multi-block delete helper (Delete / Backspace key or Grip context menu)
+  const deleteSelectedBlocks = useCallback(() => {
+    const current = blocksRef.current;
+    const targetIds = selectedBlockIds.size > 0 ? selectedBlockIds : (focusedBlockId ? new Set([focusedBlockId]) : new Set<string>());
+    if (targetIds.size === 0) return;
+
+    const remaining = current.filter(b => !targetIds.has(b.id));
+    if (remaining.length === 0) {
+      const freshId = generateId();
+      onUpdateBlocks([{ id: freshId, type: 'paragraph', html: '', indent: 0 }]);
+      setSelectedBlockIds(new Set([freshId]));
+      setLastAnchorBlockId(freshId);
+      focusBlock(freshId, 0);
+      return;
+    }
+
+    const firstSelectedIdx = current.findIndex(b => targetIds.has(b.id));
+    const nextFocusIdx = Math.min(Math.max(0, firstSelectedIdx), remaining.length - 1);
+    const nextFocusBlock = remaining[nextFocusIdx];
+
+    onUpdateBlocks(remaining);
+    setSelectedBlockIds(new Set([nextFocusBlock.id]));
+    setLastAnchorBlockId(nextFocusBlock.id);
+    focusBlock(nextFocusBlock.id, 0);
+  }, [selectedBlockIds, focusedBlockId, onUpdateBlocks]);
 
   // Handle Key Down events (Enter, Backspace, Space triggers, Tab, F2, ESC, ArrowUp/Down, Slash menu)
   const handleBlockKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>, blockId: string) => {
@@ -1296,11 +1484,9 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     // Tab Key: Indent / Outdent
     if (e.key === 'Tab') {
       e.preventDefault();
+      e.stopPropagation();
       const direction = e.shiftKey ? -1 : 1;
-      const nextIndent = Math.max(0, Math.min(6, block.indent + direction));
-      const newBlocks = [...currentBlocks];
-      newBlocks[index] = { ...block, indent: nextIndent };
-      onUpdateBlocks(newBlocks);
+      indentSelectedBlocks(direction);
       return;
     }
 
@@ -1318,123 +1504,152 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       return;
     }
 
-    // Delete key on multiple selected blocks
-    if (e.key === 'Delete' && selectedBlockIds.size > 1) {
+    // Delete or Backspace key on multiple selected blocks
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlockIds.size > 1) {
       e.preventDefault();
       e.stopPropagation();
       deleteSelectedBlocks();
       return;
     }
 
-    // Arrow Up / Down: Directly navigate between cells
-    if (e.key === 'ArrowUp' && index > 0 && !e.ctrlKey && !e.shiftKey) {
-      e.preventDefault();
-      const prevBlock = currentBlocks[index - 1];
-      setFocusedBlockId(prevBlock.id);
-      setSelectedBlockIds(new Set([prevBlock.id]));
-      setLastAnchorBlockId(prevBlock.id);
-      focusBlock(prevBlock.id, 0);
-      return;
-    }
-    if (e.key === 'ArrowDown' && index < currentBlocks.length - 1 && !e.ctrlKey && !e.shiftKey) {
-      e.preventDefault();
-      const nextBlock = currentBlocks[index + 1];
-      setFocusedBlockId(nextBlock.id);
-      setSelectedBlockIds(new Set([nextBlock.id]));
-      setLastAnchorBlockId(nextBlock.id);
-      focusBlock(nextBlock.id, 0);
-      return;
-    }
-  }, [onUpdateBlocks, slashMenuState, colorNav, applyColor, executeSlashCommand, insertTable, selectedBlockIds]);
+    // Alt + ArrowLeft / ArrowRight: Fold / Unfold H1, H2, H3 (Single press: current section, Double press: entire band)
+    if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      const isHeading = block.type === 'h1' || block.type === 'h2' || block.type === 'h3';
+      if (isHeading) {
+        e.preventDefault();
+        e.stopPropagation();
 
-  // Select block helper (supports Shift range select and Ctrl toggle select)
-  const handleSelectBlock = useCallback((blockId: string, e?: React.MouseEvent) => {
-    const current = blocksRef.current;
-    if (e?.shiftKey && lastAnchorBlockId) {
-      const idx1 = current.findIndex(b => b.id === lastAnchorBlockId);
-      const idx2 = current.findIndex(b => b.id === blockId);
-      if (idx1 !== -1 && idx2 !== -1) {
-        const start = Math.min(idx1, idx2);
-        const end = Math.max(idx1, idx2);
-        const newSet = new Set<string>();
-        for (let i = start; i <= end; i++) {
-          newSet.add(current[i].id);
+        const now = Date.now();
+        const isFold = e.key === 'ArrowLeft';
+        const isDouble =
+          lastAltArrowRef.current &&
+          lastAltArrowRef.current.key === e.key &&
+          lastAltArrowRef.current.type === block.type &&
+          now - lastAltArrowRef.current.time < 500;
+
+        if (isDouble) {
+          // Fold / Unfold ALL headings of the same level/band (all H1, all H2, or all H3)
+          const sameBand = currentBlocks.filter(b => b.type === block.type);
+          setCollapsedHeadingIds(prev => {
+            const next = new Set(prev);
+            for (const hb of sameBand) {
+              if (isFold) next.add(hb.id);
+              else next.delete(hb.id);
+            }
+            return next;
+          });
+          lastAltArrowRef.current = null;
+        } else {
+          // Fold / Unfold current heading section
+          setCollapsedHeadingIds(prev => {
+            const next = new Set(prev);
+            if (isFold) next.add(block.id);
+            else next.delete(block.id);
+            return next;
+          });
+          lastAltArrowRef.current = {
+            key: e.key as 'ArrowLeft' | 'ArrowRight',
+            time: now,
+            type: block.type,
+            blockId: block.id
+          };
         }
-        setSelectedBlockIds(newSet);
         return;
       }
     }
 
-    if (e?.ctrlKey || e?.metaKey) {
-      setSelectedBlockIds(prev => {
-        const next = new Set(prev);
-        if (next.has(blockId)) next.delete(blockId);
-        else next.add(blockId);
-        return next.size > 0 ? next : new Set([blockId]);
-      });
-      setLastAnchorBlockId(blockId);
+    // Shift + ArrowUp / ArrowDown: Expand / contract block range selection
+    if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const anchorId = lastAnchorBlockId || block.id;
+      const anchorIdx = currentBlocks.findIndex(b => b.id === anchorId);
+
+      let targetIdx = index;
+      if (e.key === 'ArrowUp') {
+        let prev = index - 1;
+        while (prev >= 0 && hiddenBlockIds.has(currentBlocks[prev].id)) prev--;
+        if (prev >= 0) targetIdx = prev;
+      } else {
+        let next = index + 1;
+        while (next < currentBlocks.length && hiddenBlockIds.has(currentBlocks[next].id)) next++;
+        if (next < currentBlocks.length) targetIdx = next;
+      }
+
+      if (anchorIdx !== -1 && targetIdx !== -1) {
+        const start = Math.min(anchorIdx, targetIdx);
+        const end = Math.max(anchorIdx, targetIdx);
+        const newSet = new Set<string>();
+        for (let i = start; i <= end; i++) {
+          if (!hiddenBlockIds.has(currentBlocks[i].id)) {
+            newSet.add(currentBlocks[i].id);
+          }
+        }
+        setSelectedBlockIds(newSet);
+        setFocusedBlockId(currentBlocks[targetIdx].id);
+        focusBlock(currentBlocks[targetIdx].id, 0);
+      }
       return;
     }
 
-    setSelectedBlockIds(new Set([blockId]));
-    setLastAnchorBlockId(blockId);
-  }, [lastAnchorBlockId]);
-
-  // Multi-block move helper (Ctrl+ArrowUp / Ctrl+ArrowDown)
-  const moveSelectedBlocks = useCallback((direction: 'up' | 'down') => {
-    const current = [...blocksRef.current];
-    if (selectedBlockIds.size === 0) return;
-
-    const indices = current
-      .map((b, idx) => (selectedBlockIds.has(b.id) ? idx : -1))
-      .filter(idx => idx !== -1);
-
-    if (indices.length === 0) return;
-
-    if (direction === 'up') {
-      if (indices[0] === 0) return;
-      for (const idx of indices) {
-        const temp = current[idx];
-        current[idx] = current[idx - 1];
-        current[idx - 1] = temp;
+    // Double Ctrl+A: Select all blocks
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+      const now = Date.now();
+      if (lastCtrlATimeRef.current && now - lastCtrlATimeRef.current < 450) {
+        e.preventDefault();
+        e.stopPropagation();
+        setSelectedBlockIds(new Set(currentBlocks.map(b => b.id)));
+        lastCtrlATimeRef.current = 0;
+        return;
       }
-    } else {
-      if (indices[indices.length - 1] === current.length - 1) return;
-      for (let i = indices.length - 1; i >= 0; i--) {
-        const idx = indices[i];
-        const temp = current[idx];
-        current[idx] = current[idx + 1];
-        current[idx + 1] = temp;
-      }
+      lastCtrlATimeRef.current = now;
     }
 
-    onUpdateBlocks(current);
-  }, [selectedBlockIds, onUpdateBlocks]);
-
-  // Multi-block delete helper (Delete key or Grip context menu)
-  const deleteSelectedBlocks = useCallback(() => {
-    const current = blocksRef.current;
-    if (selectedBlockIds.size === 0) return;
-
-    const remaining = current.filter(b => !selectedBlockIds.has(b.id));
-    if (remaining.length === 0) {
-      const freshId = generateId();
-      onUpdateBlocks([{ id: freshId, type: 'paragraph', html: '', indent: 0 }]);
-      setSelectedBlockIds(new Set([freshId]));
-      setLastAnchorBlockId(freshId);
-      focusBlock(freshId, 0);
-      return;
+    // Arrow Up / Down: Directly navigate between visible cells
+    if (e.key === 'ArrowUp' && !e.ctrlKey && !e.shiftKey) {
+      let prevIdx = index - 1;
+      while (prevIdx >= 0 && hiddenBlockIds.has(currentBlocks[prevIdx].id)) {
+        prevIdx--;
+      }
+      if (prevIdx >= 0) {
+        e.preventDefault();
+        const prevBlock = currentBlocks[prevIdx];
+        setFocusedBlockId(prevBlock.id);
+        setSelectedBlockIds(new Set([prevBlock.id]));
+        setLastAnchorBlockId(prevBlock.id);
+        focusBlock(prevBlock.id, 0);
+        return;
+      }
     }
-
-    const firstSelectedIdx = current.findIndex(b => selectedBlockIds.has(b.id));
-    const nextFocusIdx = Math.min(Math.max(0, firstSelectedIdx), remaining.length - 1);
-    const nextFocusBlock = remaining[nextFocusIdx];
-
-    onUpdateBlocks(remaining);
-    setSelectedBlockIds(new Set([nextFocusBlock.id]));
-    setLastAnchorBlockId(nextFocusBlock.id);
-    focusBlock(nextFocusBlock.id, 0);
-  }, [selectedBlockIds, onUpdateBlocks]);
+    if (e.key === 'ArrowDown' && !e.ctrlKey && !e.shiftKey) {
+      let nextIdx = index + 1;
+      while (nextIdx < currentBlocks.length && hiddenBlockIds.has(currentBlocks[nextIdx].id)) {
+        nextIdx++;
+      }
+      if (nextIdx < currentBlocks.length) {
+        e.preventDefault();
+        const nextBlock = currentBlocks[nextIdx];
+        setFocusedBlockId(nextBlock.id);
+        setSelectedBlockIds(new Set([nextBlock.id]));
+        setLastAnchorBlockId(nextBlock.id);
+        focusBlock(nextBlock.id, 0);
+        return;
+      }
+    }
+  }, [
+    onUpdateBlocks,
+    slashMenuState,
+    colorNav,
+    applyColor,
+    executeSlashCommand,
+    insertTable,
+    selectedBlockIds,
+    indentSelectedBlocks,
+    moveSelectedBlocks,
+    deleteSelectedBlocks,
+    lastAnchorBlockId,
+    hiddenBlockIds
+  ]);
 
   // Toggle raw markdown mode for a block (F2)
   const handleToggleRawMarkdown = useCallback((targetBlockId: string) => {
@@ -1482,13 +1697,22 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         } else if (e.ctrlKey && e.key === 'ArrowDown') {
           e.preventDefault();
           moveSelectedBlocks('down');
-        } else if (e.key === 'Delete') {
+        } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedBlockIds.size > 1) {
           e.preventDefault();
           deleteSelectedBlocks();
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          indentSelectedBlocks(e.shiftKey ? -1 : 1);
+        } else if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+          e.preventDefault();
+          setSelectedBlockIds(new Set(blocks.map(b => b.id)));
         }
       }}
     >
       {blocks.map((block, idx) => {
+        const isHidden = hiddenBlockIds.has(block.id);
+        const isHeading = block.type === 'h1' || block.type === 'h2' || block.type === 'h3';
+        const isCollapsed = collapsedHeadingIds.has(block.id);
         const isFocused = focusedBlockId === block.id;
         const isSelected = selectedBlockIds.has(block.id);
 
@@ -1496,6 +1720,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
           <div
             key={block.id}
             className={`mhz-td-block-row mhz-td-row-${block.type} ${isFocused ? 'focused' : ''} ${isSelected ? 'selected' : ''} ${block.isRaw ? 'editing' : ''}`}
+            style={{ display: isHidden ? 'none' : undefined }}
             onClick={(e) => handleSelectBlock(block.id, e)}
           >
             {/* Left Grip Handle & Actions */}
@@ -1503,6 +1728,18 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
               className="mhz-td-block-gutter"
               onContextMenu={(e) => handleGripContextMenu(e, block.id)}
             >
+              {isHeading && (
+                <div
+                  className={`mhz-td-fold-btn ${isCollapsed ? 'collapsed' : ''}`}
+                  title={isCollapsed ? "Unfold Section (Alt+→) / Unfold All (Alt+→×2)" : "Fold Section (Alt+←) / Fold All (Alt+←×2)"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleHeadingFold(block.id);
+                  }}
+                >
+                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                </div>
+              )}
               <span className="mhz-td-line-number">{idx + 1}</span>
               <div
                 className="mhz-td-grip"
@@ -1590,13 +1827,28 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
                       handleSelectBlock(block.id);
                     }}
                     onBlur={() => setFocusedBlockId(null)}
-                    onClick={() => {
+                    onClick={(e) => {
                       setFocusedBlockId(block.id);
-                      handleSelectBlock(block.id);
+                      handleSelectBlock(block.id, e);
                     }}
                     onMouseUp={() => handleBlockMouseUp(block.id)}
                     onContextMenu={(e) => handleBlockContextMenu(e, block.id)}
                   />
+
+                  {/* Heading Fold Indicator Pill */}
+                  {isHeading && isCollapsed && (
+                    <span
+                      className="mhz-td-fold-pill"
+                      contentEditable={false}
+                      title="Section folded. Click to unfold (Alt+→) / Unfold All (Alt+→×2)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleHeadingFold(block.id);
+                      }}
+                    >
+                      ···
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -1982,7 +2234,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         </div>
       )}
 
-      {/* Right-Click Grip Context Menu (Edit F2, Move Up, Move Down, Delete) */}
+      {/* Right-Click Grip Context Menu (Edit F2, Colors, Indent, Outdent, Move Up, Move Down, Delete) */}
       {gripMenuState && (
         <div
           className="mhz-td-context-menu mhz-td-grip-menu"
@@ -1990,7 +2242,9 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.preventDefault()}
         >
-          <div className="mhz-td-context-menu-title">Block Actions</div>
+          <div className="mhz-td-context-menu-title">
+            Block Actions {selectedBlockIds.size > 1 ? `(${selectedBlockIds.size} Selected)` : ''}
+          </div>
           <button
             className="mhz-td-context-menu-item"
             onClick={() => {
@@ -2002,6 +2256,42 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
             <span>{blocks.find(b => b.id === gripMenuState.blockId)?.isRaw ? 'Render Markdown' : 'Edit Raw Markdown'}</span>
             <span className="mhz-td-context-shortcut">F2</span>
           </button>
+          <button
+            className="mhz-td-context-menu-item"
+            onClick={() => {
+              const bId = gripMenuState.blockId;
+              const x = gripMenuState.x;
+              const y = gripMenuState.y;
+              setGripMenuState(null);
+              setContextMenuState({ x, y, blockId: bId });
+            }}
+          >
+            <Palette size={13} />
+            <span>Colors & Formatting</span>
+          </button>
+          <button
+            className="mhz-td-context-menu-item"
+            onClick={() => {
+              indentSelectedBlocks(1);
+              setGripMenuState(null);
+            }}
+          >
+            <ChevronRight size={13} />
+            <span>Indent</span>
+            <span className="mhz-td-context-shortcut">Tab</span>
+          </button>
+          <button
+            className="mhz-td-context-menu-item"
+            onClick={() => {
+              indentSelectedBlocks(-1);
+              setGripMenuState(null);
+            }}
+          >
+            <ChevronLeft size={13} />
+            <span>Outdent</span>
+            <span className="mhz-td-context-shortcut">Shift+Tab</span>
+          </button>
+          <div className="mhz-td-context-divider" />
           <button
             className="mhz-td-context-menu-item"
             onClick={() => {

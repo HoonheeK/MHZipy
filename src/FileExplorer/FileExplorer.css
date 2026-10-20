@@ -193,14 +193,16 @@
 .context-menu {
   position: fixed;
   background: #0f172a;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   z-index: 1000;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.75), 0 0 16px rgba(56, 189, 248, 0.15);
-  padding: 5px;
-  min-width: 190px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.15);
+  padding: 4px;
+  min-width: 195px;
   border-radius: 8px;
   color: var(--mhz-text);
   animation: contextFadeIn 0.12s ease-out;
+  max-height: calc(100vh - 20px);
+  overflow-y: auto;
 }
 
 @keyframes contextFadeIn {
@@ -209,16 +211,25 @@
 }
 
 .context-menu-item {
-  padding: 6px 10px;
+  padding: 5px 10px !important;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
-  border-radius: 5px;
+  border-radius: 4px;
   color: var(--mhz-text);
   transition: all 0.12s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.context-menu-item:last-child {
+  border-bottom: none;
+}
+
+.context-menu-item:has(+ .context-menu-separator) {
+  border-bottom: none;
 }
 
 .context-menu-item:hover:not(.disabled) {
@@ -241,8 +252,10 @@
 }
 
 .context-menu-separator {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  height: 1px;
+  background: rgba(255, 255, 255, 0.14);
   margin: 4px 2px;
+  border: none;
 }
 
 .shortcut {

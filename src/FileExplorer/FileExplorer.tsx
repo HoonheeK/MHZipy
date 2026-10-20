@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, forwardRef, useImperativeHandle } from "react";
 import { useTranslation } from "react-i18next";
 import { dirname, join } from '@tauri-apps/api/path';
 import { mkdir, rename } from '@tauri-apps/plugin-fs';
@@ -278,9 +278,11 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     onSaveConfig({ defaultPath: path });
   };
 
-  const handleAddToQuickAccess = (path: string) => {
-    if (!config.quickAccess.includes(path)) {
-      onSaveConfig({ quickAccess: [...config.quickAccess, path] });
+  const handleAddToQuickAccess = (paths: string | string[]) => {
+    const list = Array.isArray(paths) ? paths : [paths];
+    const newItems = list.filter(p => !config.quickAccess.includes(p));
+    if (newItems.length > 0) {
+      onSaveConfig({ quickAccess: [...config.quickAccess, ...newItems] });
     }
   };
 
@@ -626,30 +628,41 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     return checkPathPermission(contextMenu.path, config.editableFolders, config.readonlyFolders);
   }, [contextMenu, config.editableFolders, config.readonlyFolders]);
 
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (contextMenu && menuRef.current) {
+      const el = menuRef.current;
+      const rect = el.getBoundingClientRect();
+      const margin = 10;
+      let left = contextMenu.x;
+      let top = contextMenu.y;
+
+      if (left + rect.width > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - rect.width - margin);
+      }
+      if (top + rect.height > window.innerHeight - margin) {
+        top = Math.max(margin, window.innerHeight - rect.height - margin);
+      }
+
+      el.style.left = `${left}px`;
+      el.style.top = `${top}px`;
+    }
+  }, [contextMenu]);
+
   const getMenuPosition = () => {
     if (!contextMenu) return {};
     const { x, y } = contextMenu;
+    const margin = 10;
+    const left = Math.max(margin, Math.min(x, window.innerWidth - 200));
+    const top = Math.max(margin, Math.min(y, window.innerHeight - 350));
 
-    const style: any = {
-      position: 'fixed',
-      width: '180px',
-      fontSize: '12px',
+    return {
+      position: 'fixed' as const,
+      left: `${left}px`,
+      top: `${top}px`,
       zIndex: 1000,
     };
-
-    if (x + 180 > window.innerWidth) {
-      style.right = window.innerWidth - x;
-    } else {
-      style.left = x;
-    }
-
-    if (y + 250 > window.innerHeight) {
-      style.bottom = window.innerHeight - y;
-    } else {
-      style.top = y;
-    }
-
-    return style;
   };
 
   const handleQADragStart = (e: React.DragEvent, index: number) => {
@@ -955,10 +968,12 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
             onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
             usePdfWorker={config.usePdfWorker}
             pdfExportPath={pdfExportPath}
+            onSetDefault={handleSetDefault}
+            onAddToQuickAccess={handleAddToQuickAccess}
           />
         </section>
         {contextMenu && (
-          <div className="context-menu" style={getMenuPosition()}>
+          <div ref={menuRef} className="context-menu" style={getMenuPosition()}>
             {contextMenu.source === 'quickAccess' ? (
               <div className="context-menu-item delete" onClick={() => handleRemoveQuickAccess(contextMenu.path)}>
                 <span>{t('contextMenu.removeFromQuickAccess', { defaultValue: 'Remove from Quick Access' })}</span>

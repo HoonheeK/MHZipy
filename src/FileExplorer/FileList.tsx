@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { rename, mkdir, exists } from '@tauri-apps/plugin-fs';
+import { rename, mkdir, exists, writeTextFile } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 import ErrorDialog from './ErrorDialog';
 import { basename, dirname, join } from '@tauri-apps/api/path';
@@ -47,6 +47,8 @@ interface FileListProps {
   onRefresh?: () => void;
   usePdfWorker?: boolean;
   pdfExportPath?: string;
+  onSetDefault?: (path: string) => void;
+  onAddToQuickAccess?: (paths: string | string[]) => void;
 }
 
 interface FileData {
@@ -108,7 +110,9 @@ export default function FileList({
   onColumnSettingsChange,
   onRefresh,
   usePdfWorker = true,
-  pdfExportPath
+  pdfExportPath,
+  onSetDefault,
+  onAddToQuickAccess
 }: FileListProps) {
   const { t } = useTranslation();
   const [files, setFiles] = useState<FileData[]>([]);
@@ -740,7 +744,7 @@ export default function FileList({
   }, [isSelecting, sortedFiles, onSelectFiles]);
 
   const handleRename = async () => {
-    if (!renamingFile || !renameText) {
+    if (!renamingFile || !renameText.trim()) {
       setRenamingFile(null);
       return;
     }
@@ -751,12 +755,25 @@ export default function FileList({
     }
     try {
       const oldPath = renamingFile;
-      const newPath = await join(await dirname(oldPath), renameText);
-      await rename(oldPath, newPath);
-      setVersion(v => v + 1);
-      if (onRefresh) onRefresh();
+      const targetName = renameText.trim();
+      const newPath = await join(await dirname(oldPath), targetName);
+      if (oldPath !== newPath) {
+        const isConflict = files.some(f => f.path.toLowerCase() !== oldPath.toLowerCase() && f.name.toLowerCase() === targetName.toLowerCase());
+        if (isConflict) {
+          showMessage(t('explorer.error', { defaultValue: 'Error' }), t('fileList.nameConflict', { defaultValue: 'An item with that name already exists.' }));
+          return;
+        }
+        await rename(oldPath, newPath);
+        onSelectFiles(new Set([newPath]));
+        setVersion(v => v + 1);
+        if (onRefresh) onRefresh();
+      }
     } catch (error) {
       console.error('Failed to rename:', error);
+      setErrorDialogTitle(t('explorer.error', { defaultValue: 'Error' }));
+      setErrorDialogMessage(t('fileList.renameFailed', { defaultValue: 'Failed to rename item.' }));
+      setErrorDialogDetails(String(error));
+      setErrorDialogOpen(true);
     } finally {
       setRenamingFile(null);
     }
@@ -774,8 +791,8 @@ export default function FileList({
     let newName = baseName;
     let counter = 2;
 
-    const existingNames = new Set(files.map(f => f.name));
-    while (existingNames.has(newName)) {
+    const existingNames = new Set(files.map(f => f.name.toLowerCase()));
+    while (existingNames.has(newName.toLowerCase())) {
       newName = `${baseName} (${counter})`;
       counter++;
     }
@@ -783,20 +800,87 @@ export default function FileList({
     try {
       const newPath = await join(path, newName);
       await mkdir(newPath);
-      setVersion(v => v + 1); // Trigger refresh
-      if (onRefresh) onRefresh();
-      // Auto-select and enter rename mode for the new folder
+      const newFolderData: FileData = {
+        name: newName,
+        path: newPath,
+        size: 0,
+        extension: '',
+        type: 'File folder',
+        mtime: new Date(),
+        birthtime: new Date(),
+        atime: new Date(),
+        readonly: false,
+        isDirectory: true,
+      };
+      setFiles(prev => [...prev, newFolderData]);
       setRenamingFile(newPath);
       setRenameText(newName);
       onSelectFiles(new Set([newPath]));
+      setVersion(v => v + 1); // Trigger refresh
+      if (onRefresh) onRefresh();
     } catch (error) {
       console.error('Failed to create folder:', error);
-      setErrorDialogTitle('Create Folder Failed');
-      setErrorDialogMessage('Could not create folder.');
+      setErrorDialogTitle(t('explorer.error', { defaultValue: 'Error' }));
+      setErrorDialogMessage(t('fileList.createFolderFailed', { defaultValue: 'Could not create folder.' }));
       setErrorDialogDetails(String(error));
       setErrorDialogOpen(true);
     }
   };
+
+  const handleCreateFile = async (extension: 'md' | 'txt') => {
+    if (!path) return;
+    if (!checkPathPermission(path, editableFolders, readonlyFolders)) {
+      showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
+      return;
+    }
+    setContextMenu(null);
+
+    const prefix = extension === 'md' ? 'New Document' : 'New Text Document';
+    let newName = `${prefix}.${extension}`;
+    let counter = 2;
+
+    const existingNames = new Set(files.map(f => f.name.toLowerCase()));
+    while (existingNames.has(newName.toLowerCase())) {
+      newName = `${prefix} (${counter}).${extension}`;
+      counter++;
+    }
+
+    try {
+      const newPath = await join(path, newName);
+      await writeTextFile(newPath, '');
+      const newFileData: FileData = {
+        name: newName,
+        path: newPath,
+        size: 0,
+        extension: extension,
+        type: extension === 'md' ? 'MD File' : 'TXT File',
+        mtime: new Date(),
+        birthtime: new Date(),
+        atime: new Date(),
+        readonly: false,
+        isDirectory: false,
+      };
+      setFiles(prev => [...prev, newFileData]);
+      setRenamingFile(newPath);
+      setRenameText(newName);
+      onSelectFiles(new Set([newPath]));
+      setVersion(v => v + 1); // Trigger refresh
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error('Failed to create file:', error);
+      setErrorDialogTitle(t('explorer.error', { defaultValue: 'Error' }));
+      setErrorDialogMessage(t('fileList.createFileFailed', { defaultValue: 'Could not create file.' }));
+      setErrorDialogDetails(String(error));
+      setErrorDialogOpen(true);
+    }
+  };
+
+  useEffect(() => {
+    if (renamingFile) {
+      const el = fileRefs.current.get(renamingFile);
+      el?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [renamingFile]);
 
   const canWriteToCurrentPath = useMemo(() => {
     if (!path) return false; // Disable in search view
@@ -1580,31 +1664,41 @@ export default function FileList({
     setTimeout(() => document.body.removeChild(dragGhost), 0);
   };
 
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (contextMenu && menuRef.current) {
+      const el = menuRef.current;
+      const rect = el.getBoundingClientRect();
+      const margin = 10;
+      let left = contextMenu.x;
+      let top = contextMenu.y;
+
+      if (left + rect.width > window.innerWidth - margin) {
+        left = Math.max(margin, window.innerWidth - rect.width - margin);
+      }
+      if (top + rect.height > window.innerHeight - margin) {
+        top = Math.max(margin, window.innerHeight - rect.height - margin);
+      }
+
+      el.style.left = `${left}px`;
+      el.style.top = `${top}px`;
+    }
+  }, [contextMenu]);
+
   const getMenuPosition = () => {
     if (!contextMenu) return {};
     const { x, y } = contextMenu;
+    const margin = 10;
+    const left = Math.max(margin, Math.min(x, window.innerWidth - 200));
+    const top = Math.max(margin, Math.min(y, window.innerHeight - 350));
 
-    const style: any = {
-      position: 'fixed',
-      width: '180px',
-      fontSize: '12px',
+    return {
+      position: 'fixed' as const,
+      left: `${left}px`,
+      top: `${top}px`,
       zIndex: 1000,
     };
-
-    // 화면 오른쪽/아래쪽 경계를 넘어가면 반대 방향으로 펼침
-    if (x + 180 > window.innerWidth) {
-      style.right = window.innerWidth - x;
-    } else {
-      style.left = x;
-    }
-
-    if (y + 250 > window.innerHeight) {
-      style.bottom = window.innerHeight - y;
-    } else {
-      style.top = y;
-    }
-
-    return style;
   };
 
   // path가 없고 filesOverride도 없으면 안내 메시지
@@ -1863,10 +1957,42 @@ export default function FileList({
                 {activeColumnSettings.map(col => col.visible && (
                   <div key={col.key} style={{ ...cellStyle, width: columnWidths[col.key], color: col.key === 'name' ? 'inherit' : '#94a3b8' }}>
                     {col.key === 'name' && renamingFile === file.path ? (
-                      <input autoFocus value={renameText} onChange={(e) => setRenameText(e.target.value)}
-                        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') handleRename(); if (e.key === 'Escape') setRenamingFile(null); }}
-                        onBlur={handleRename} onClick={(e) => e.stopPropagation()} style={{ flex: 1, backgroundColor: '#0f172a', color: '#f8fafc', border: '1px solid #38bdf8', padding: '2px 4px', borderRadius: '4px' }}
-                      />
+                      <>
+                        <span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : (openingFiles.has(file.path) ? '⏳' : '📄')}</span>
+                        <input
+                          autoFocus
+                          value={renameText}
+                          onChange={(e) => setRenameText(e.target.value)}
+                          onFocus={(e) => {
+                            const target = e.target;
+                            const selectPart = () => {
+                              const dotIndex = target.value.lastIndexOf('.');
+                              if (dotIndex > 0 && !file.isDirectory) {
+                                target.setSelectionRange(0, dotIndex);
+                              } else {
+                                target.select();
+                              }
+                            };
+                            selectPart();
+                            requestAnimationFrame(selectPart);
+                          }}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Enter') handleRename();
+                            if (e.key === 'Escape') setRenamingFile(null);
+                          }}
+                          onBlur={handleRename}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            flex: 1,
+                            backgroundColor: '#0f172a',
+                            color: '#f8fafc',
+                            border: '1px solid #38bdf8',
+                            padding: '2px 4px',
+                            borderRadius: '4px'
+                          }}
+                        />
+                      </>
                     ) : renderCell(file, col.key)}
                   </div>
                 ))}
@@ -1905,7 +2031,7 @@ export default function FileList({
       </div>
 
       {contextMenu && (
-        <div className="context-menu" style={getMenuPosition()}>
+        <div ref={menuRef} className="context-menu" style={getMenuPosition()}>
           {contextMenu.type === 'header' && (
             <>
               <div style={{ padding: '4px 10px', fontWeight: 'bold', color: '#666', borderBottom: '1px solid #eee', marginBottom: '4px' }}>Columns</div>
@@ -1969,8 +2095,25 @@ export default function FileList({
                 <span>{t('contextMenu.openInExplorer')}</span>
               </div>
               {selectedFiles.size === 1 && (sortedFiles.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory || filesOverride?.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory) && (
-                <div className="context-menu-item" onClick={() => handleCopyFileNames(Array.from(selectedFiles)[0])} style={{ padding: '2px 10px' }}>
-                  <span>{t('contextMenu.copyFileNames', 'Copy File Names')}</span>
+                <>
+                  <div className="context-menu-item" onClick={() => handleCopyFileNames(Array.from(selectedFiles)[0])} style={{ padding: '2px 10px' }}>
+                    <span>{t('contextMenu.copyFileNames', 'Copy File Names')}</span>
+                  </div>
+                  {onSetDefault && (
+                    <div className="context-menu-item" onClick={() => { onSetDefault(Array.from(selectedFiles)[0]); setContextMenu(null); }} style={{ padding: '2px 10px' }}>
+                      <span>{t('contextMenu.setAsDefaultFolder', { defaultValue: 'Set as Default Folder' })}</span>
+                    </div>
+                  )}
+                  {onAddToQuickAccess && (
+                    <div className="context-menu-item" onClick={() => { onAddToQuickAccess(Array.from(selectedFiles)[0]); setContextMenu(null); }} style={{ padding: '2px 10px' }}>
+                      <span>{t('contextMenu.addToQuickAccess', { defaultValue: 'Add to Quick Access' })}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {selectedFiles.size > 1 && Array.from(selectedFiles).every(p => sortedFiles.find(f => f.path === p)?.isDirectory || filesOverride?.find(f => f.path === p)?.isDirectory) && onAddToQuickAccess && (
+                <div className="context-menu-item" onClick={() => { onAddToQuickAccess(Array.from(selectedFiles)); setContextMenu(null); }} style={{ padding: '2px 10px' }}>
+                  <span>{t('contextMenu.addToQuickAccess', { defaultValue: 'Add to Quick Access' })}</span>
                 </div>
               )}
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.zip') && (
@@ -2006,6 +2149,12 @@ export default function FileList({
               <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={canWriteToCurrentPath ? handleCreateFolder : undefined} style={{ padding: '2px 10px' }}>
                 <span>{t('contextMenu.createFolder')}</span>
               </div>
+              <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={canWriteToCurrentPath ? () => handleCreateFile('md') : undefined} style={{ padding: '2px 10px' }}>
+                <span>{t('contextMenu.createMarkdownFile', { defaultValue: 'Create Markdown File' })}</span>
+              </div>
+              <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={canWriteToCurrentPath ? () => handleCreateFile('txt') : undefined} style={{ padding: '2px 10px' }}>
+                <span>{t('contextMenu.createTextFile', { defaultValue: 'Create Text File' })}</span>
+              </div>
               {canPaste && (
                 <div className={`context-menu-item ${!canWriteToCurrentPath ? 'disabled' : ''}`} onClick={() => {
                   if (canWriteToCurrentPath) onPaste(path);
@@ -2013,9 +2162,6 @@ export default function FileList({
                   <span>{t('contextMenu.paste')}</span> <span className="shortcut">Ctrl+V</span>
                 </div>
               )}
-              <div className="context-menu-item" onClick={() => handleCopyFileNames(path)} style={{ padding: '2px 10px' }}>
-                <span>{t('contextMenu.copyFileNames', 'Copy File Names')}</span>
-              </div>
             </>
           )}
         </div>

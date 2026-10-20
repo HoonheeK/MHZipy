@@ -122,6 +122,8 @@
     "openInExplorer": "Open in File Explorer",
     "extractHere": "Extract Here",
     "createFolder": "Create Folder",
+    "createMarkdownFile": "Create Markdown File",
+    "createTextFile": "Create Text File",
     "paste": "Paste",
     "removeFromQuickAccess": "Remove from Quick Access",
     "setAsDefaultFolder": "Set as Default Folder",

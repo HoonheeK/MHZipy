@@ -124,6 +124,8 @@
     "openInExplorer": "파일 탐색기에서 열기",
     "extractHere": "여기에 압축 풀기",
     "createFolder": "폴더 생성",
+    "createMarkdownFile": "Markdown 파일 생성",
+    "createTextFile": "텍스트 파일 생성",
     "paste": "붙여넣기",
     "removeFromQuickAccess": "빠른 실행에서 제거",
     "setAsDefaultFolder": "기본 폴더로 설정",
