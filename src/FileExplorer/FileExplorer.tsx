@@ -24,6 +24,7 @@ export interface FileExplorerRef {
   compress: () => void;
   extract: () => void;
   newFolder: () => void;
+  newMdFile: () => void;
   copy: () => void;
   paste: () => void;
   deleteSelected: () => void;
@@ -146,14 +147,12 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
 
 
   useEffect(() => {
-
-    if (externalPath && externalPath !== selected) {
-
-      setSelected(externalPath);
-      setSelectedPaths(new Set([externalPath]));
-
+    if (externalPath) {
+      if (externalPath !== selected) {
+        setSelected(externalPath);
+        setSelectedPaths(new Set([externalPath]));
+      }
       if (externalSelect) {
-
         setFilesSelected(new Set([externalSelect]));
       } else {
         setFilesSelected(new Set());
@@ -200,6 +199,9 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     },
     newFolder: () => {
       handleCreateFolder(selected);
+    },
+    newMdFile: () => {
+      window.dispatchEvent(new CustomEvent('mhz-file-action', { detail: { action: 'new-md-file' } }));
     },
     copy: () => {
       const targetPaths = filesSelected.size > 0 ? Array.from(filesSelected) : Array.from(selectedPaths);
@@ -618,6 +620,21 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     }
   };
 
+  const handleCreateMdFile = async (parentPath: string) => {
+    if (!checkPathPermission(parentPath, config.editableFolders, config.readonlyFolders)) {
+      showMessage('Permission Error', `You do not have permission to create files in '${parentPath}'.`);
+      return;
+    }
+    setContextMenu(null);
+    if (selected !== parentPath) {
+      setSelected(parentPath);
+      setSelectedPaths(new Set([parentPath]));
+    }
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('mhz-file-action', { detail: { action: 'new-md-file' } }));
+    }, 50);
+  };
+
   const canWriteToSelectedPaths = useMemo(() => {
     if (selectedPaths.size === 0) return false;
     return Array.from(selectedPaths).every(p => checkPathPermission(p, config.editableFolders, config.readonlyFolders));
@@ -694,6 +711,13 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
         return;
       }
 
+      if (e.key === 'Escape') {
+        if (filesSelected.size > 0) {
+          setFilesSelected(new Set());
+        }
+        return;
+      }
+
       const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
       if (isCtrlOrMeta && e.key.toLowerCase() === 'c') {
@@ -728,6 +752,12 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
         if (activePane === 'tree' && selectedPaths.size > 0) {
           handleCompress(Array.from(selectedPaths));
         }
+      } else if (isCtrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('mhz-file-action', { detail: { action: 'new-md-file' } }));
+      } else if (e.key === 'F5' || (isCtrlOrMeta && e.key.toLowerCase() === 'r')) {
+        e.preventDefault();
+        setRefreshTrigger((p) => p + 1);
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -873,6 +903,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                 onCancelRename={handleCancelTreeRename}
                 showMessage={showMessage}
                 isRoot
+                depth={0}
               />
             ) : (
               config.quickAccess
@@ -889,6 +920,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                     key={qaPath}
                     path={qaPath}
                     name={qaPath.split(/[/\\]/).filter(Boolean).pop() || qaPath}
+                    depth={0}
                     onSelect={handleTreeSelect}
                     activePath={selected}
                     selectedPaths={selectedPaths}
@@ -988,6 +1020,9 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                 </div>
                 <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handleCreateFolder(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
                   <span>{t('contextMenu.createFolder', { defaultValue: 'Create Folder' })}</span>
+                </div>
+                <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handleCreateMdFile(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>
+                  <span>{t('contextMenu.createMarkdownFile', { defaultValue: 'Create Markdown File' })}</span>
                 </div>
                 {canPasteVisible && (
                   <div className={`context-menu-item ${!canWriteToContextMenuPath ? 'disabled' : ''}`} onClick={canWriteToContextMenuPath ? () => handlePaste(contextMenu.path) : undefined} style={{ padding: '2px 10px' }}>

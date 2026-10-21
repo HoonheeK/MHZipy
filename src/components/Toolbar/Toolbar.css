@@ -459,7 +459,7 @@
   }
 }
 
-/* 화면이 줄어들 때 압축하기/풀기, 폴더 만들기, Copy, Paste, Delete 액션 버튼 숨김 */
+/* 화면이 줄어들 때 압축하기/풀기, 폴더 만들기, New MD File 액션 버튼 숨김 */
 @media (max-width: 1100px) {
   .mhz-action-buttons {
     display: none !important;

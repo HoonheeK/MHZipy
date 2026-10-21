@@ -21,6 +21,9 @@ import {
   Quote,
   Minus,
   AlignLeft,
+  AlignCenter,
+  AlignRight,
+  CornerDownLeft,
   Table as TableIcon,
   Palette,
   Bold,
@@ -35,7 +38,8 @@ import {
   BlockType,
   generateId,
   getBlockClassName,
-  htmlToMarkdown
+  htmlToMarkdown,
+  serializeBlocksToMarkdown
 } from './markdownBlockUtils';
 import { marked } from 'marked';
 
@@ -82,6 +86,8 @@ export const ContentBlock = React.memo<{
   onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
   onContextMenu?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onMouseUp?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onMouseDown?: (e: React.MouseEvent<HTMLDivElement>) => void;
+  onMouseMove?: (e: React.MouseEvent<HTMLDivElement>) => void;
 }>(({
   id,
   dataBlockId,
@@ -95,7 +101,9 @@ export const ContentBlock = React.memo<{
   onBlur,
   onClick,
   onContextMenu,
-  onMouseUp
+  onMouseUp,
+  onMouseDown,
+  onMouseMove
 }) => {
   const contentEditableRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +130,8 @@ export const ContentBlock = React.memo<{
       onClick={onClick}
       onContextMenu={onContextMenu}
       onMouseUp={onMouseUp}
+      onMouseDown={onMouseDown}
+      onMouseMove={onMouseMove}
     />
   );
 });
@@ -218,6 +228,55 @@ const focusBlock = (blockId: string, caretOffset: number = 0) => {
       sel?.addRange(range);
     } catch {}
   }, 10);
+};
+
+// Focus a specific table cell element and select contents or place caret
+const focusCell = (cellElement: HTMLElement, mode: 'all' | 'start' | 'end' | boolean = 'all') => {
+  cellElement.focus();
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.selectNodeContents(cellElement);
+  if (mode === 'start') {
+    range.collapse(true);
+  } else if (mode === 'end' || mode === false) {
+    range.collapse(false);
+  }
+  sel.removeAllRanges();
+  sel.addRange(range);
+};
+
+// Get caret position information inside an editable table cell
+const getCellCaretInfo = (cell: HTMLElement) => {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) {
+    return { offset: 0, length: 0, isAtStart: true, isAtEnd: true, hasSelection: false };
+  }
+
+  if (!sel.isCollapsed) {
+    return { offset: 0, length: 0, isAtStart: false, isAtEnd: false, hasSelection: true };
+  }
+
+  const text = (cell.textContent || '').replace(/\u200B/g, '');
+  const length = text.length;
+
+  if (length === 0) {
+    return { offset: 0, length: 0, isAtStart: true, isAtEnd: true, hasSelection: false };
+  }
+
+  const range = sel.getRangeAt(0);
+  const preRange = range.cloneRange();
+  preRange.selectNodeContents(cell);
+  preRange.setEnd(range.startContainer, range.startOffset);
+  const offset = (preRange.toString() || '').replace(/\u200B/g, '').length;
+
+  return {
+    offset,
+    length,
+    isAtStart: offset === 0,
+    isAtEnd: offset >= length,
+    hasSelection: false
+  };
 };
 
 // Preset Color Palettes (identical to TreeDiadev's MarkdownComp)
@@ -536,6 +595,16 @@ export interface SlashMenuState {
   filterText: string;
 }
 
+export interface TableMenuState {
+  x: number;
+  y: number;
+  blockId: string;
+  rowIndex: number;
+  colIndex: number;
+  rowIndices: number[];
+  colIndices: number[];
+}
+
 export interface TreeEditableCellProps {
   blocks: Block[];
   onUpdateBlocks: (newBlocks: Block[]) => void;
@@ -564,7 +633,9 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
   const [menuPlacement, setMenuPlacement] = useState<'bottom' | 'top'>('bottom');
   const [colorNav, setColorNav] = useState<{ col: 'text' | 'bg'; row: number }>({ col: 'text', row: 0 });
   const [contextMenuState, setContextMenuState] = useState<{ x: number; y: number; blockId: string } | null>(null);
+  const [tableMenuState, setTableMenuState] = useState<TableMenuState | null>(null);
   const savedSelectionRef = useRef<{ range: Range; blockId: string } | null>(null);
+  const isShiftSelectingRef = useRef<boolean>(false);
 
   const blocksRef = useRef<Block[]>(blocks);
   blocksRef.current = blocks;
@@ -795,7 +866,124 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     };
     setSlashMenuState(null);
     onUpdateBlocks(next);
-    focusBlock(blockId, 0);
+    setTimeout(() => {
+      const el = document.getElementById(`edit-${blockId}`);
+      const firstCell = el?.querySelector('th, td') as HTMLElement | null;
+      if (firstCell) {
+        focusCell(firstCell, 'all');
+      } else {
+        focusBlock(blockId, 0);
+      }
+    }, 20);
+  }, [onUpdateBlocks]);
+
+  // Handle Table row/column addition, deletion, and alignment (supports multi-cell selections)
+  const handleTableAction = useCallback((
+    blockId: string,
+    action: 'add_row_above' | 'add_row_below' | 'del_row' | 'add_col_left' | 'add_col_right' | 'del_col' | 'add_row_bottom' | 'del_row_bottom' | 'add_col_right_btn' | 'del_col_right_btn' | 'align_col_left' | 'align_col_center' | 'align_col_right',
+    targetRow?: number,
+    targetCol?: number,
+    targetRows?: number[],
+    targetCols?: number[]
+  ) => {
+    const current = blocksRef.current;
+    const idx = current.findIndex(b => b.id === blockId);
+    if (idx === -1) return;
+
+    const container = document.createElement('div');
+    container.innerHTML = current[idx].html;
+    const table = container.querySelector('table');
+    if (!table) return;
+
+    const rows = Array.from(table.querySelectorAll('tr'));
+    if (rows.length === 0) return;
+    const colCount = Math.max(1, rows[0].querySelectorAll('th, td').length);
+
+    if (action === 'add_row_above' || action === 'add_row_below' || action === 'add_row_bottom') {
+      const newTr = document.createElement('tr');
+      for (let c = 0; c < colCount; c++) {
+        const newTd = document.createElement('td');
+        newTd.textContent = 'Item';
+        newTr.appendChild(newTd);
+      }
+      if (action === 'add_row_above' && targetRow !== undefined && targetRow >= 0 && targetRow < rows.length) {
+        rows[targetRow].parentElement?.insertBefore(newTr, rows[targetRow]);
+      } else if (action === 'add_row_below' && targetRow !== undefined && targetRow >= 0 && targetRow < rows.length) {
+        const next = rows[targetRow].nextElementSibling;
+        if (next) rows[targetRow].parentElement?.insertBefore(newTr, next);
+        else rows[targetRow].parentElement?.appendChild(newTr);
+      } else {
+        const tbody = table.querySelector('tbody') || table;
+        tbody.appendChild(newTr);
+      }
+    } else if (action === 'del_row' || action === 'del_row_bottom') {
+      if (rows.length <= 1) return; // Keep at least 1 row
+      const rowsToDelete = targetRows && targetRows.length > 0
+        ? [...targetRows].sort((a, b) => b - a)
+        : (targetRow !== undefined && targetRow >= 0 && targetRow < rows.length ? [targetRow] : [rows.length - 1]);
+
+      for (const rIdx of rowsToDelete) {
+        const currRows = Array.from(table.querySelectorAll('tr'));
+        if (currRows.length > 1 && rIdx >= 0 && rIdx < currRows.length) {
+          currRows[rIdx].remove();
+        }
+      }
+    } else if (action === 'add_col_left' || action === 'add_col_right' || action === 'add_col_right_btn') {
+      const insertIdx = targetCol !== undefined ? (action === 'add_col_right' ? targetCol + 1 : targetCol) : colCount;
+      rows.forEach((tr, rIdx) => {
+        const cells = Array.from(tr.querySelectorAll('th, td'));
+        const isHeader = rIdx === 0 || tr.parentElement?.tagName.toLowerCase() === 'thead';
+        const newCell = document.createElement(isHeader ? 'th' : 'td');
+        newCell.textContent = isHeader ? `Header ${cells.length + 1}` : 'Item';
+        if (insertIdx < cells.length) {
+          tr.insertBefore(newCell, cells[insertIdx]);
+        } else {
+          tr.appendChild(newCell);
+        }
+      });
+    } else if (action === 'del_col' || action === 'del_col_right_btn') {
+      if (colCount <= 1) return; // Keep at least 1 column
+      const colsToDelete = targetCols && targetCols.length > 0
+        ? [...targetCols].sort((a, b) => b - a)
+        : (targetCol !== undefined ? [targetCol] : [colCount - 1]);
+
+      for (const cIdx of colsToDelete) {
+        const currColCount = Math.max(1, table.querySelectorAll('tr:first-child > *').length);
+        if (currColCount > 1) {
+          const currRows = Array.from(table.querySelectorAll('tr'));
+          currRows.forEach(tr => {
+            const cells = Array.from(tr.querySelectorAll('th, td'));
+            if (cIdx < cells.length) {
+              cells[cIdx].remove();
+            }
+          });
+        }
+      }
+    } else if (action === 'align_col_left' || action === 'align_col_center' || action === 'align_col_right') {
+      const alignVal = action === 'align_col_center' ? 'center' : (action === 'align_col_right' ? 'right' : 'left');
+      const colsToAlign = targetCols && targetCols.length > 0
+        ? targetCols
+        : (targetCol !== undefined ? [targetCol] : [0]);
+
+      rows.forEach(tr => {
+        const cells = Array.from(tr.querySelectorAll('th, td'));
+        colsToAlign.forEach(cIdx => {
+          if (cIdx >= 0 && cIdx < cells.length) {
+            const targetCell = cells[cIdx] as HTMLElement;
+            targetCell.setAttribute('align', alignVal);
+            targetCell.style.textAlign = alignVal;
+          }
+        });
+      });
+    }
+
+    const nextBlocks = [...current];
+    nextBlocks[idx] = {
+      ...current[idx],
+      html: container.innerHTML
+    };
+    onUpdateBlocks(nextBlocks);
+    setTableMenuState(null);
   }, [onUpdateBlocks]);
 
   // Handle saving selection on mouse up
@@ -812,8 +1000,156 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     }
   }, []);
 
-  // Handle right-click context menu on selected text or multiple blocks
+  const isResizingTableRef = useRef<boolean>(false);
+
+  // Table column width resize hover detection
+  const handleBlockMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>, _blockId: string) => {
+    if (isResizingTableRef.current) return;
+    const target = (e.target as HTMLElement).closest('th, td') as HTMLElement | null;
+    const table = (e.target as HTMLElement).closest('table');
+    if (!target || !table) return;
+
+    const rect = target.getBoundingClientRect();
+    const isRightBorder = Math.abs(e.clientX - rect.right) <= 6;
+    if (isRightBorder) {
+      target.style.cursor = 'col-resize';
+    } else {
+      target.style.cursor = '';
+    }
+  }, []);
+
+  // Table column width resize drag start
+  const handleBlockMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>, blockId: string) => {
+    if (e.shiftKey) {
+      e.preventDefault();
+      handleSelectBlock(blockId, { shiftKey: true });
+      return;
+    }
+
+    const target = (e.target as HTMLElement).closest('th, td') as HTMLTableCellElement | null;
+    const table = (e.target as HTMLElement).closest('table');
+    if (!target || !table) return;
+
+    const rect = target.getBoundingClientRect();
+    const isRightBorder = Math.abs(e.clientX - rect.right) <= 6;
+    if (!isRightBorder) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    isResizingTableRef.current = true;
+    const startX = e.clientX;
+    const startWidth = rect.width;
+    const colIndex = target.cellIndex;
+
+    document.body.style.cursor = 'col-resize';
+    target.classList.add('mhz-td-col-resizing');
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
+      const diff = moveEvent.clientX - startX;
+      const newWidth = Math.max(45, Math.round(startWidth + diff));
+
+      const allThs = Array.from(table.querySelectorAll('th'));
+      if (colIndex < allThs.length) {
+        allThs[colIndex].style.width = `${newWidth}px`;
+        allThs[colIndex].style.minWidth = `${newWidth}px`;
+      } else {
+        const firstRowCells = table.querySelectorAll('tr:first-child > *');
+        if (firstRowCells[colIndex]) {
+          (firstRowCells[colIndex] as HTMLElement).style.width = `${newWidth}px`;
+          (firstRowCells[colIndex] as HTMLElement).style.minWidth = `${newWidth}px`;
+        }
+      }
+    };
+
+    const onMouseUp = () => {
+      isResizingTableRef.current = false;
+      document.body.style.cursor = '';
+      target.classList.remove('mhz-td-col-resizing');
+      target.style.cursor = '';
+
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+
+      const updatedHtml = (table.parentElement?.innerHTML || table.outerHTML);
+      const current = blocksRef.current;
+      const idx = current.findIndex(b => b.id === blockId);
+      if (idx !== -1 && updatedHtml) {
+        const next = [...current];
+        next[idx] = { ...next[idx], html: updatedHtml };
+        onUpdateBlocks(next);
+      }
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [onUpdateBlocks]);
+
+  // Handle right-click context menu on selected text, table cells, or multiple blocks
   const handleBlockContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>, blockId: string) => {
+    // 1. Check if right-clicking inside a table cell
+    const currentBlocks = blocksRef.current;
+    const targetBlock = currentBlocks.find(b => b.id === blockId);
+    const cell = (e.target as HTMLElement).closest('td, th') as HTMLTableCellElement | null;
+    const table = (e.target as HTMLElement).closest('table');
+
+    if (targetBlock && targetBlock.type === 'table' && cell && table) {
+      e.preventDefault();
+      e.stopPropagation();
+      const tr = cell.closest('tr');
+      const allRows = Array.from(table.querySelectorAll('tr'));
+      const rowIndex = tr ? allRows.indexOf(tr) : 0;
+      const cellIndex = cell.cellIndex;
+
+      // Detect multi-cell selection if user dragged/selected across multiple cells
+      let targetCells: HTMLTableCellElement[] = [cell];
+      const sel = window.getSelection();
+      const currentRange = (sel && sel.rangeCount > 0 && !sel.isCollapsed)
+        ? sel.getRangeAt(0)
+        : (savedSelectionRef.current?.blockId === blockId ? savedSelectionRef.current.range : null);
+
+      if (currentRange && table.contains(currentRange.commonAncestorContainer)) {
+        const allCells = Array.from(table.querySelectorAll('th, td')) as HTMLTableCellElement[];
+        const intersecting = allCells.filter(c => {
+          try {
+            return currentRange.intersectsNode(c);
+          } catch {
+            return false;
+          }
+        });
+        if (intersecting.length > 1) {
+          targetCells = intersecting;
+        }
+      }
+
+      const rowIndices = Array.from(new Set(targetCells.map(c => {
+        const r = c.closest('tr');
+        return r ? allRows.indexOf(r) : -1;
+      }))).filter(r => r !== -1).sort((a, b) => a - b);
+
+      const colIndices = Array.from(new Set(targetCells.map(c => c.cellIndex))).sort((a, b) => a - b);
+
+      const menuWidth = 220;
+      const menuHeight = 320;
+      const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
+      const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
+
+      setContextMenuState(null);
+      setGripMenuState(null);
+      setTableMenuState({
+        x,
+        y,
+        blockId,
+        rowIndex,
+        colIndex: cellIndex,
+        rowIndices: rowIndices.length > 0 ? rowIndices : [rowIndex],
+        colIndices: colIndices.length > 0 ? colIndices : [cellIndex]
+      });
+      return;
+    }
+
+    // 2. Normal text selection or multi-block context menu
     const sel = window.getSelection();
     let text = sel ? sel.toString().trim() : '';
     if (!text && savedSelectionRef.current && savedSelectionRef.current.blockId === blockId) {
@@ -832,6 +1168,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       const menuHeight = 220;
       const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
       const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
+      setTableMenuState(null);
       setContextMenuState({ x, y, blockId });
     }
   }, [selectedBlockIds]);
@@ -846,6 +1183,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       if (!target.closest('.mhz-td-context-menu')) {
         setContextMenuState(null);
         setGripMenuState(null);
+        setTableMenuState(null);
       }
     };
     document.addEventListener('mousedown', handleDocClick);
@@ -914,19 +1252,24 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
   }, [onUpdateBlocks, slashMenuState]);
 
   // Select block helper (supports Shift range select and Ctrl toggle select)
-  const handleSelectBlock = useCallback((blockId: string, e?: React.MouseEvent) => {
+  const handleSelectBlock = useCallback((blockId: string, e?: React.MouseEvent | { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }) => {
     const current = blocksRef.current;
-    if (e?.shiftKey && lastAnchorBlockId) {
-      const idx1 = current.findIndex(b => b.id === lastAnchorBlockId);
+    if (e?.shiftKey) {
+      const anchorId = lastAnchorBlockId || focusedBlockId || current[0]?.id;
+      const idx1 = current.findIndex(b => b.id === anchorId);
       const idx2 = current.findIndex(b => b.id === blockId);
       if (idx1 !== -1 && idx2 !== -1) {
         const start = Math.min(idx1, idx2);
         const end = Math.max(idx1, idx2);
         const newSet = new Set<string>();
         for (let i = start; i <= end; i++) {
-          newSet.add(current[i].id);
+          if (!hiddenBlockIds.has(current[i].id)) {
+            newSet.add(current[i].id);
+          }
         }
         setSelectedBlockIds(newSet);
+        setFocusedBlockId(blockId);
+        window.getSelection()?.removeAllRanges();
         return;
       }
     }
@@ -939,12 +1282,14 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         return next.size > 0 ? next : new Set([blockId]);
       });
       setLastAnchorBlockId(blockId);
+      setFocusedBlockId(blockId);
       return;
     }
 
     setSelectedBlockIds(new Set([blockId]));
     setLastAnchorBlockId(blockId);
-  }, [lastAnchorBlockId]);
+    setFocusedBlockId(blockId);
+  }, [lastAnchorBlockId, focusedBlockId, hiddenBlockIds]);
 
   // Multi-block indent/outdent helper (Tab / Shift+Tab)
   const indentSelectedBlocks = useCallback((direction: 1 | -1) => {
@@ -952,14 +1297,51 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     const targetIds = selectedBlockIds.size > 0 ? selectedBlockIds : (focusedBlockId ? new Set([focusedBlockId]) : new Set<string>());
     if (targetIds.size === 0) return;
 
+    const activeEl = focusedBlockId ? document.getElementById(`edit-${focusedBlockId}`) : null;
+    const caretOffset = activeEl ? getCaretOffset(activeEl) : 0;
+
     const newBlocks = current.map(b => {
       if (targetIds.has(b.id)) {
-        const nextIndent = Math.max(0, Math.min(6, b.indent + direction));
-        return { ...b, indent: nextIndent };
+        if (direction === 1) {
+          // If no Turn into element is applied (plain paragraph) -> turn into Unordered List (ul) at CURRENT indent (no jump!)
+          if (b.type === 'paragraph') {
+            return {
+              ...b,
+              type: 'list' as BlockType,
+              listType: 'ul' as const,
+              indent: b.indent
+            };
+          }
+          const nextIndent = Math.max(0, Math.min(6, b.indent + 1));
+          return { ...b, indent: nextIndent };
+        } else {
+          // Outdent (direction === -1)
+          if (b.indent <= 0) {
+            // If already at root indent and is a list, convert back to plain paragraph
+            if (b.type === 'list') {
+              return {
+                ...b,
+                type: 'paragraph' as BlockType,
+                listType: undefined,
+                indent: 0
+              };
+            }
+            return b;
+          }
+          const nextIndent = Math.max(0, b.indent - 1);
+          return { ...b, indent: nextIndent };
+        }
       }
       return b;
     });
+
     onUpdateBlocks(newBlocks);
+
+    if (focusedBlockId) {
+      setTimeout(() => {
+        focusBlock(focusedBlockId, caretOffset);
+      }, 0);
+    }
   }, [selectedBlockIds, focusedBlockId, onUpdateBlocks]);
 
   // Multi-block move helper (Ctrl+ArrowUp / Ctrl+ArrowDown)
@@ -1018,6 +1400,25 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     setSelectedBlockIds(new Set([nextFocusBlock.id]));
     setLastAnchorBlockId(nextFocusBlock.id);
     focusBlock(nextFocusBlock.id, 0);
+  }, [selectedBlockIds, focusedBlockId, onUpdateBlocks]);
+
+  // Set horizontal alignment on blocks (left / center / right)
+  const setBlocksAlign = useCallback((align: 'left' | 'center' | 'right', targetBlockId?: string) => {
+    const current = blocksRef.current;
+    const targetIds = selectedBlockIds.size > 0
+      ? selectedBlockIds
+      : new Set([targetBlockId || focusedBlockId || '']);
+
+    const next = current.map(b => {
+      if (targetIds.has(b.id)) {
+        return { ...b, align };
+      }
+      return b;
+    });
+
+    onUpdateBlocks(next);
+    setGripMenuState(null);
+    setContextMenuState(null);
   }, [selectedBlockIds, focusedBlockId, onUpdateBlocks]);
 
   // Handle Key Down events (Enter, Backspace, Space triggers, Tab, F2, ESC, ArrowUp/Down, Slash menu)
@@ -1282,8 +1683,205 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       return;
     }
 
+    // =========================================================================
+    // Table Keyboard Navigation & Cell Management
+    // (ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Enter, Shift+Enter, Tab, Shift+Tab)
+    // =========================================================================
+    if (block.type === 'table' && !block.isRaw) {
+      const sel = window.getSelection();
+      const anchorNode = sel?.anchorNode;
+      const cell = (anchorNode instanceof HTMLElement ? anchorNode : anchorNode?.parentElement)?.closest('td, th') as HTMLTableCellElement | null;
+      const table = cell?.closest('table') as HTMLTableElement | null;
+
+      if (cell && table) {
+        const tr = cell.closest('tr');
+        const allRows = Array.from(table.querySelectorAll('tr'));
+        const currRowIndex = tr ? allRows.indexOf(tr) : -1;
+        const colIndex = cell.cellIndex;
+        const allCells = Array.from(table.querySelectorAll('th, td')) as HTMLTableCellElement[];
+        const cellIndex = allCells.indexOf(cell);
+
+        // 1. Alt+Enter or Ctrl+Enter: Insert line break (<br>) within table cell!
+        if (e.key === 'Enter' && (e.altKey || e.ctrlKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+
+          try {
+            document.execCommand('insertHTML', false, '<br>');
+          } catch {
+            const selection = window.getSelection();
+            if (selection && selection.rangeCount > 0) {
+              const range = selection.getRangeAt(0);
+              range.deleteContents();
+              const br = document.createElement('br');
+              range.insertNode(br);
+              const zwsp = document.createTextNode('\u200B');
+              range.setStartAfter(br);
+              range.insertNode(zwsp);
+              range.setStartAfter(zwsp);
+              range.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          }
+
+          const updatedHtml = (table.parentElement?.innerHTML || table.outerHTML);
+          const nextBlocks = [...currentBlocks];
+          nextBlocks[index] = { ...block, html: updatedHtml };
+          onUpdateBlocks(nextBlocks);
+          return;
+        }
+
+        // 2. Enter / Shift+Enter: Navigate vertically between rows (or append row at bottom)
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (e.shiftKey) {
+            // Shift+Enter: move up to previous row in same column
+            if (currRowIndex > 0) {
+              const targetRow = allRows[currRowIndex - 1];
+              const targetCell = targetRow.children[Math.min(colIndex, targetRow.children.length - 1)] as HTMLElement;
+              if (targetCell) focusCell(targetCell, 'all');
+            }
+          } else {
+            // Enter: move down to next row in same column (or add row at bottom)
+            if (currRowIndex >= 0 && currRowIndex < allRows.length - 1) {
+              const targetRow = allRows[currRowIndex + 1];
+              const targetCell = targetRow.children[Math.min(colIndex, targetRow.children.length - 1)] as HTMLElement;
+              if (targetCell) focusCell(targetCell, 'all');
+            } else {
+              // At bottom row: add a new row and move to it
+              const colCount = Math.max(1, allRows[0].querySelectorAll('th, td').length);
+              const newTr = document.createElement('tr');
+              for (let c = 0; c < colCount; c++) {
+                const newTd = document.createElement('td');
+                newTd.innerHTML = 'Item';
+                newTr.appendChild(newTd);
+              }
+              const tbody = table.querySelector('tbody') || table;
+              tbody.appendChild(newTr);
+
+              const updatedHtml = (table.parentElement?.innerHTML || table.outerHTML);
+              const nextBlocks = [...currentBlocks];
+              nextBlocks[index] = { ...block, html: updatedHtml };
+              onUpdateBlocks(nextBlocks);
+
+              const targetCell = newTr.children[Math.min(colIndex, colCount - 1)] as HTMLElement;
+              if (targetCell) {
+                setTimeout(() => focusCell(targetCell, 'all'), 10);
+              }
+            }
+          }
+          return;
+        }
+
+        // 2. Tab / Shift+Tab: Navigate horizontally between cells (or append row on last cell)
+        if (e.key === 'Tab') {
+          e.preventDefault();
+          e.stopPropagation();
+
+          if (!e.shiftKey) {
+            // Tab: move right/next cell
+            if (cellIndex < allCells.length - 1) {
+              const nextCell = allCells[cellIndex + 1];
+              focusCell(nextCell, 'all');
+            } else {
+              // Very last cell in the table!
+              const allRows = Array.from(table.querySelectorAll('tr'));
+              const colCount = Math.max(1, allRows[0].querySelectorAll('th, td').length);
+              const newTr = document.createElement('tr');
+              for (let c = 0; c < colCount; c++) {
+                const newTd = document.createElement('td');
+                newTd.innerHTML = 'Item';
+                newTr.appendChild(newTd);
+              }
+              const tbody = table.querySelector('tbody') || table;
+              tbody.appendChild(newTr);
+
+              const updatedHtml = (table.parentElement?.innerHTML || table.outerHTML);
+              const nextBlocks = [...currentBlocks];
+              nextBlocks[index] = { ...block, html: updatedHtml };
+              onUpdateBlocks(nextBlocks);
+
+              // Move cursor to first cell (leftmost) of the new row
+              const firstNewCell = newTr.children[0] as HTMLElement;
+              if (firstNewCell) {
+                setTimeout(() => focusCell(firstNewCell, 'all'), 10);
+              }
+            }
+          } else {
+            // Shift+Tab: move left/prev cell
+            if (cellIndex > 0) {
+              const prevCell = allCells[cellIndex - 1];
+              focusCell(prevCell, 'all');
+            }
+          }
+          return;
+        }
+
+        // 3. ArrowUp / ArrowDown: Move vertically between rows in the same column
+        if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+          if (currRowIndex > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            const targetRow = allRows[currRowIndex - 1];
+            const targetCell = targetRow.children[Math.min(colIndex, targetRow.children.length - 1)] as HTMLElement;
+            if (targetCell) focusCell(targetCell, 'start');
+            return;
+          }
+          // If currRowIndex === 0, allow falling through to navigate to block above table
+        }
+
+        if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+          if (currRowIndex >= 0 && currRowIndex < allRows.length - 1) {
+            e.preventDefault();
+            e.stopPropagation();
+            const targetRow = allRows[currRowIndex + 1];
+            const targetCell = targetRow.children[Math.min(colIndex, targetRow.children.length - 1)] as HTMLElement;
+            if (targetCell) focusCell(targetCell, 'start');
+            return;
+          }
+          // If at bottom row, allow falling through to navigate to block below table
+        }
+
+        // 4. ArrowRight: Move within cell, and jump to start of next cell when at end of cell text
+        if (e.key === 'ArrowRight' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+          const caretInfo = getCellCaretInfo(cell);
+          if (!caretInfo.hasSelection && caretInfo.isAtEnd) {
+            if (cellIndex < allCells.length - 1) {
+              e.preventDefault();
+              e.stopPropagation();
+              const nextCell = allCells[cellIndex + 1];
+              focusCell(nextCell, 'start');
+              return;
+            }
+          }
+          // Inside cell: browser natively navigates within cell text
+        }
+
+        // 5. ArrowLeft: Move within cell, and jump to end of previous cell when at start of cell text
+        if (e.key === 'ArrowLeft' && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+          const caretInfo = getCellCaretInfo(cell);
+          if (!caretInfo.hasSelection && caretInfo.isAtStart) {
+            if (cellIndex > 0) {
+              e.preventDefault();
+              e.stopPropagation();
+              const prevCell = allCells[cellIndex - 1];
+              focusCell(prevCell, 'end');
+              return;
+            }
+          }
+          // Inside cell: browser natively navigates within cell text
+        }
+      }
+    }
+
     // Enter Key: Split block, create next item, or divider trigger
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (block.type === 'table') {
+        return; // Prevent table block from splitting and creating empty block
+      }
       e.preventDefault();
       e.stopPropagation();
 
@@ -1481,10 +2079,11 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       }
     }
 
-    // Tab Key: Indent / Outdent
+    // Tab Key: Block Indent / Outdent
     if (e.key === 'Tab') {
       e.preventDefault();
       e.stopPropagation();
+
       const direction = e.shiftKey ? -1 : 1;
       indentSelectedBlocks(direction);
       return;
@@ -1587,7 +2186,16 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         }
         setSelectedBlockIds(newSet);
         setFocusedBlockId(currentBlocks[targetIdx].id);
-        focusBlock(currentBlocks[targetIdx].id, 0);
+        window.getSelection()?.removeAllRanges();
+
+        isShiftSelectingRef.current = true;
+        const targetEl = document.getElementById(`edit-${currentBlocks[targetIdx].id}`);
+        if (targetEl) {
+          targetEl.focus({ preventScroll: false });
+        }
+        setTimeout(() => {
+          isShiftSelectingRef.current = false;
+        }, 80);
       }
       return;
     }
@@ -1603,6 +2211,28 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         return;
       }
       lastCtrlATimeRef.current = now;
+    }
+
+    // Block Horizontal Alignment Shortcuts: Ctrl+Shift+L (Left), Ctrl+Shift+E (Center), Ctrl+Shift+R (Right)
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+      if (e.key === 'L' || e.key === 'l') {
+        e.preventDefault();
+        e.stopPropagation();
+        setBlocksAlign('left', blockId);
+        return;
+      }
+      if (e.key === 'E' || e.key === 'e') {
+        e.preventDefault();
+        e.stopPropagation();
+        setBlocksAlign('center', blockId);
+        return;
+      }
+      if (e.key === 'R' || e.key === 'r') {
+        e.preventDefault();
+        e.stopPropagation();
+        setBlocksAlign('right', blockId);
+        return;
+      }
     }
 
     // Arrow Up / Down: Directly navigate between visible cells
@@ -1647,6 +2277,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     indentSelectedBlocks,
     moveSelectedBlocks,
     deleteSelectedBlocks,
+    setBlocksAlign,
     lastAnchorBlockId,
     hiddenBlockIds
   ]);
@@ -1705,7 +2336,11 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
           indentSelectedBlocks(e.shiftKey ? -1 : 1);
         } else if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
           e.preventDefault();
-          setSelectedBlockIds(new Set(blocks.map(b => b.id)));
+        } else if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C') && selectedBlockIds.size > 1) {
+          e.preventDefault();
+          const selected = blocks.filter(b => selectedBlockIds.has(b.id));
+          const md = serializeBlocksToMarkdown(selected);
+          navigator.clipboard.writeText(md);
         }
       }}
     >
@@ -1721,6 +2356,12 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
             key={block.id}
             className={`mhz-td-block-row mhz-td-row-${block.type} ${isFocused ? 'focused' : ''} ${isSelected ? 'selected' : ''} ${block.isRaw ? 'editing' : ''}`}
             style={{ display: isHidden ? 'none' : undefined }}
+            onMouseDown={(e) => {
+              if (e.shiftKey) {
+                e.preventDefault();
+                handleSelectBlock(block.id, { shiftKey: true });
+              }
+            }}
             onClick={(e) => handleSelectBlock(block.id, e)}
           >
             {/* Left Grip Handle & Actions */}
@@ -1813,24 +2454,82 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
                     </div>
                   )}
 
+                  {/* Table quick row/column controls */}
+                  {block.type === 'table' && !block.isRaw && (
+                    <div className="mhz-td-table-controls" contentEditable={false}>
+                      <button
+                        type="button"
+                        className="mhz-td-table-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTableAction(block.id, 'add_row_bottom');
+                        }}
+                        title="Add row at bottom"
+                      >
+                        + Row
+                      </button>
+                      <button
+                        type="button"
+                        className="mhz-td-table-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTableAction(block.id, 'del_row_bottom');
+                        }}
+                        title="Delete bottom row"
+                      >
+                        - Row
+                      </button>
+                      <span className="mhz-td-table-sep" />
+                      <button
+                        type="button"
+                        className="mhz-td-table-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTableAction(block.id, 'add_col_right_btn');
+                        }}
+                        title="Add column at right"
+                      >
+                        + Col
+                      </button>
+                      <button
+                        type="button"
+                        className="mhz-td-table-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTableAction(block.id, 'del_col_right_btn');
+                        }}
+                        title="Delete rightmost column"
+                      >
+                        - Col
+                      </button>
+                    </div>
+                  )}
+
                   {/* Real in-place contentEditable block */}
                   <ContentBlock
                     id={`edit-${block.id}`}
                     dataBlockId={block.id}
-                    html={block.html || (isFocused ? '' : '<span class="mhz-td-empty-hint">Empty block...</span>')}
+                    html={block.html || ''}
                     className={getBlockClassName(block)}
                     isEditing={true}
                     onInput={(e) => handleBlockInput(e, block.id)}
                     onKeyDown={(e) => handleBlockKeyDown(e, block.id)}
                     onFocus={() => {
+                      if (isShiftSelectingRef.current) return;
                       setFocusedBlockId(block.id);
-                      handleSelectBlock(block.id);
+                      setSelectedBlockIds(prev => {
+                        if (prev.size > 1 && prev.has(block.id)) return prev;
+                        return new Set([block.id]);
+                      });
+                      setLastAnchorBlockId(block.id);
                     }}
                     onBlur={() => setFocusedBlockId(null)}
                     onClick={(e) => {
                       setFocusedBlockId(block.id);
                       handleSelectBlock(block.id, e);
                     }}
+                    onMouseDown={(e) => handleBlockMouseDown(e, block.id)}
+                    onMouseMove={(e) => handleBlockMouseMove(e, block.id)}
                     onMouseUp={() => handleBlockMouseUp(block.id)}
                     onContextMenu={(e) => handleBlockContextMenu(e, block.id)}
                   />
@@ -2167,6 +2866,31 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
             >
               <Eraser size={13} />
             </button>
+            <span className="mhz-td-table-sep" />
+            <button
+              className="mhz-td-menu-format-btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setBlocksAlign('left', contextMenuState.blockId)}
+              title="Align Left (Ctrl+Shift+L)"
+            >
+              <AlignLeft size={13} />
+            </button>
+            <button
+              className="mhz-td-menu-format-btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setBlocksAlign('center', contextMenuState.blockId)}
+              title="Align Center (Ctrl+Shift+E)"
+            >
+              <AlignCenter size={13} />
+            </button>
+            <button
+              className="mhz-td-menu-format-btn"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setBlocksAlign('right', contextMenuState.blockId)}
+              title="Align Right (Ctrl+Shift+R)"
+            >
+              <AlignRight size={13} />
+            </button>
           </div>
 
           {/* Colors Section */}
@@ -2234,7 +2958,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         </div>
       )}
 
-      {/* Right-Click Grip Context Menu (Edit F2, Colors, Indent, Outdent, Move Up, Move Down, Delete) */}
+      {/* Right-Click Grip Context Menu (Edit F2, Align, Colors, Indent, Outdent, Move Up, Move Down, Delete) */}
       {gripMenuState && (
         <div
           className="mhz-td-context-menu mhz-td-grip-menu"
@@ -2245,6 +2969,38 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
           <div className="mhz-td-context-menu-title">
             Block Actions {selectedBlockIds.size > 1 ? `(${selectedBlockIds.size} Selected)` : ''}
           </div>
+
+          {/* Block Align Bar */}
+          <div className="mhz-td-menu-align-bar">
+            <span className="mhz-td-align-bar-label">Align:</span>
+            <button
+              type="button"
+              className="mhz-td-menu-format-btn"
+              onClick={() => setBlocksAlign('left', gripMenuState.blockId)}
+              title="Align Left (Ctrl+Shift+L)"
+            >
+              <AlignLeft size={13} />
+            </button>
+            <button
+              type="button"
+              className="mhz-td-menu-format-btn"
+              onClick={() => setBlocksAlign('center', gripMenuState.blockId)}
+              title="Align Center (Ctrl+Shift+E)"
+            >
+              <AlignCenter size={13} />
+            </button>
+            <button
+              type="button"
+              className="mhz-td-menu-format-btn"
+              onClick={() => setBlocksAlign('right', gripMenuState.blockId)}
+              title="Align Right (Ctrl+Shift+R)"
+            >
+              <AlignRight size={13} />
+            </button>
+          </div>
+
+          <div className="mhz-td-context-divider" />
+
           <button
             className="mhz-td-context-menu-item"
             onClick={() => {
@@ -2325,6 +3081,156 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
             <Trash2 size={13} />
             <span>Delete {selectedBlockIds.size > 1 ? `(${selectedBlockIds.size} Blocks)` : 'Block'}</span>
             <span className="mhz-td-context-shortcut">Del</span>
+          </button>
+        </div>
+      )}
+
+      {/* Table Context Menu (Row/Column Insert/Delete) */}
+      {tableMenuState && (
+        <div
+          className="mhz-td-context-menu mhz-td-table-menu"
+          style={{ left: `${tableMenuState.x}px`, top: `${tableMenuState.y}px` }}
+        >
+          <div className="mhz-td-context-menu-title">
+            {tableMenuState.rowIndices.length > 1 || tableMenuState.colIndices.length > 1
+              ? `Table Selection (${tableMenuState.rowIndices.length} Rows, ${tableMenuState.colIndices.length} Cols)`
+              : `Table Cell (R${tableMenuState.rowIndex + 1}, C${tableMenuState.colIndex + 1})`}
+          </div>
+
+          {/* Column Alignment Toolbar */}
+          <div className="mhz-td-menu-align-bar">
+            <span className="mhz-td-align-bar-label">Col Align:</span>
+            <button
+              type="button"
+              className="mhz-td-menu-format-btn"
+              onClick={() => handleTableAction(tableMenuState.blockId, 'align_col_left', tableMenuState.rowIndex, tableMenuState.colIndex, tableMenuState.rowIndices, tableMenuState.colIndices)}
+              title="Align Selected Columns Left"
+            >
+              <AlignLeft size={13} />
+            </button>
+            <button
+              type="button"
+              className="mhz-td-menu-format-btn"
+              onClick={() => handleTableAction(tableMenuState.blockId, 'align_col_center', tableMenuState.rowIndex, tableMenuState.colIndex, tableMenuState.rowIndices, tableMenuState.colIndices)}
+              title="Align Selected Columns Center"
+            >
+              <AlignCenter size={13} />
+            </button>
+            <button
+              type="button"
+              className="mhz-td-menu-format-btn"
+              onClick={() => handleTableAction(tableMenuState.blockId, 'align_col_right', tableMenuState.rowIndex, tableMenuState.colIndex, tableMenuState.rowIndices, tableMenuState.colIndices)}
+              title="Align Selected Columns Right"
+            >
+              <AlignRight size={13} />
+            </button>
+          </div>
+
+          <div className="mhz-td-context-divider" />
+
+          {/* Insert Line Break inside Cell */}
+          <button
+            type="button"
+            className="mhz-td-context-menu-item"
+            onClick={() => {
+              const bId = tableMenuState.blockId;
+              const rIdx = tableMenuState.rowIndex;
+              const cIdx = tableMenuState.colIndex;
+              setTableMenuState(null);
+              setTimeout(() => {
+                const el = document.getElementById(`edit-${bId}`);
+                const table = el?.querySelector('table');
+                const rows = table?.querySelectorAll('tr');
+                if (rows && rIdx < rows.length) {
+                  const targetCell = rows[rIdx].children[cIdx] as HTMLElement;
+                  if (targetCell) {
+                    focusCell(targetCell, 'end');
+                    try {
+                      document.execCommand('insertHTML', false, '<br>');
+                    } catch {
+                      targetCell.innerHTML += '<br>';
+                    }
+                    const updatedHtml = (table?.parentElement?.innerHTML || table?.outerHTML || '');
+                    const current = blocksRef.current;
+                    const idx = current.findIndex(b => b.id === bId);
+                    if (idx !== -1 && updatedHtml) {
+                      const next = [...current];
+                      next[idx] = { ...next[idx], html: updatedHtml };
+                      onUpdateBlocks(next);
+                    }
+                  }
+                }
+              }, 10);
+            }}
+          >
+            <CornerDownLeft size={13} />
+            <span>Insert Line Break</span>
+            <span className="mhz-td-context-shortcut">Alt+Enter</span>
+          </button>
+
+          <div className="mhz-td-context-divider" />
+
+          <button
+            type="button"
+            className="mhz-td-context-menu-item"
+            onClick={() => handleTableAction(tableMenuState.blockId, 'add_row_above', tableMenuState.rowIndex, tableMenuState.colIndex)}
+          >
+            <ChevronUp size={13} />
+            <span>Insert Row Above</span>
+          </button>
+          <button
+            type="button"
+            className="mhz-td-context-menu-item"
+            onClick={() => handleTableAction(tableMenuState.blockId, 'add_row_below', tableMenuState.rowIndex, tableMenuState.colIndex)}
+          >
+            <ChevronDown size={13} />
+            <span>Insert Row Below</span>
+          </button>
+          <button
+            type="button"
+            className="mhz-td-context-menu-item danger"
+            onClick={() => handleTableAction(tableMenuState.blockId, 'del_row', tableMenuState.rowIndex, tableMenuState.colIndex, tableMenuState.rowIndices, tableMenuState.colIndices)}
+          >
+            <Trash2 size={13} />
+            <span>Delete {tableMenuState.rowIndices.length > 1 ? `${tableMenuState.rowIndices.length} Rows` : 'Row'}</span>
+          </button>
+          <div className="mhz-td-context-divider" />
+          <button
+            type="button"
+            className="mhz-td-context-menu-item"
+            onClick={() => handleTableAction(tableMenuState.blockId, 'add_col_left', tableMenuState.rowIndex, tableMenuState.colIndex)}
+          >
+            <ChevronLeft size={13} />
+            <span>Insert Column Left</span>
+          </button>
+          <button
+            type="button"
+            className="mhz-td-context-menu-item"
+            onClick={() => handleTableAction(tableMenuState.blockId, 'add_col_right', tableMenuState.rowIndex, tableMenuState.colIndex)}
+          >
+            <ChevronRight size={13} />
+            <span>Insert Column Right</span>
+          </button>
+          <button
+            type="button"
+            className="mhz-td-context-menu-item danger"
+            onClick={() => handleTableAction(tableMenuState.blockId, 'del_col', tableMenuState.rowIndex, tableMenuState.colIndex, tableMenuState.rowIndices, tableMenuState.colIndices)}
+          >
+            <Trash2 size={13} />
+            <span>Delete {tableMenuState.colIndices.length > 1 ? `${tableMenuState.colIndices.length} Columns` : 'Column'}</span>
+          </button>
+          <div className="mhz-td-context-divider" />
+          <button
+            type="button"
+            className="mhz-td-context-menu-item danger"
+            onClick={() => {
+              const next = blocksRef.current.filter(b => b.id !== tableMenuState.blockId);
+              onUpdateBlocks(next.length ? next : [{ id: generateId(), type: 'paragraph', html: '', indent: 0 }]);
+              setTableMenuState(null);
+            }}
+          >
+            <Trash2 size={13} />
+            <span>Delete Table</span>
           </button>
         </div>
       )}

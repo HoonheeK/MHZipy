@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
-import { rename, mkdir, exists, writeTextFile } from '@tauri-apps/plugin-fs';
+import { rename, mkdir, exists, writeTextFile, watch } from '@tauri-apps/plugin-fs';
 import { open } from '@tauri-apps/plugin-dialog';
 import ErrorDialog from './ErrorDialog';
 import { basename, dirname, join } from '@tauri-apps/api/path';
@@ -339,6 +339,55 @@ export default function FileList({
       isMounted = false;
     };
   }, [path, version, refreshTrigger, filesOverride]);
+
+  const renamingFileRef = useRef(renamingFile);
+  useEffect(() => {
+    renamingFileRef.current = renamingFile;
+  }, [renamingFile]);
+
+  // Live filesystem watcher for changes inside current directory
+  useEffect(() => {
+    if (!path || path === 'My PC' || path.length < 3) return;
+
+    let unwatch: (() => void) | undefined;
+    let isCancelled = false;
+    let timer: any = null;
+
+    watch(
+      path,
+      () => {
+        if (isCancelled || renamingFileRef.current) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (!isCancelled && !renamingFileRef.current) {
+            setVersion((v) => v + 1);
+            if (onRefresh) onRefresh();
+          }
+        }, 150);
+      },
+      { recursive: false }
+    )
+      .then((unwatchFn) => {
+        if (isCancelled) {
+          unwatchFn();
+        } else {
+          unwatch = unwatchFn;
+        }
+      })
+      .catch((err) => {
+        console.warn('Filesystem watch failed for:', path, err);
+      });
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+      if (unwatch) {
+        try {
+          unwatch();
+        } catch {}
+      }
+    };
+  }, [path, onRefresh]);
 
   // 검색어가 변경되면 포커스 인덱스 초기화
   useEffect(() => {
@@ -828,7 +877,7 @@ export default function FileList({
   };
 
   const handleCreateFile = async (extension: 'md' | 'txt') => {
-    if (!path) return;
+    if (!path || path === 'My PC' || path.length < 3) return;
     if (!checkPathPermission(path, editableFolders, readonlyFolders)) {
       showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
       return;
@@ -883,7 +932,7 @@ export default function FileList({
   }, [renamingFile]);
 
   const canWriteToCurrentPath = useMemo(() => {
-    if (!path) return false; // Disable in search view
+    if (!path || path === 'My PC' || path.length < 3) return false; // Disable in search view or PC root
     return checkPathPermission(path, editableFolders, readonlyFolders);
   }, [path, editableFolders, readonlyFolders]);
 
@@ -1020,11 +1069,17 @@ export default function FileList({
         performCompress();
       } else if (customEvent.detail?.action === 'extract' && canExtractHere) {
         performExtract();
+      } else if (customEvent.detail?.action === 'new-md-file') {
+        if (canWriteToCurrentPath) {
+          handleCreateFile('md');
+        } else {
+          showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
+        }
       }
     };
     window.addEventListener('mhz-file-action', handleMhzAction);
     return () => window.removeEventListener('mhz-file-action', handleMhzAction);
-  }, [canCompress, canExtractHere, performCompress, performExtract]);
+  }, [canCompress, canExtractHere, performCompress, performExtract, canWriteToCurrentPath, t]);
 
   const handleContextMenu = (e: React.MouseEvent, file?: FileData, index?: number) => {
     e.preventDefault();
@@ -1518,6 +1573,12 @@ export default function FileList({
         setZipDialogOpen(false);
         return;
       }
+      if (selectedFiles.size > 0) {
+        onSelectFiles(new Set());
+        setLastSelectedIndex(null);
+        setAnchorIndex(null);
+      }
+      return;
     }
     if (sortedFiles.length === 0) return;
 
@@ -1571,7 +1632,7 @@ export default function FileList({
       return;
     }
 
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       setContextMenu(null);
       e.preventDefault();
       let newIndex = lastSelectedIndex === null ? -1 : lastSelectedIndex;

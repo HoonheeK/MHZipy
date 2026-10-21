@@ -41,10 +41,9 @@
   font-size: 13px;
   font-weight: 500;
   color: #f8fafc;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
   white-space: nowrap;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag !important;
 }
 
 .mhz-md-app-icon {
@@ -58,23 +57,112 @@
   font-weight: 600;
   color: #f8fafc;
   letter-spacing: -0.01em;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.mhz-md-title-filename:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #38bdf8;
+}
+
+.mhz-md-title-rename-input {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: #1e293b;
+  border: 1px solid #38bdf8;
+  border-radius: 4px;
+  padding: 1px 6px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+  -webkit-app-region: no-drag;
+  width: auto;
+  min-width: 120px;
+  max-width: 240px;
+}
+
+.mhz-md-header-context-menu {
+  position: fixed;
+  z-index: 999999 !important;
+  background-color: #1e293b;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  -webkit-app-region: no-drag !important;
+  pointer-events: auto !important;
+}
+
+.mhz-md-header-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.mhz-md-header-context-item:hover {
+  background-color: #0284c7;
+  color: #ffffff;
+}
+
+.mhz-md-header-context-item .icon {
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.mhz-md-header-context-item:hover .icon {
+  color: #ffffff;
 }
 
 .mhz-md-status-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 9999px;
   font-size: 11px;
   font-weight: 600;
   -webkit-app-region: no-drag;
+  cursor: pointer;
+  background: transparent;
+  outline: none;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.mhz-md-status-badge:hover {
+  filter: brightness(1.25);
+  transform: translateY(-0.5px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .mhz-md-status-badge.saved {
   background-color: rgba(16, 185, 129, 0.15);
   color: #34d399;
   border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.mhz-md-status-badge.saved:hover {
+  background-color: rgba(16, 185, 129, 0.25);
+  border-color: #34d399;
 }
 
 .mhz-md-status-badge.dirty {
@@ -84,9 +172,53 @@
   animation: pulse-glow 2s infinite ease-in-out;
 }
 
+.mhz-md-status-badge.dirty:hover {
+  background-color: rgba(245, 158, 11, 0.28);
+  border-color: #fbbf24;
+}
+
 @keyframes pulse-glow {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.7; }
+}
+
+.mhz-md-titlebar-history-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.mhz-md-titlebar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+  padding: 0;
+}
+
+.mhz-md-titlebar-icon-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.2);
+}
+
+.mhz-md-titlebar-icon-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.mhz-md-titlebar-icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .mhz-md-titlebar-center {
@@ -139,13 +271,13 @@
 .mhz-md-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
+  justify-content: center;
+  padding: 5px 12px;
   background-color: #111827;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-  gap: 10px;
+  gap: 8px;
   flex-shrink: 0;
-  overflow-x: auto;
+  overflow: visible;
   -webkit-app-region: no-drag;
 }
 
@@ -218,6 +350,55 @@
   color: #38bdf8;
   border-color: rgba(56, 189, 248, 0.35);
   font-weight: 600;
+}
+
+/* Heading Dropdown Menu */
+.mhz-md-heading-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1000;
+  min-width: 130px;
+  background-color: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 10px rgba(56, 189, 248, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mhz-md-heading-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.mhz-md-heading-menu-item:hover {
+  background-color: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+}
+
+.mhz-md-heading-menu-item .lvl-badge {
+  font-weight: 700;
+  font-size: 11px;
+  color: #38bdf8;
+  width: 22px;
+}
+
+.mhz-md-heading-menu-item .lvl-title {
+  font-size: 12px;
+  color: #f1f5f9;
 }
 
 .mhz-md-tool-btn kbd {
@@ -393,8 +574,8 @@
   flex-shrink: 0;
   border-radius: 4px;
   border: 1px solid transparent;
-  padding: 1px 2px;
-  margin: 0.2em 0;
+  padding: 0 2px;
+  margin: 1px 0;
   box-sizing: border-box;
   transition: background-color 0.12s ease, border-color 0.12s ease;
   overflow: visible;
@@ -415,56 +596,72 @@
 /* Natural Heading & Block Row Spacings matching Preview markdown rhythm */
 .mhz-td-block-row.mhz-td-row-h1 {
   min-height: auto;
-  padding: 1px 2px;
-  margin-top: 0.8em;
-  margin-bottom: 0.3em;
+  padding: 0 2px;
+  margin-top: 0.55em;
+  margin-bottom: 0.18em;
 }
 
 .mhz-td-block-row.mhz-td-row-h2 {
   min-height: auto;
-  padding: 1px 2px;
-  margin-top: 0.7em;
-  margin-bottom: 0.25em;
+  padding: 0 2px;
+  margin-top: 0.45em;
+  margin-bottom: 0.15em;
 }
 
 .mhz-td-block-row.mhz-td-row-h3 {
   min-height: auto;
-  padding: 1px 2px;
-  margin-top: 0.6em;
-  margin-bottom: 0.2em;
+  padding: 0 2px;
+  margin-top: 0.35em;
+  margin-bottom: 0.12em;
+}
+
+.mhz-td-block-row.mhz-td-row-h4 {
+  min-height: auto;
+  padding: 0 2px;
+  margin-top: 0.28em;
+  margin-bottom: 0.1em;
+}
+
+.mhz-td-block-row.mhz-td-row-h5,
+.mhz-td-block-row.mhz-td-row-h6 {
+  min-height: auto;
+  padding: 0 2px;
+  margin-top: 0.22em;
+  margin-bottom: 0.08em;
 }
 
 .mhz-td-block-row.mhz-td-row-paragraph {
-  margin-top: 0.25em;
-  margin-bottom: 0.25em;
-}
-
-.mhz-td-block-row.mhz-td-row-list {
   margin-top: 0.12em;
   margin-bottom: 0.12em;
 }
 
+.mhz-td-block-row.mhz-td-row-list,
+.mhz-td-block-row.mhz-td-row-checkbox {
+  margin-top: 0.04em;
+  margin-bottom: 0.04em;
+}
+
 .mhz-td-block-row.mhz-td-row-quote {
-  margin-top: 0.4em;
-  margin-bottom: 0.4em;
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
 }
 
 .mhz-td-block-row.mhz-td-row-code {
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
 }
 
 .mhz-td-block-row.mhz-td-row-divider {
-  padding: 2px 2px;
-  margin-top: 0.6em;
-  margin-bottom: 0.6em;
+  padding: 0 2px;
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
 }
 
 .mhz-td-block-row.mhz-td-row-table {
   min-height: auto;
-  padding: 2px 2px;
-  margin-top: 0.5em;
-  margin-bottom: 0.5em;
+  padding: 1px 2px;
+  margin-top: 0.35em;
+  margin-bottom: 0.35em;
 }
 
 /* Compact Block Gutter with Line Number & Drag Grip Vertically Centered */
@@ -649,13 +846,13 @@
 
 .mhz-td-list-marker.ul {
   font-size: 16px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: #38bdf8;
 }
 
 .mhz-td-list-marker.ol {
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: #38bdf8;
 }
 
@@ -678,7 +875,7 @@
   cursor: pointer;
   user-select: none;
   flex-shrink: 0;
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 .mhz-td-checkbox-icon:hover {
@@ -698,7 +895,7 @@
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-wrap;
-  line-height: 1.7;
+  line-height: 1.5;
   color: #e2e8f0;
   font-family: inherit;
   min-height: auto;
@@ -711,7 +908,7 @@
 .mhz-td-content-block div {
   margin: 0;
   padding: 0;
-  line-height: 1.7;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-wrap;
@@ -752,24 +949,27 @@
 /* Typography per Block Type */
 .mhz-td-content-block.mhz-td-h1 {
   font-size: 1.85em;
+  line-height: 1.25;
   font-weight: 700;
   color: #f8fafc;
   border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  padding-bottom: 4px;
+  padding-bottom: 2px;
   margin: 0;
 }
 
 .mhz-td-content-block.mhz-td-h2 {
   font-size: 1.45em;
+  line-height: 1.25;
   font-weight: 700;
   color: #f1f5f9;
   border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-  padding-bottom: 3px;
+  padding-bottom: 2px;
   margin: 0;
 }
 
 .mhz-td-content-block.mhz-td-h3 {
   font-size: 1.25em;
+  line-height: 1.3;
   font-weight: 600;
   color: #e2e8f0;
   margin: 0;
@@ -777,6 +977,7 @@
 
 .mhz-td-content-block.mhz-td-h4 {
   font-size: 1.1em;
+  line-height: 1.3;
   font-weight: 600;
   color: #cbd5e1;
   margin: 0;
@@ -784,6 +985,7 @@
 
 .mhz-td-content-block.mhz-td-h5 {
   font-size: 1.0em;
+  line-height: 1.3;
   font-weight: 600;
   color: #94a3b8;
   margin: 0;
@@ -791,6 +993,7 @@
 
 .mhz-td-content-block.mhz-td-h6 {
   font-size: 0.9em;
+  line-height: 1.3;
   font-weight: 600;
   color: #64748b;
   margin: 0;
@@ -846,10 +1049,74 @@
 }
 
 /* Table Block & Multi-column Cell Layout */
+/* Table Block Container & Quick Actions Bar */
+.mhz-td-row-table .mhz-td-content-container {
+  position: relative;
+  display: block;
+}
+
+.mhz-td-table-controls {
+  position: absolute;
+  top: -12px;
+  right: 6px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(15, 23, 42, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 5px;
+  padding: 2px 6px;
+  width: fit-content;
+  user-select: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, border-color 0.15s ease;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+.mhz-td-block-row.mhz-td-row-table:hover .mhz-td-table-controls {
+  opacity: 1;
+  pointer-events: auto;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.mhz-td-table-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.mhz-td-table-btn:hover {
+  background-color: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.mhz-td-table-sep {
+  width: 1px;
+  height: 12px;
+  background-color: rgba(148, 163, 184, 0.2);
+  margin: 0 2px;
+}
+
+.mhz-td-context-menu.mhz-td-table-menu {
+  width: 200px;
+}
+
 .mhz-td-content-block table {
   width: 100%;
   border-collapse: collapse;
-  margin: 6px 0;
+  margin: 4px 0;
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 6px;
   overflow: hidden;
@@ -869,6 +1136,8 @@
   text-align: left;
   line-height: 1.5;
   min-height: 36px;
+  vertical-align: top;
+  word-break: break-word;
 }
 
 .mhz-td-content-block table tbody tr {
@@ -891,6 +1160,69 @@
   line-height: 1.5;
   min-height: 36px;
   vertical-align: top;
+  word-break: break-word;
+}
+
+/* Table Column Alignment overrides */
+.mhz-td-content-block table th[align="left"],
+.mhz-td-content-block table td[align="left"],
+.mhz-td-content-block table th[style*="text-align: left"],
+.mhz-td-content-block table td[style*="text-align: left"] {
+  text-align: left !important;
+}
+
+.mhz-td-content-block table th[align="center"],
+.mhz-td-content-block table td[align="center"],
+.mhz-td-content-block table th[style*="text-align: center"],
+.mhz-td-content-block table td[style*="text-align: center"] {
+  text-align: center !important;
+}
+
+.mhz-td-content-block table th.mhz-td-col-resizing,
+.mhz-td-content-block table td.mhz-td-col-resizing {
+  border-right: 2px solid #38bdf8 !important;
+}
+
+.mhz-td-content-block table th[align="right"],
+.mhz-td-content-block table td[align="right"],
+.mhz-td-content-block table th[style*="text-align: right"],
+.mhz-td-content-block table td[style*="text-align: right"] {
+  text-align: right !important;
+}
+
+/* Block Horizontal Alignments */
+.mhz-td-content-block.mhz-td-align-center,
+.mhz-td-content-block.mhz-td-align-center > * {
+  text-align: center;
+}
+
+.mhz-td-content-block.mhz-td-align-right,
+.mhz-td-content-block.mhz-td-align-right > * {
+  text-align: right;
+}
+
+.mhz-td-content-block.mhz-td-align-left,
+.mhz-td-content-block.mhz-td-align-left > * {
+  text-align: left;
+}
+
+/* Menu Align Bar */
+.mhz-td-menu-align-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background-color: rgba(30, 41, 59, 0.6);
+  border-radius: 5px;
+  margin-bottom: 4px;
+}
+
+.mhz-td-align-bar-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-right: 2px;
+  user-select: none;
 }
 
 /* Compact Slash Command Menu (Auto-positioned & Viewport-aware) */
@@ -1202,7 +1534,7 @@
 /* Divider Block */
 .mhz-td-divider {
   width: 100%;
-  min-height: 24px;
+  min-height: 14px;
   display: flex;
   align-items: center;
   outline: none;
@@ -1623,4 +1955,396 @@
   margin-bottom: 6px;
   gap: 2px;
 }
+
+/* 7. Encoding Button & Modal Styles */
+.mhz-md-statusbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mhz-md-statusbar-btn:hover {
+  background-color: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
+}
+
+.mhz-md-statusbar-btn strong {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.mhz-md-statusbar-btn:hover strong {
+  color: #38bdf8;
+}
+
+.mhz-md-statusbar-select-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.mhz-md-statusbar-select-wrapper:hover {
+  background-color: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
+}
+
+.mhz-md-statusbar-select {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0 1px;
+  border-radius: 3px;
+  transition: color 0.15s ease;
+  font-family: inherit;
+}
+
+.mhz-md-statusbar-select-wrapper:hover .mhz-md-statusbar-select {
+  color: #38bdf8;
+}
+
+.mhz-md-statusbar-select option {
+  background-color: #0f172a;
+  color: #f1f5f9;
+  font-size: 12px;
+  padding: 4px;
+}
+
+.mhz-md-encoding-modal {
+  width: 500px;
+  max-width: 90vw;
+  background-color: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+  padding: 18px 22px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 20px rgba(56, 189, 248, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mhz-md-modal-close-btn,
+.mhz-md-encoding-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.mhz-md-modal-close-btn:hover,
+.mhz-md-encoding-back-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.mhz-md-encoding-action-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.mhz-md-encoding-action-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background-color: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.mhz-md-encoding-action-card:hover {
+  background-color: rgba(30, 41, 59, 0.95);
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.mhz-md-encoding-action-card .card-icon {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.mhz-md-encoding-action-card .card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+  margin-bottom: 3px;
+}
+
+.mhz-md-encoding-action-card .card-desc {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.mhz-md-encoding-dirty-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #fbbf24;
+}
+
+.mhz-md-encoding-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #1e293b;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.mhz-md-encoding-search-box input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f8fafc;
+  font-size: 12px;
+}
+
+.mhz-md-encoding-search-box button {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+}
+
+.mhz-md-encoding-search-box button:hover {
+  color: #cbd5e1;
+}
+
+.mhz-md-encoding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mhz-md-encoding-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.mhz-md-encoding-item:hover {
+  background-color: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.25);
+}
+
+.mhz-md-encoding-item.active {
+  background-color: rgba(56, 189, 248, 0.15);
+  border-color: #38bdf8;
+}
+
+.mhz-md-encoding-item .encoding-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mhz-md-encoding-item .encoding-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.mhz-md-encoding-item .encoding-desc {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.mhz-md-encoding-item .encoding-item-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background-color: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* =========================================================
+   Zen / Reader Fullscreen Mode (TreeDiadev-style)
+   ========================================================= */
+.mhz-md-root.mhz-md-zen-fullscreen {
+  background-color: #0d1117;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(-100%);
+  transition: all 0.25s ease;
+  pointer-events: none;
+}
+
+/* Peek titlebar when hovering near top of screen */
+.mhz-md-root.mhz-md-zen-fullscreen:hover .mhz-md-titlebar {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-toolbar {
+  display: none !important;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-statusbar {
+  display: none !important;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-body {
+  height: 100vh !important;
+}
+
+/* Hide editor gutters, line numbers, grips, and table edit buttons in reading mode */
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-td-block-gutter {
+  display: none !important;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-td-table-controls {
+  display: none !important;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-td-block-row {
+  border-color: transparent !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+  padding: 4px 0 !important;
+  width: 100%;
+  max-width: 860px;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-td-block-body {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  line-height: 1.85;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-td-wrapper {
+  padding: 60px 32px 140px 32px !important;
+  background-color: #0d1117;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-preview-pane {
+  padding: 60px 48px 140px 48px !important;
+  background-color: #0d1117;
+  display: flex;
+  justify-content: center;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-preview-content {
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  line-height: 1.85;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-source-pane {
+  padding: 60px 48px 140px 48px !important;
+  background-color: #0d1117;
+  display: flex;
+  justify-content: center;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-editor-wrapper {
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.mhz-md-root.mhz-md-zen-fullscreen .mhz-md-gutter {
+  display: none !important;
+}
+
+/* Floating Exit Reading Mode pill */
+.mhz-md-zen-exit-pill {
+  position: fixed;
+  bottom: 24px;
+  right: 28px;
+  z-index: 99999;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  background-color: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  -webkit-app-region: no-drag;
+}
+
+.mhz-md-zen-exit-pill:hover {
+  background-color: rgba(56, 189, 248, 0.2);
+  border-color: #38bdf8;
+  color: #38bdf8;
+  transform: translateY(-1px);
+}
+
 

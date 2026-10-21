@@ -25,9 +25,10 @@ interface FolderTreeProps {
   onRenameTextChange?: (text: string) => void;
   showMessage?: (title: string, message: string) => void;
   isRoot?: boolean;
+  depth?: number;
 }
 
-export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage, isRoot }: FolderTreeProps) {
+export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage, isRoot: _isRoot, depth = 0 }: FolderTreeProps) {
   const isAncestorOf = (ancestor: string, descendant: string) => {
     if (!descendant.startsWith(ancestor)) return false;
     if (descendant.length === ancestor.length) return true;
@@ -200,6 +201,8 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
       return;
     }
 
+    if (e.altKey) return; // Allow Alt+Arrow navigation shortcuts (Alt+Left/Right/Up) to bubble up
+
     if (e.key === 'Tab') {
       if (e.shiftKey) {
         // Shift + Tab 키 입력 시 Quick Access 섹션으로 이동
@@ -302,11 +305,17 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
     }
   };
 
+  // Sticky parent folder calculation:
+  // Expanded folders stay sticky at the top while scrolling through their children
+  const isSticky = isExpanded && depth <= 5;
+  const stickyTop = depth * 28;
+  const stickyZIndex = Math.max(10, 60 - depth);
+
   return (
-    <div style={{ marginLeft: isRoot ? '0' : '16px' }}>
+    <div className="folder-tree-branch" style={{ width: '100%' }}>
       <div
         ref={nodeRef}
-        className={`folder-tree-node ${isSelected ? 'selected' : ''}`}
+        className={`folder-tree-node ${isSelected ? 'selected' : ''} ${isSticky ? 'sticky' : ''}`}
         data-path={path}
         tabIndex={0}
         onKeyDown={handleKeyDown}
@@ -322,18 +331,30 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
         style={{
           cursor: 'pointer',
           userSelect: 'none',
-          padding: '4px 6px',
+          padding: `4px 6px 4px ${depth * 14 + 6}px`,
           display: 'flex',
           alignItems: 'center',
           whiteSpace: 'nowrap',
           outline: 'none',
           color: !isEditable ? '#64748b' : 'inherit',
           opacity: isCut ? 0.5 : 1,
+          width: '100%',
+          height: '28px',
+          minHeight: '28px',
+          boxSizing: 'border-box',
+          ...(isSticky ? {
+            position: 'sticky',
+            top: `${stickyTop}px`,
+            zIndex: stickyZIndex,
+            backgroundColor: isSelected ? 'var(--mhz-bg-selected)' : 'var(--mhz-bg-sidebar)',
+            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.4)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+          } : {})
         }}
       >
         {renamingPath === path ? (
           <>
-            <span style={{ marginRight: '4px' }}>{isExpanded ? '📂' : '📁'}</span>
+            <span style={{ marginRight: '4px', flexShrink: 0 }}>{isExpanded ? '📂' : '📁'}</span>
             <input
               type="text"
               value={renameText}
@@ -348,18 +369,19 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
           </>
         ) : (
           <>
-            <span style={{ marginRight: '4px' }}>{isExpanded ? '📂' : '📁'}</span>
-            <span>{name}</span>
+            <span style={{ marginRight: '4px', flexShrink: 0 }}>{isExpanded ? '📂' : '📁'}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
           </>
         )}
       </div>
       {isExpanded && (
-        <div>
+        <div className="folder-tree-children" style={{ width: '100%' }}>
           {subFolders.map((folder) => (
             <FolderTree
               key={folder.path}
               path={folder.path}
               name={folder.name}
+              depth={depth + 1}
               onSelect={onSelect}
               activePath={activePath}
               selectedPaths={selectedPaths}

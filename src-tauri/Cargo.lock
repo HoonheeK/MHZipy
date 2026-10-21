@@ -3458,6 +3458,7 @@ dependencies = [
  "bincode",
  "chrono",
  "dashmap",
+ "encoding_rs",
  "lopdf",
  "machine-uid",
  "office2pdf",

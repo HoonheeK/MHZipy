@@ -24,6 +24,7 @@ export interface Block {
   indent: number;
   customId?: string;
   isRaw?: boolean;
+  align?: 'left' | 'center' | 'right';
 }
 
 export const generateId = () => Math.random().toString(36).substring(2, 11);
@@ -87,8 +88,17 @@ export const htmlToMarkdown = (html: string): string => {
         return `[${content}](${href})`;
       }
       case 'table': {
-        const tableRows: string[] = [];
         const trs = Array.from(el.querySelectorAll('tr'));
+        const allHeaderCells = Array.from(el.querySelectorAll('th, td'));
+        const hasCustomWidth = allHeaderCells.some(c => !!(c as HTMLElement).style.width || !!(c as HTMLElement).style.minWidth || c.hasAttribute('width'));
+        if (hasCustomWidth) {
+          // If table has custom widths, serialize as standard HTML table so widths are preserved across save & reload
+          const clone = el.cloneNode(true) as HTMLElement;
+          clone.querySelectorAll('.mhz-td-col-resizing').forEach(c => c.classList.remove('mhz-td-col-resizing'));
+          return clone.outerHTML;
+        }
+
+        const tableRows: string[] = [];
         trs.forEach((tr, i) => {
           const cells = Array.from(tr.querySelectorAll('th, td'));
           const rowContent = cells.map(c => processChildren(c).trim()).join(' | ');
@@ -98,16 +108,17 @@ export const htmlToMarkdown = (html: string): string => {
             const isHeader = tr.parentElement?.tagName.toLowerCase() === 'thead' || tr.querySelector('th');
             if (isHeader) {
               const separator = cells.map(c => {
-                const align = c.getAttribute('align');
+                const align = (c.getAttribute('align') || (c as HTMLElement).style.textAlign || '').toLowerCase();
                 if (align === 'center') return ':---:';
                 if (align === 'right') return '---:';
+                if (align === 'left') return ':---';
                 return '---';
               }).join(' | ');
               tableRows.push(`| ${separator} |`);
             }
           }
         });
-        return '\n' + tableRows.join('\n') + '\n';
+        return tableRows.join('\n');
       }
       case 'thead':
       case 'tbody':
@@ -127,11 +138,19 @@ export const htmlToMarkdown = (html: string): string => {
 /**
  * Returns appropriate CSS class names for a block depending on its type.
  */
-export const getBlockClassName = (block: { type: string; isRaw?: boolean }) => {
+export const getBlockClassName = (block: { type: string; isRaw?: boolean; align?: 'left' | 'center' | 'right' }) => {
   let baseClasses = 'mhz-td-content-block';
 
   if (block.isRaw) {
     baseClasses += ' mhz-td-raw-block';
+  }
+
+  if (block.align === 'center') {
+    baseClasses += ' mhz-td-align-center';
+  } else if (block.align === 'right') {
+    baseClasses += ' mhz-td-align-right';
+  } else if (block.align === 'left') {
+    baseClasses += ' mhz-td-align-left';
   }
 
   switch (block.type) {
@@ -169,8 +188,15 @@ export const parseMarkdownToBlocks = (md: string): Block[] => {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Skip empty lines outside code blocks
+    // Empty lines outside code blocks: preserve as empty paragraph blocks so line counts and blank lines are maintained accurately
     if (trimmed === '' && !line.startsWith('    ') && !line.startsWith('\t')) {
+      intermediateBlocks.push({
+        id: generateId(),
+        type: 'paragraph',
+        html: '',
+        indent: 0,
+        isRaw: false
+      });
       i++;
       continue;
     }
@@ -237,12 +263,44 @@ export const parseMarkdownToBlocks = (md: string): Block[] => {
         continue;
       }
     }
+    
+    // HTML Tables (<table ...> ... </table>)
+    if (trimmed.startsWith('<table')) {
+      let tableHtml = line;
+      let j = i + 1;
+      let closed = trimmed.includes('</table>');
+      while (j < lines.length && !closed) {
+        tableHtml += '\n' + lines[j];
+        if (lines[j].includes('</table>')) {
+          closed = true;
+        }
+        j++;
+      }
+
+      intermediateBlocks.push({
+        id: generateId(),
+        type: 'table',
+        html: tableHtml.trim(),
+        indent: 0
+      });
+
+      i = j;
+      continue;
+    }
 
     const id = generateId();
     let type: BlockType = 'paragraph';
     let content = line;
     let checked = false;
     let listType: 'ul' | 'ol' | undefined;
+    let align: 'left' | 'center' | 'right' | undefined;
+
+    // Detect align wrapper like <p align="center">...</p>
+    const alignTagMatch = trimmed.match(/^<(?:p|div)\s+align=["'](left|center|right)["']>(.*?)<\/(?:p|div)>$/i);
+    if (alignTagMatch) {
+      align = alignTagMatch[1].toLowerCase() as 'left' | 'center' | 'right';
+      content = alignTagMatch[2];
+    }
 
     // Calculate Indent from leading spaces / tabs
     const leadingWhitespace = line.match(/^\s*/)?.[0] || '';
@@ -317,7 +375,7 @@ export const parseMarkdownToBlocks = (md: string): Block[] => {
       }
     }
 
-    intermediateBlocks.push({ id, type, html, indent, checked, listType, isRaw: false });
+    intermediateBlocks.push({ id, type, html, indent, checked, listType, isRaw: false, align });
     i++;
   }
 
@@ -400,27 +458,13 @@ export const serializeBlocksToMarkdown = (blocks: Block[]): string => {
       default: lineContent = `${prefix}${mdContent}`;
     }
 
+    if (b.align && b.align !== 'left' && lineContent.trim()) {
+      lineContent = `<p align="${b.align}">${lineContent}</p>`;
+    }
+
     lines.push(lineContent);
   }
 
-  // Join blocks cleanly: between list items single newline, between headers/paragraphs double newlines
-  let result = '';
-  for (let i = 0; i < blocks.length; i++) {
-    const curr = lines[i];
-    const currBlock = blocks[i];
-    const nextBlock = blocks[i + 1];
-    result += curr;
-
-    if (i < blocks.length - 1) {
-      const isCurrList = currBlock.type === 'list' || currBlock.type === 'checkbox';
-      const isNextList = nextBlock && (nextBlock.type === 'list' || nextBlock.type === 'checkbox');
-      if (isCurrList && isNextList) {
-        result += '\n';
-      } else {
-        result += '\n\n';
-      }
-    }
-  }
-
-  return result;
+  // Join blocks with single newlines so no unexpected blank lines are injected
+  return lines.join('\n');
 };

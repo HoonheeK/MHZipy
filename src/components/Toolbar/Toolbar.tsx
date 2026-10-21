@@ -9,9 +9,8 @@ import {
   Package,
   PackageOpen,
   FolderPlus,
+  FilePlus,
   Copy,
-  ClipboardPaste,
-  Trash2,
   Settings,
   Info,
   BookOpen,
@@ -53,10 +52,7 @@ export interface ToolbarProps {
   onCompress: () => void;
   onExtract: () => void;
   onNewFolder: () => void;
-  onCopy: () => void;
-  onPaste: () => void;
-  canPaste: boolean;
-  onDelete: () => void;
+  onNewMdFile: () => void;
 
   // View Switcher
   currentView: 'folder' | 'search';
@@ -84,10 +80,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onCompress,
   onExtract,
   onNewFolder,
-  onCopy,
-  onPaste,
-  canPaste,
-  onDelete,
+  onNewMdFile,
   currentView,
   onToggleView,
 }) => {
@@ -216,6 +209,46 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     }
   };
 
+  const isDraggingBrandRef = useRef(false);
+  const brandMouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  const handleBrandMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0) {
+      isDraggingBrandRef.current = false;
+      brandMouseDownPosRef.current = { x: e.screenX, y: e.screenY };
+    }
+  };
+
+  const handleBrandMouseMove = (e: React.MouseEvent) => {
+    if (brandMouseDownPosRef.current && !isDraggingBrandRef.current) {
+      const dist = Math.hypot(
+        e.screenX - brandMouseDownPosRef.current.x,
+        e.screenY - brandMouseDownPosRef.current.y
+      );
+      if (dist > 4) {
+        isDraggingBrandRef.current = true;
+        try {
+          getCurrentWindow().startDragging();
+        } catch (err) {
+          console.warn('startDragging failed:', err);
+        }
+      }
+    }
+  };
+
+  const handleBrandMouseUp = () => {
+    brandMouseDownPosRef.current = null;
+  };
+
+  const handleBrandClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDraggingBrandRef.current) {
+      isDraggingBrandRef.current = false;
+      return;
+    }
+    setIsBrandMenuOpen((prev) => !prev);
+  };
+
   return (
     <header className="mhz-toolbar">
       {/* 1. Left Group: Brand & Nav Buttons */}
@@ -225,11 +258,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             type="button"
             className={`brand-badge-btn ${isBrandMenuOpen ? 'active' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsBrandMenuOpen((prev) => !prev);
-            }}
-            title="MHZipy Menu (Settings, About, License)"
+            onMouseDown={handleBrandMouseDown}
+            onMouseMove={handleBrandMouseMove}
+            onMouseUp={handleBrandMouseUp}
+            onClick={handleBrandClick}
+            title="MHZipy Menu (Click: Open Menu, Drag: Move Window)"
           >
             <img src={logoImg} alt="MHZipy" className="brand-app-icon" />
             <span className="brand-title">MHZipy</span>
@@ -418,40 +451,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span className="tb-btn-text">New Folder</span>
         </button>
 
-        {/* Copy */}
+        {/* New MD File */}
         <button
           type="button"
           className="tb-btn"
-          onClick={onCopy}
-          disabled={!hasSelectedFiles}
-          title="Copy Selected Files (Ctrl+C)"
+          onClick={onNewMdFile}
+          title="Create New Markdown File (Ctrl+Shift+M)"
         >
-          <Copy size={14} />
-          <span className="tb-btn-text">Copy</span>
-        </button>
-
-        {/* Paste */}
-        <button
-          type="button"
-          className="tb-btn"
-          onClick={onPaste}
-          disabled={!canPaste}
-          title="Paste from Clipboard (Ctrl+V)"
-        >
-          <ClipboardPaste size={14} />
-          <span className="tb-btn-text">Paste</span>
-        </button>
-
-        {/* Delete */}
-        <button
-          type="button"
-          className="tb-btn tb-btn-danger"
-          onClick={onDelete}
-          disabled={!hasSelectedFiles}
-          title="Delete to Recycle Bin (Del)"
-        >
-          <Trash2 size={14} />
-          <span className="tb-btn-text">Delete</span>
+          <FilePlus size={15} />
+          <span className="tb-btn-text">New MD File</span>
         </button>
       </div>
 

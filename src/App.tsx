@@ -384,6 +384,85 @@ function App() {
     setRequestedPath(nextPath);
   };
 
+  useEffect(() => {
+    const handleNavigationKeyDown = (e: KeyboardEvent) => {
+      // Modal dialogs open check
+      if (isPrefOpen || isAboutOpen || isOpenSourceOpen || isLicenseOpen) return;
+
+      if (e.altKey && !e.ctrlKey && !e.shiftKey) {
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          handleBack();
+        } else if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          handleNext();
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          fileExplorerRef.current?.goUp();
+        }
+      } else if (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r')) {
+        e.preventDefault();
+        fileExplorerRef.current?.refresh();
+      }
+    };
+
+    window.addEventListener('keydown', handleNavigationKeyDown);
+    return () => window.removeEventListener('keydown', handleNavigationKeyDown);
+  }, [history, forwardHistory, currentPath, isPrefOpen, isAboutOpen, isOpenSourceOpen, isLicenseOpen]);
+
+  // Listen for file change/save events from other windows (e.g. MarkdownEditor) and window focus
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen('mhz-refresh-files', () => {
+      fileExplorerRef.current?.refresh();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+
+    let unlistenNav: UnlistenFn | undefined;
+    listen<{ folderPath: string; selectPath?: string }>('mhz-navigate-folder', async (event) => {
+      const { folderPath, selectPath } = event.payload;
+      if (folderPath) {
+        setRequestedPath(folderPath);
+        if (selectPath) {
+          setRequestedSelect(selectPath);
+        }
+        try {
+          const mainWin = getCurrentWebviewWindow();
+          await mainWin.unminimize();
+          await mainWin.setFocus();
+        } catch {}
+      }
+    }).then((fn) => {
+      unlistenNav = fn;
+    });
+
+    let lastFocusRefresh = 0;
+    const handleFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusRefresh > 400) {
+        lastFocusRefresh = now;
+        fileExplorerRef.current?.refresh();
+      }
+    };
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        handleFocus();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      if (unlisten) unlisten();
+      if (unlistenNav) unlistenNav();
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, []);
+
   if (!configLoaded) return null;
 
   return (
@@ -410,10 +489,7 @@ function App() {
         onCompress={() => fileExplorerRef.current?.compress()}
         onExtract={() => fileExplorerRef.current?.extract()}
         onNewFolder={() => fileExplorerRef.current?.newFolder()}
-        onCopy={() => fileExplorerRef.current?.copy()}
-        onPaste={() => fileExplorerRef.current?.paste()}
-        canPaste={selectionStatus.canPaste}
-        onDelete={() => fileExplorerRef.current?.deleteSelected()}
+        onNewMdFile={() => fileExplorerRef.current?.newMdFile()}
         currentView={currentView}
         onToggleView={(view) => saveConfig({ view })}
       />

@@ -154,27 +154,100 @@ fn close_window(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct TextFileContent {
+    pub content: String,
+    pub encoding: String,
+}
+
 #[tauri::command]
-fn read_text_file_content(path: String) -> Result<String, String> {
-    match fs::read(&path) {
-        Ok(bytes) => {
-            let slice = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
-                &bytes[3..]
+fn read_text_file_content(path: String, encoding: Option<String>) -> Result<TextFileContent, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // If explicit encoding is requested
+    if let Some(ref enc_name) = encoding {
+        let enc_clean = enc_name.trim();
+        if enc_clean.eq_ignore_ascii_case("UTF-8 with BOM") || enc_clean.eq_ignore_ascii_case("utf-8-bom") {
+            let slice = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) { &bytes[3..] } else { &bytes[..] };
+            let (cow, _, _) = encoding_rs::UTF_8.decode(slice);
+            return Ok(TextFileContent {
+                content: cow.to_string(),
+                encoding: "UTF-8 with BOM".to_string(),
+            });
+        }
+        if let Some(enc) = encoding_rs::Encoding::for_label(enc_clean.as_bytes()) {
+            let (cow, _, _) = enc.decode(&bytes);
+            return Ok(TextFileContent {
+                content: cow.to_string(),
+                encoding: enc.name().to_string(),
+            });
+        }
+    }
+
+    // Auto-detect BOM
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let (cow, _, _) = encoding_rs::UTF_8.decode(&bytes[3..]);
+        return Ok(TextFileContent {
+            content: cow.to_string(),
+            encoding: "UTF-8 with BOM".to_string(),
+        });
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        let (cow, _, _) = encoding_rs::UTF_16LE.decode(&bytes);
+        return Ok(TextFileContent {
+            content: cow.to_string(),
+            encoding: "UTF-16 LE".to_string(),
+        });
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let (cow, _, _) = encoding_rs::UTF_16BE.decode(&bytes);
+        return Ok(TextFileContent {
+            content: cow.to_string(),
+            encoding: "UTF-16 BE".to_string(),
+        });
+    }
+
+    // Try strict UTF-8
+    match std::str::from_utf8(&bytes) {
+        Ok(s) => Ok(TextFileContent {
+            content: s.to_string(),
+            encoding: "UTF-8".to_string(),
+        }),
+        Err(_) => {
+            // Try EUC-KR (CP949)
+            let (cow_euckr, had_errors) = encoding_rs::EUC_KR.decode_without_bom_handling(&bytes);
+            if !had_errors {
+                Ok(TextFileContent {
+                    content: cow_euckr.to_string(),
+                    encoding: "EUC-KR".to_string(),
+                })
             } else {
-                &bytes[..]
-            };
-            match std::str::from_utf8(slice) {
-                Ok(s) => Ok(s.to_string()),
-                Err(_) => Ok(String::from_utf8_lossy(slice).to_string()),
+                // Fallback to UTF-8 lossy
+                Ok(TextFileContent {
+                    content: String::from_utf8_lossy(&bytes).to_string(),
+                    encoding: "UTF-8".to_string(),
+                })
             }
         }
-        Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
 
 #[tauri::command]
-fn save_text_file_content(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, content.as_bytes()).map_err(|e| format!("Failed to save file: {}", e))
+fn save_text_file_content(path: String, content: String, encoding: Option<String>) -> Result<(), String> {
+    let enc_str = encoding.as_deref().unwrap_or("UTF-8").trim();
+
+    let bytes_to_write: Vec<u8> = if enc_str.eq_ignore_ascii_case("UTF-8 with BOM") || enc_str.eq_ignore_ascii_case("utf-8-bom") {
+        let mut b = vec![0xEF, 0xBB, 0xBF];
+        b.extend_from_slice(content.as_bytes());
+        b
+    } else if let Some(enc) = encoding_rs::Encoding::for_label(enc_str.as_bytes()) {
+        let (encoded_bytes, _, _) = enc.encode(&content);
+        encoded_bytes.into_owned()
+    } else {
+        content.into_bytes()
+    };
+
+    fs::write(&path, &bytes_to_write).map_err(|e| format!("Failed to save file: {}", e))
 }
 
 // 압축 명령어
