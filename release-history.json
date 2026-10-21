@@ -1,6 +1,21 @@
 [
   {
     "version": "0.9.8",
+    "date": "2026-10-21",
+    "notes": {
+      "ko": [
+        "MHZipy Version 0.9.8 Released!"
+      ],
+      "en": [
+        "MHZipy Version 0.9.8 Released!"
+      ],
+      "ja": [
+        "MHZipy バージョン 0.9.8 がリリースされました!"
+      ]
+    }
+  },
+  {
+    "version": "0.9.8",
     "date": "2026-10-19",
     "notes": {
       "ko": [
