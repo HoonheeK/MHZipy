@@ -29,6 +29,7 @@ interface SearchViewProps {
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
   onSelectionChange?: (paths: Set<string>) => void;
   usePdfWorker?: boolean;
+  useImageViewer?: boolean;
   pdfExportPath?: string;
   onSearchChange?: (query: string) => void;
 }
@@ -101,6 +102,7 @@ export default function SearchView({
   onColumnSettingsChange,
   onSelectionChange,
   usePdfWorker,
+  useImageViewer,
   pdfExportPath,
   onSearchChange
 }: SearchViewProps) {
@@ -808,6 +810,7 @@ export default function SearchView({
               onColumnSettingsChange={onColumnSettingsChange}
               pdfExportPath={pdfExportPath}
               usePdfWorker={usePdfWorker}
+              useImageViewer={useImageViewer}
             />
           )}
         </div>

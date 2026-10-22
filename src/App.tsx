@@ -15,6 +15,7 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useTranslation } from 'react-i18next';
 import { checkForUpdates } from './utils/updater';
 import PdfProgressDialog from './common/PdfProgressDialog';
+import { initCrossWindowDrag } from './utils/crossWindowDrag';
 import './App.css';
 
 export interface SearchConfig {
@@ -49,6 +50,7 @@ interface AppConfig {
   columnSettings?: { key: string; visible: boolean }[];
   language?: string;
   usePdfWorker?: boolean;
+  useImageViewer?: boolean;
   licenseEmail?: string;
   licenseCode?: string;
   recentOpenedFolders?: string[];
@@ -270,6 +272,8 @@ function App() {
 
   // 웹뷰의 기본 파일 드롭 동작(파일 열기) 방지
   useEffect(() => {
+    // 창 간 Drag&Drop payload 공유 리스너 등록
+    initCrossWindowDrag();
     const stopDefault = (e: DragEvent) => {
       e.preventDefault();
     };
@@ -520,11 +524,12 @@ function App() {
         initialColumnSettings={config.columnSettings}
         initialLanguage={config.language}
         initialUsePdfWorker={config.usePdfWorker}
+        initialUseImageViewer={config.useImageViewer}
         initialLicenseEmail={config.licenseEmail}
         initialLicenseCode={config.licenseCode}
         initialDisableUpdateCheck={config.disableUpdateCheck}
         initialPdfExportPath={config.pdfExportPath}
-        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string) => {
+        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string, newUseImageViewer?: boolean) => {
           saveConfig({
             defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
@@ -533,6 +538,7 @@ function App() {
             columnSettings: newColumnSettings,
             language: newLanguage,
             usePdfWorker: newUsePdfWorker,
+            useImageViewer: newUseImageViewer,
             licenseEmail: newLicenseEmail,
             licenseCode: newLicenseCode,
             disableUpdateCheck: newDisableUpdateCheck,

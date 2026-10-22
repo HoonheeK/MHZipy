@@ -46,6 +46,8 @@
     "lang_vi": "越南语",
     "usePdfWorker": "使用内置 PDF 阅读器",
     "usePdfWorkerDesc": "默认使用内置 PDF 阅读器打开 PDF 文件",
+    "useImageViewer": "使用内置图像查看器",
+    "useImageViewerDesc": "默认使用内置图像查看器打开图像文件",
     "columnsTitle": "文件列表列 (可见性与顺序)",
     "columnsDesc": "勾选以显示列。使用箭头自左向右重新排序。",
     "defaultStartFolder": "默认起始文件夹",

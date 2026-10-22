@@ -10,12 +10,20 @@ import { basename, dirname, join } from '@tauri-apps/api/path';
 import { checkPathPermission } from '../command/fileOperations';
 import { openPdfInWindow } from '../PDFViewer/PDFViewer';
 import { openMarkdownInWindow } from '../MarkdownEditor/openMarkdownInWindow';
+import { openImageInWindow } from '../ImageViewer/openImageInWindow';
 import MessageDialog from '../common/MessageDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
+import FileIcon from './FileIcon';
+import { broadcastDragStart, broadcastDragEnd, getDragPayload, consumeDragPayload, isNativeDragSupported, startNativeFileDrag, resolveExternalDropPaths, decideExternalDropOp } from '../utils/crossWindowDrag';
 
 const isMarkdownOrText = (fileName: string) => {
   const ext = fileName.toLowerCase().split('.').pop() || '';
   return ['md', 'markdown', 'txt', 'text'].includes(ext);
+};
+
+const isImageFile = (fileName: string) => {
+  const ext = fileName.toLowerCase().split('.').pop() || '';
+  return ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'ico', 'tiff', 'tif', 'gif', 'svg', 'avif'].includes(ext);
 };
 
 
@@ -46,6 +54,7 @@ interface FileListProps {
   onColumnSettingsChange?: (settings: { key: string; visible: boolean }[]) => void;
   onRefresh?: () => void;
   usePdfWorker?: boolean;
+  useImageViewer?: boolean;
   pdfExportPath?: string;
   onSetDefault?: (path: string) => void;
   onAddToQuickAccess?: (paths: string | string[]) => void;
@@ -110,6 +119,7 @@ export default function FileList({
   onColumnSettingsChange,
   onRefresh,
   usePdfWorker = true,
+  useImageViewer = true,
   pdfExportPath,
   onSetDefault,
   onAddToQuickAccess
@@ -1163,6 +1173,8 @@ export default function FileList({
       await openZipFile(file);
     } else if (file.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
       await openPdfInWindow({ path: file.path, name: file.name });
+    } else if (isImageFile(file.name) && useImageViewer) {
+      await openImageInWindow({ path: file.path, name: file.name });
     } else if (isMarkdownOrText(file.name)) {
       await openMarkdownInWindow({ path: file.path, name: file.name });
     } else {
@@ -1200,6 +1212,8 @@ export default function FileList({
         await openZipFile(item);
       } else if (item.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
         await openPdfInWindow({ path: item.path, name: item.name });
+      } else if (isImageFile(item.name) && useImageViewer) {
+        await openImageInWindow({ path: item.path, name: item.name });
       } else if (isMarkdownOrText(item.name)) {
         await openMarkdownInWindow({ path: item.path, name: item.name });
       } else {
@@ -1260,6 +1274,7 @@ export default function FileList({
     e.dataTransfer.setData('application/json', data);
     e.dataTransfer.setData('text/plain', data); // 호환성을 위해 text/plain 추가
     e.dataTransfer.effectAllowed = 'copy';
+    broadcastDragStart(data); // 다른 창으로 드래그 시 payload 공유
   };
 
   const handleZipHeaderMouseDown = (e: React.MouseEvent) => {
@@ -1415,9 +1430,25 @@ export default function FileList({
     const destPath = targetDir || path;
     if (!destPath) return;
 
-    let dataString = e.dataTransfer.getData('application/json');
-    if (!dataString) dataString = e.dataTransfer.getData('text/plain'); // fallback 확인
-    if (!dataString) return;
+    // DataTransfer 우선, 없으면 다른 창에서 브로드캐스트된 payload 사용
+    const dataString = getDragPayload(e.dataTransfer);
+    if (!dataString) {
+      // Windows 탐색기 등 외부에서 드롭된 파일: File 객체는 드롭 이벤트 안에서 동기적으로 확보
+      const droppedFiles = Array.from(e.dataTransfer.files || []);
+      if (droppedFiles.length === 0 || !onMove) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      if (!checkPathPermission(destPath, editableFolders, readonlyFolders)) {
+        showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
+        return;
+      }
+      const externalPaths = await resolveExternalDropPaths(droppedFiles);
+      if (externalPaths.length > 0) {
+        onMove(externalPaths, destPath, decideExternalDropOp(externalPaths, destPath, ctrl, shift));
+      }
+      return;
+    }
+    consumeDragPayload();
 
     if (!checkPathPermission(destPath, editableFolders, readonlyFolders)) {
       showMessage(t('explorer.permissionError'), t('fileList.permissionWriteError'));
@@ -1684,10 +1715,27 @@ export default function FileList({
 
     const filesToDragObjects = files.filter(f => filesToDrag.includes(f.path));
 
-    e.dataTransfer.setData('application/json', JSON.stringify({
+    const payload = JSON.stringify({
       paths: filesToDrag,
       files: filesToDragObjects
-    }));
+    });
+
+    // Windows: HTML5 드래그 대신 네이티브 Shell 드래그를 시작하여
+    // Windows 탐색기/다른 앱/다른 MHZipy 창 모두에 드롭할 수 있게 함
+    if (isNativeDragSupported) {
+      e.preventDefault();
+      startNativeFileDrag(filesToDrag, payload).then((effect) => {
+        // 탐색기로 이동된 경우 등 목록 갱신
+        if (effect && effect !== 'none') {
+          setVersion(v => v + 1);
+          onRefresh?.();
+        }
+      });
+      return;
+    }
+
+    e.dataTransfer.setData('application/json', payload);
+    broadcastDragStart(payload); // 다른 창으로 드래그 시 payload 공유
 
     // 다른 앱(메모장, VSCode 등)으로 드래그 시 경로 텍스트 전달
     // 웹메일 등에서 파일 내용 대신 경로 텍스트가 입력되는 것을 방지하기 위해 text/plain 설정 제거
@@ -1931,7 +1979,7 @@ export default function FileList({
 
   const renderCell = (file: FileData, colKey: string) => {
     switch (colKey) {
-      case 'name': return <><span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : (openingFiles.has(file.path) ? '⏳' : '📄')}</span><span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, opacity: openingFiles.has(file.path) ? 0.5 : 1 }}>{file.name}</span></>;
+      case 'name': return <><FileIcon name={file.name} path={file.path} isDirectory={file.isDirectory} isLoading={openingFiles.has(file.path)} /><span title={file.name} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, opacity: openingFiles.has(file.path) ? 0.5 : 1 }}>{file.name}</span></>;
       case 'size': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'right' }}>{formatSize(file.size, file.isDirectory)}</span>;
       case 'type': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{file.type}</span>;
       case 'birthtime': return <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, textAlign: 'center' }}>{formatDate(file.birthtime)}</span>;
@@ -1999,6 +2047,7 @@ export default function FileList({
                 onMouseDown={(e) => e.stopPropagation()}
                 draggable
                 onDragStart={(e) => handleDragStart(e, file)}
+                onDragEnd={() => broadcastDragEnd()}
                 onContextMenu={(e) => handleContextMenu(e, file, index)}
                 onDragOver={(e) => {
                   if (file.isDirectory) {
@@ -2019,7 +2068,7 @@ export default function FileList({
                   <div key={col.key} style={{ ...cellStyle, width: columnWidths[col.key], color: col.key === 'name' ? 'inherit' : '#94a3b8' }}>
                     {col.key === 'name' && renamingFile === file.path ? (
                       <>
-                        <span style={{ marginRight: '8px' }}>{file.isDirectory ? '📁' : (openingFiles.has(file.path) ? '⏳' : '📄')}</span>
+                        <FileIcon name={file.name} path={file.path} isDirectory={file.isDirectory} isLoading={openingFiles.has(file.path)} />
                         <input
                           autoFocus
                           value={renameText}
@@ -2396,13 +2445,14 @@ export default function FileList({
                   onClick={(e) => handleZipEntryClick(e, entry.name)}
                   draggable
                   onDragStart={(e) => handleZipDragStart(e, entry.name)}
+                  onDragEnd={() => broadcastDragEnd()}
                   style={{
                     padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
                     backgroundColor: selectedZipEntries.has(entry.name) ? '#e6f3ff' : 'transparent',
                     cursor: 'default', display: 'flex', alignItems: 'center'
                   }}
                 >
-                  <span style={{ marginRight: '8px' }}>{entry.isDir ? '📁' : '📄'}</span>
+                  <FileIcon name={entry.name} isDirectory={entry.isDir} />
                   <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {entry.name}
                     {entry.isEncrypted && <span style={{ marginLeft: '6px', fontSize: '0.8em' }}>🔒</span>}

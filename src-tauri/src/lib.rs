@@ -18,6 +18,8 @@ use regex::RegexBuilder;
 mod mft;
 use mft::MftIndex;
 mod license;
+mod icon;
+mod native_dnd;
 
 #[derive(serde::Serialize)]
 struct ZipEntry {
@@ -152,6 +154,79 @@ fn minimize_window(window: Window) -> Result<(), String> {
 #[tauri::command]
 fn close_window(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn toggle_fullscreen(window: Window) -> Result<bool, String> {
+    let is_fs = window.is_fullscreen().map_err(|e| e.to_string())?;
+    window.set_fullscreen(!is_fs).map_err(|e| e.to_string())?;
+    Ok(!is_fs)
+}
+
+#[tauri::command]
+fn is_window_fullscreen(window: Window) -> Result<bool, String> {
+    window.is_fullscreen().map_err(|e| e.to_string())
+}
+
+const SUPPORTED_IMAGE_EXTS: &[&str] = &[
+    "jpg", "jpeg", "png", "webp", "bmp", "ico", "tiff", "tif", "gif", "svg", "avif",
+];
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ImageFileInfo {
+    pub path: String,
+    pub file_name: String,
+    pub file_size: u64,
+    pub modified_millis: u64,
+}
+
+#[tauri::command]
+async fn get_folder_images(folder_path: String) -> Result<Vec<ImageFileInfo>, String> {
+    let p = std::path::PathBuf::from(&folder_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        if !p.is_dir() {
+            return Err(format!("'{}' is not a directory.", p.display()));
+        }
+
+        let read_dir = fs::read_dir(&p).map_err(|e| format!("Failed to read folder: {}", e))?;
+        let mut list = Vec::new();
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if SUPPORTED_IMAGE_EXTS.contains(&ext_lower.as_str()) {
+                        let metadata = entry.metadata().ok();
+                        let file_size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let modified_millis = metadata
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+
+                        let file_name = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        list.push(ImageFileInfo {
+                            path: path.to_string_lossy().to_string(),
+                            file_name,
+                            file_size,
+                            modified_millis,
+                        });
+                    }
+                }
+            }
+        }
+
+        list.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
+        Ok(list)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1662,6 +1737,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Windows 탐색기 ↔ MHZipy 네이티브 Drag&Drop 브리지
+        .plugin(native_dnd::init())
         // Hide window on close instead of quitting (tray background mode)
         // PDF viewer 창은 그냥 닫히고, Main 윈도우는 Tray 방향으로 축소 애니메이션 후 숨김
         .on_window_event(|window, event| {
@@ -1691,8 +1768,8 @@ pub fn run() {
                         (pos.x + size.width as i32, pos.y + size.height as i32)
                     };
 
-                    let steps = 12u32;
-                    let delay = std::time::Duration::from_millis(18);
+                    let steps = 6u32;
+                    let delay = std::time::Duration::from_millis(8);
 
                     for i in 1..=steps {
                         let t = i as f64 / steps as f64;
@@ -1744,8 +1821,13 @@ pub fn run() {
             is_window_maximized,
             minimize_window,
             close_window,
+            toggle_fullscreen,
+            is_window_fullscreen,
             read_text_file_content,
-            save_text_file_content
+            save_text_file_content,
+            get_folder_images,
+            icon::get_file_icons,
+            native_dnd::start_native_file_drag
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

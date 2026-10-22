@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { dirname, join } from '@tauri-apps/api/path';
 import { mkdir, rename } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 import FolderTree from "./FolderTree";
 import FileList from "./FileList";
 import SearchView from "../SearchView/SearchView";
@@ -34,8 +35,8 @@ export interface FileExplorerRef {
 }
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
@@ -466,6 +467,8 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
       const createdPaths = await pasteFiles(sourcePaths, targetDir, op);
       if (createdPaths && createdPaths.length > 0) {
         setRefreshTrigger(p => p + 1);
+        // 다른 창(드래그 원본 창 등)도 목록을 갱신하도록 알림
+        emit('mhz-refresh-files').catch(() => {});
         const normTarget = targetDir.replace(/[/\\]+/g, '/').toLowerCase().replace(/\/$/, '');
         const normSelected = selected.replace(/[/\\]+/g, '/').toLowerCase().replace(/\/$/, '');
         if (normTarget === normSelected) {
@@ -585,6 +588,12 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
       new WebviewWindow(label, {
         url,
         title: `MHZipy - ${targetPath}`,
+        // 메인 창(tauri.conf.json)과 동일하게 OS 네이티브 드롭을 꺼서 HTML5 Drag&Drop(창 간 포함)이 동작하도록 함
+        dragDropEnabled: false,
+        // 메인 창과 동일하게 OS 기본 타이틀바를 제거하고 앱 자체 Toolbar를 헤더로 사용
+        decorations: false,
+        width: 1280,
+        height: 960,
         ...(posX !== undefined && posY !== undefined ? { x: posX, y: posY } : {})
       });
     } catch (e) {
@@ -814,6 +823,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
         onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
         usePdfWorker={config.usePdfWorker}
+        useImageViewer={config.useImageViewer}
         recentOpenedFolders={config.recentOpenedFolders}
         pdfExportPath={pdfExportPath}
       />
@@ -999,6 +1009,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
             canPaste={!!clipboard && clipboard.paths.length > 0}
             onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
             usePdfWorker={config.usePdfWorker}
+            useImageViewer={config.useImageViewer}
             pdfExportPath={pdfExportPath}
             onSetDefault={handleSetDefault}
             onAddToQuickAccess={handleAddToQuickAccess}

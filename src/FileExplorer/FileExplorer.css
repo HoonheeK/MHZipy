@@ -6,10 +6,13 @@
 :root {
   --mhz-bg-root: #0b0f19;
   --mhz-bg-sidebar: #0f172a;
+  --mhz-bg-sidebar-opaque: #0f172a;
   --mhz-bg-main: #090d16;
   --mhz-bg-card: rgba(30, 41, 59, 0.5);
   --mhz-bg-hover: rgba(255, 255, 255, 0.06);
+  --mhz-bg-hover-opaque: #1a2536;
   --mhz-bg-selected: rgba(56, 189, 248, 0.15);
+  --mhz-bg-selected-opaque: #152d47;
   --mhz-border: rgba(255, 255, 255, 0.08);
   --mhz-border-light: rgba(255, 255, 255, 0.04);
   --mhz-text: #f1f5f9;
@@ -103,6 +106,27 @@
   background-color: var(--mhz-bg-selected) !important;
   color: var(--mhz-accent) !important;
   font-weight: 600;
+}
+
+/* Sticky Parent Folder Nodes in Tree (100% opaque to cover scrolling children) */
+.folder-tree-node.sticky {
+  border-radius: 0 !important;
+  background-color: var(--mhz-bg-sidebar-opaque) !important;
+}
+
+.folder-tree-node.sticky:hover:not(.selected) {
+  background-color: var(--mhz-bg-hover-opaque) !important;
+  color: #ffffff;
+}
+
+.folder-tree-node.sticky.selected {
+  background-color: var(--mhz-bg-selected-opaque) !important;
+  color: var(--mhz-accent) !important;
+  font-weight: 600;
+}
+
+.folder-tree-node.sticky.selected:hover {
+  background-color: #1a3859 !important;
 }
 
 /* 4. Splitter Resizer */

@@ -525,7 +525,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             className="mhz-win-ctrl-btn mhz-win-ctrl-close"
             onClick={handleCloseWindow}
             onMouseDown={(e) => e.stopPropagation()}
-            title="Close to System Tray"
+            title={getCurrentWindow().label === 'main' ? 'Close to System Tray' : 'Close Window'}
           >
             <X size={15} />
           </button>

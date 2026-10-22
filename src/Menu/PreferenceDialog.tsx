@@ -13,13 +13,14 @@ interface PreferenceDialogProps {
   initialColumnSettings?: { key: string; visible: boolean }[];
   initialLanguage?: string;
   initialUsePdfWorker?: boolean;
+  initialUseImageViewer?: boolean;
   initialLicenseEmail?: string;
   initialLicenseCode?: string;
   initialDisableUpdateCheck?: boolean;
   initialPdfExportPath?: string;
   licenseInfo?: any;
   onActivateLicense?: (email: string, code: string) => Promise<void>;
-  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string) => void;
+  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string, newUseImageViewer?: boolean) => void;
 }
 
 const DEFAULT_COLUMN_SETTINGS = [
@@ -32,7 +33,7 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo: _licenseInfo, onActivateLicense: _onActivateLicense, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialUseImageViewer, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo: _licenseInfo, onActivateLicense: _onActivateLicense, onSave }: PreferenceDialogProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'General' | 'Folder'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
@@ -42,6 +43,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   const [columnSettings, setColumnSettings] = useState<{ key: string; visible: boolean }[]>(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
   const [language, setLanguage] = useState<string>(initialLanguage || 'en');
   const [usePdfWorker, setUsePdfWorker] = useState<boolean>(initialUsePdfWorker !== false);
+  const [useImageViewer, setUseImageViewer] = useState<boolean>(initialUseImageViewer !== false);
   const [licenseEmail, setLicenseEmail] = useState<string>(initialLicenseEmail || '');
   const [licenseCode, setLicenseCode] = useState<string>(initialLicenseCode || '');
   const [disableUpdateCheck, setDisableUpdateCheck] = useState<boolean>(!!initialDisableUpdateCheck);
@@ -68,13 +70,14 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       setColumnSettings(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
       setLanguage(initialLanguage || 'en');
       setUsePdfWorker(initialUsePdfWorker !== false);
+      setUseImageViewer(initialUseImageViewer !== false);
       setLicenseEmail(initialLicenseEmail || '');
       setLicenseCode(initialLicenseCode || '');
       setDisableUpdateCheck(!!initialDisableUpdateCheck);
       setPdfExportPath(initialPdfExportPath || '');
       setPosition({ x: 0, y: 0 });
     }
-  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath]);
+  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialUseImageViewer, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -187,7 +190,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath);
+    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath, useImageViewer);
     onClose();
   };
 
@@ -317,6 +320,19 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <label htmlFor="pdfWorkerCheckbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, flex: 1 }}>
                   <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f8fafc' }}>{t('preferences.usePdfWorker', 'Use Built-in PDF Viewer')}</span>
                   <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>- {t('preferences.usePdfWorkerDesc', 'Open PDF files with internal PDF worker by default')}</span>
+                </label>
+              </div>
+              <div className="preference-item" style={{ flexDirection: 'row', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="imageViewerCheckbox"
+                  checked={useImageViewer}
+                  onChange={(e) => setUseImageViewer(e.target.checked)}
+                  style={{ width: '16px', height: '16px', margin: 0, cursor: 'pointer' }}
+                />
+                <label htmlFor="imageViewerCheckbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, flex: 1 }}>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f8fafc' }}>{t('preferences.useImageViewer', 'Use Built-in Image Viewer')}</span>
+                  <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>- {t('preferences.useImageViewerDesc', 'Open image files with internal image viewer by default')}</span>
                 </label>
               </div>
               <div className="preference-item" style={{ marginTop: '8px' }}>

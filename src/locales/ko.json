@@ -46,6 +46,8 @@
     "lang_vi": "베트남어",
     "usePdfWorker": "내장 PDF 뷰어 사용",
     "usePdfWorkerDesc": "기본적으로 내장된 PDF 뷰어로 PDF 파일을 엽니다",
+    "useImageViewer": "내장 이미지 뷰어 사용",
+    "useImageViewerDesc": "기본적으로 내장된 이미지 뷰어로 이미지 파일을 엽니다",
     "columnsTitle": "파일 목록 열 (표시 및 순서)",
     "columnsDesc": "체크하면 해당 열이 표시됩니다. 화살표를 사용하여 왼쪽에서 오른쪽 순서를 변경하세요.",
     "defaultStartFolder": "기본 시작 폴더",

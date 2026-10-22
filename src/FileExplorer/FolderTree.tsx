@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { checkPathPermission } from '../command/fileOperations';
+import { getDragPayload, consumeDragPayload, resolveExternalDropPaths, decideExternalDropOp } from '../utils/crossWindowDrag';
 
 interface FolderTreeProps {
   path: string;
@@ -276,8 +277,22 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const data = e.dataTransfer.getData('application/json');
+    const data = getDragPayload(e.dataTransfer);
+    if (!data) {
+      // Windows 탐색기 등 외부에서 드롭된 파일
+      const droppedFiles = Array.from(e.dataTransfer.files || []);
+      if (droppedFiles.length === 0) return;
+      const ctrl = e.ctrlKey || e.metaKey;
+      const shift = e.shiftKey;
+      resolveExternalDropPaths(droppedFiles).then((externalPaths) => {
+        if (externalPaths.length > 0) {
+          onMove(externalPaths, path, decideExternalDropOp(externalPaths, path, ctrl, shift));
+        }
+      });
+      return;
+    }
     if (data) {
+      consumeDragPayload();
       try {
         const parsed = JSON.parse(data);
         const paths = parsed.paths || parsed.files?.map((f: any) => f.path);
@@ -346,9 +361,10 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
             position: 'sticky',
             top: `${stickyTop}px`,
             zIndex: stickyZIndex,
-            backgroundColor: isSelected ? 'var(--mhz-bg-selected)' : 'var(--mhz-bg-sidebar)',
-            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.4)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+            backgroundColor: isSelected ? 'var(--mhz-bg-selected-opaque, #152d47)' : 'var(--mhz-bg-sidebar-opaque, #0f172a)',
+            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.5)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '0px',
           } : {})
         }}
       >

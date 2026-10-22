@@ -1,0 +1,354 @@
+/* MHZipy Image Viewer Styles */
+
+.mhz-iv-container {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 0%, #17223b 0%, #0a0f1d 75%);
+  color: #f1f5f9;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 1. Window Header / Titlebar */
+.mhz-iv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  background-color: #0b1120;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  padding: 0 0 0 12px;
+  flex-shrink: 0;
+  z-index: 100;
+  -webkit-app-region: drag;
+}
+
+.mhz-iv-title-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mhz-iv-app-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 4px;
+}
+
+.mhz-iv-app-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #38bdf8;
+  letter-spacing: 0.5px;
+}
+
+.mhz-iv-filename {
+  font-size: 12px;
+  font-weight: 500;
+  color: #cbd5e1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mhz-iv-win-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.mhz-iv-win-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 38px;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+
+.mhz-iv-win-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.mhz-iv-win-btn.close:hover {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+/* 2. Action Toolbar */
+.mhz-iv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background-color: #111827;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  flex-shrink: 0;
+  z-index: 90;
+}
+
+.mhz-iv-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.mhz-iv-toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(148, 163, 184, 0.18);
+  margin: 0 4px;
+}
+
+.mhz-iv-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.mhz-iv-tool-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.mhz-iv-tool-btn.active {
+  background: rgba(56, 189, 248, 0.16);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+}
+
+.mhz-iv-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 3. Canvas Viewport */
+.mhz-iv-canvas-viewport {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  cursor: grab;
+  background-color: transparent;
+}
+
+.mhz-iv-canvas-viewport.panning {
+  cursor: grabbing;
+}
+
+.mhz-iv-image-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.mhz-iv-rendered-image {
+  display: block;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  max-width: none;
+  max-height: none;
+  transition: transform 0.1s ease-out;
+}
+
+.mhz-iv-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #64748b;
+  font-size: 14px;
+}
+
+/* 4. Filmstrip Drawer */
+.mhz-iv-filmstrip-container {
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+  flex-shrink: 0;
+  z-index: 80;
+}
+
+.mhz-iv-filmstrip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: rgba(17, 24, 39, 0.7);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.mhz-iv-filmstrip-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.mhz-iv-filmstrip-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mhz-iv-filmstrip-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.mhz-iv-filmstrip-scroll {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 90px;
+  cursor: grab;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.25) transparent;
+}
+
+.mhz-iv-filmstrip-scroll.is-dragging {
+  cursor: grabbing;
+}
+
+.mhz-iv-filmstrip-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.mhz-iv-filmstrip-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 3px;
+}
+
+.mhz-iv-filmstrip-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 74px;
+  min-width: 74px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 3px;
+  border: 2px solid transparent;
+  transition: all 0.12s ease;
+}
+
+.mhz-iv-filmstrip-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.mhz-iv-filmstrip-item.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.mhz-iv-filmstrip-thumb-wrap {
+  width: 100%;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mhz-iv-filmstrip-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.mhz-iv-filmstrip-label {
+  font-size: 10px;
+  color: #94a3b8;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mhz-iv-filmstrip-item.active .mhz-iv-filmstrip-label {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+/* 5. Status Bar */
+.mhz-iv-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 12px;
+  background-color: #0b1120;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 11px;
+  color: #94a3b8;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.mhz-iv-status-left,
+.mhz-iv-status-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mhz-iv-status-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mhz-iv-status-badge {
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  color: #cbd5e1;
+  font-weight: 600;
+}

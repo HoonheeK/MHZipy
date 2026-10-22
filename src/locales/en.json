@@ -46,6 +46,8 @@
     "lang_vi": "Vietnamese",
     "usePdfWorker": "Use Built-in PDF Viewer",
     "usePdfWorkerDesc": "Open PDF files with internal PDF worker by default",
+    "useImageViewer": "Use Built-in Image Viewer",
+    "useImageViewerDesc": "Open image files with internal image viewer by default",
     "columnsTitle": "File List Columns (Visibility & Order)",
     "columnsDesc": "Check to show columns. Use arrows to reorder them from left to right.",
     "defaultStartFolder": "Default Start Folder",

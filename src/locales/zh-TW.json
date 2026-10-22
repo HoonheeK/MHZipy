@@ -46,6 +46,8 @@
     "lang_vi": "Vietnamese",
     "usePdfWorker": "使用內建 PDF 閱讀器",
     "usePdfWorkerDesc": "預設使用內建 PDF 閱讀器開啟 PDF 檔案",
+    "useImageViewer": "使用內建圖像檢視器",
+    "useImageViewerDesc": "預設使用內建圖像檢視器開啟圖像檔案",
     "columnsTitle": "File List Columns (Visibility & Order)",
     "columnsDesc": "Check to show columns. Use arrows to reorder them from left to right.",
     "defaultStartFolder": "Default Start Folder",
