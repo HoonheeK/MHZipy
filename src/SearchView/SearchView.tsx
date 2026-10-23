@@ -30,6 +30,7 @@ interface SearchViewProps {
   onSelectionChange?: (paths: Set<string>) => void;
   usePdfWorker?: boolean;
   useImageViewer?: boolean;
+  useVideoPlayer?: boolean;
   pdfExportPath?: string;
   onSearchChange?: (query: string) => void;
 }
@@ -103,6 +104,7 @@ export default function SearchView({
   onSelectionChange,
   usePdfWorker,
   useImageViewer,
+  useVideoPlayer,
   pdfExportPath,
   onSearchChange
 }: SearchViewProps) {
@@ -811,6 +813,7 @@ export default function SearchView({
               pdfExportPath={pdfExportPath}
               usePdfWorker={usePdfWorker}
               useImageViewer={useImageViewer}
+              useVideoPlayer={useVideoPlayer}
             />
           )}
         </div>

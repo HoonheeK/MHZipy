@@ -35,8 +35,8 @@ export interface FileExplorerRef {
 }
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; useVideoPlayer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; useVideoPlayer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
@@ -824,6 +824,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
         onSaveSearchConfig={(newSearchConfig) => onSaveConfig({ search: newSearchConfig })}
         usePdfWorker={config.usePdfWorker}
         useImageViewer={config.useImageViewer}
+        useVideoPlayer={config.useVideoPlayer}
         recentOpenedFolders={config.recentOpenedFolders}
         pdfExportPath={pdfExportPath}
       />
@@ -1010,6 +1011,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
             onColumnSettingsChange={(newSettings) => onSaveConfig({ columnSettings: newSettings })}
             usePdfWorker={config.usePdfWorker}
             useImageViewer={config.useImageViewer}
+            useVideoPlayer={config.useVideoPlayer}
             pdfExportPath={pdfExportPath}
             onSetDefault={handleSetDefault}
             onAddToQuickAccess={handleAddToQuickAccess}

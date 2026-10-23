@@ -285,6 +285,127 @@
   cursor: not-allowed;
 }
 
+.tb-btn.active {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+/* Navigation Button Wrapper for Dropdown Menus */
+.tb-nav-btn-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* History Dropdown Popup (Long-press / Right-click) */
+.tb-history-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 250px;
+  max-width: 380px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(56, 189, 248, 0.25);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 1000;
+  backdrop-filter: blur(16px);
+  animation: brandMenuFadeIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tb-history-dropdown::-webkit-scrollbar {
+  width: 5px;
+}
+.tb-history-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tb-history-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.tb-history-dropdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.tb-history-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+  padding: 4px 8px 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 3px;
+  user-select: none;
+}
+
+.tb-history-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--tb-text);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.tb-history-item:hover {
+  background: rgba(56, 189, 248, 0.15);
+  color: #ffffff;
+}
+
+.tb-history-item-icon {
+  flex-shrink: 0;
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tb-history-item-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.tb-history-item-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tb-history-item-path {
+  font-size: 10.5px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+.tb-history-item:hover .tb-history-item-path {
+  color: #94a3b8;
+}
+
 .tb-btn.primary {
   background: rgba(56, 189, 248, 0.15);
   color: #38bdf8;
@@ -317,21 +438,27 @@
 }
 
 /* 3. Address Bar & In-Folder Filter Search */
+.mhz-action-buttons {
+  flex-shrink: 0;
+}
+
+/* 3. Address Bar & In-Folder Filter Search */
 .tb-path-search-group {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1 1 300px;
+  flex: 1 1 240px;
   max-width: 550px;
   margin: 0 6px;
-  min-width: 140px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tb-address-bar {
   display: flex;
   align-items: center;
-  flex: 1 1 auto;
-  min-width: 100px;
+  flex: 1 1 120px;
+  min-width: 60px;
   height: 30px;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -339,6 +466,7 @@
   padding: 0 8px;
   gap: 6px;
   transition: all 0.2s ease;
+  overflow: hidden;
 }
 
 .tb-address-bar:focus-within {
@@ -349,7 +477,8 @@
 
 .tb-address-input {
   flex: 1;
-  min-width: 40px;
+  min-width: 0;
+  width: 100%;
   background: transparent;
   border: none;
   outline: none;
@@ -362,8 +491,9 @@
 .tb-search-filter {
   display: flex;
   align-items: center;
-  width: 160px;
-  flex-shrink: 0;
+  flex: 0 1 150px;
+  width: 150px;
+  min-width: 80px;
   height: 30px;
   background: rgba(15, 23, 42, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -371,6 +501,7 @@
   padding: 0 8px;
   gap: 6px;
   transition: all 0.2s ease;
+  overflow: hidden;
 }
 
 .tb-search-filter:focus-within {
@@ -381,7 +512,8 @@
 
 .tb-search-input {
   flex: 1;
-  min-width: 30px;
+  min-width: 0;
+  width: 100%;
   background: transparent;
   border: none;
   outline: none;
@@ -401,6 +533,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .tb-clear-btn:hover {
@@ -446,21 +579,22 @@
 }
 
 /* 5. Responsive Breakpoints */
-@media (max-width: 1260px) {
+@media (max-width: 1380px) {
   .mhz-action-buttons .tb-btn-text {
     display: none;
   }
-  .tb-btn {
+  .mhz-action-buttons .tb-btn {
     padding: 6px 8px;
     gap: 0;
   }
   .tb-search-filter {
-    width: 130px;
+    flex: 0 1 120px;
+    width: 120px;
   }
 }
 
-/* 화면이 줄어들 때 압축하기/풀기, 폴더 만들기, New MD File 액션 버튼 숨김 */
-@media (max-width: 1100px) {
+/* 화면이 더 좁아질 때 (1060px 이하) 액션 버튼 숨김 (컨텍스트 메뉴 및 단축키로 이용) */
+@media (max-width: 1060px) {
   .mhz-action-buttons {
     display: none !important;
   }

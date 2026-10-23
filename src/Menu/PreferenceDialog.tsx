@@ -14,13 +14,14 @@ interface PreferenceDialogProps {
   initialLanguage?: string;
   initialUsePdfWorker?: boolean;
   initialUseImageViewer?: boolean;
+  initialUseVideoPlayer?: boolean;
   initialLicenseEmail?: string;
   initialLicenseCode?: string;
   initialDisableUpdateCheck?: boolean;
   initialPdfExportPath?: string;
   licenseInfo?: any;
   onActivateLicense?: (email: string, code: string) => Promise<void>;
-  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string, newUseImageViewer?: boolean) => void;
+  onSave: (newDefaultPath: string, newQuickAccess?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string, newUseImageViewer?: boolean, newUseVideoPlayer?: boolean) => void;
 }
 
 const DEFAULT_COLUMN_SETTINGS = [
@@ -33,7 +34,7 @@ const DEFAULT_COLUMN_SETTINGS = [
   { key: 'path', visible: true },
 ];
 
-export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialUseImageViewer, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo: _licenseInfo, onActivateLicense: _onActivateLicense, onSave }: PreferenceDialogProps) {
+export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialUseImageViewer, initialUseVideoPlayer, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath, licenseInfo: _licenseInfo, onActivateLicense: _onActivateLicense, onSave }: PreferenceDialogProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'General' | 'Folder'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
@@ -44,6 +45,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   const [language, setLanguage] = useState<string>(initialLanguage || 'en');
   const [usePdfWorker, setUsePdfWorker] = useState<boolean>(initialUsePdfWorker !== false);
   const [useImageViewer, setUseImageViewer] = useState<boolean>(initialUseImageViewer !== false);
+  const [useVideoPlayer, setUseVideoPlayer] = useState<boolean>(initialUseVideoPlayer !== false);
   const [licenseEmail, setLicenseEmail] = useState<string>(initialLicenseEmail || '');
   const [licenseCode, setLicenseCode] = useState<string>(initialLicenseCode || '');
   const [disableUpdateCheck, setDisableUpdateCheck] = useState<boolean>(!!initialDisableUpdateCheck);
@@ -71,13 +73,14 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
       setLanguage(initialLanguage || 'en');
       setUsePdfWorker(initialUsePdfWorker !== false);
       setUseImageViewer(initialUseImageViewer !== false);
+      setUseVideoPlayer(initialUseVideoPlayer !== false);
       setLicenseEmail(initialLicenseEmail || '');
       setLicenseCode(initialLicenseCode || '');
       setDisableUpdateCheck(!!initialDisableUpdateCheck);
       setPdfExportPath(initialPdfExportPath || '');
       setPosition({ x: 0, y: 0 });
     }
-  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialUseImageViewer, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath]);
+  }, [isOpen, initialDefaultPath, initialQuickAccessFolders, initialEditableFolders, initialReadonlyFolders, initialColumnSettings, initialLanguage, initialUsePdfWorker, initialUseImageViewer, initialUseVideoPlayer, initialLicenseEmail, initialLicenseCode, initialDisableUpdateCheck, initialPdfExportPath]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -190,7 +193,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath, useImageViewer);
+    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath, useImageViewer, useVideoPlayer);
     onClose();
   };
 
@@ -333,6 +336,19 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 <label htmlFor="imageViewerCheckbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, flex: 1 }}>
                   <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f8fafc' }}>{t('preferences.useImageViewer', 'Use Built-in Image Viewer')}</span>
                   <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>- {t('preferences.useImageViewerDesc', 'Open image files with internal image viewer by default')}</span>
+                </label>
+              </div>
+              <div className="preference-item" style={{ flexDirection: 'row', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
+                <input
+                  type="checkbox"
+                  id="videoPlayerCheckbox"
+                  checked={useVideoPlayer}
+                  onChange={(e) => setUseVideoPlayer(e.target.checked)}
+                  style={{ width: '16px', height: '16px', margin: 0, cursor: 'pointer' }}
+                />
+                <label htmlFor="videoPlayerCheckbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', margin: 0, flex: 1 }}>
+                  <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f8fafc' }}>{t('preferences.useVideoPlayer', 'Use Built-in Video Player')}</span>
+                  <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>- {t('preferences.useVideoPlayerDesc', 'Open video files with internal video player by default')}</span>
                 </label>
               </div>
               <div className="preference-item" style={{ marginTop: '8px' }}>

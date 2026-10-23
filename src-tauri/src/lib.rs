@@ -229,6 +229,67 @@ async fn get_folder_images(folder_path: String) -> Result<Vec<ImageFileInfo>, St
     .map_err(|e| e.to_string())?
 }
 
+const SUPPORTED_VIDEO_EXTS: &[&str] = &[
+    "mp4", "mkv", "webm", "mov", "avi", "wmv", "flv", "m4v", "3gp", "ts", "asf", "rmvb",
+];
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct VideoFileInfo {
+    pub path: String,
+    pub file_name: String,
+    pub file_size: u64,
+    pub modified_millis: u64,
+}
+
+#[tauri::command]
+async fn get_folder_videos(folder_path: String) -> Result<Vec<VideoFileInfo>, String> {
+    let p = std::path::PathBuf::from(&folder_path);
+    tauri::async_runtime::spawn_blocking(move || {
+        if !p.is_dir() {
+            return Err(format!("'{}' is not a directory.", p.display()));
+        }
+
+        let read_dir = fs::read_dir(&p).map_err(|e| format!("Failed to read folder: {}", e))?;
+        let mut list = Vec::new();
+
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if SUPPORTED_VIDEO_EXTS.contains(&ext_lower.as_str()) {
+                        let metadata = entry.metadata().ok();
+                        let file_size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let modified_millis = metadata
+                            .and_then(|m| m.modified().ok())
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+
+                        let file_name = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        list.push(VideoFileInfo {
+                            path: path.to_string_lossy().to_string(),
+                            file_name,
+                            file_size,
+                            modified_millis,
+                        });
+                    }
+                }
+            }
+        }
+
+        list.sort_by(|a, b| a.file_name.to_lowercase().cmp(&b.file_name.to_lowercase()));
+        Ok(list)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TextFileContent {
     pub content: String,
@@ -1826,6 +1887,7 @@ pub fn run() {
             read_text_file_content,
             save_text_file_content,
             get_folder_images,
+            get_folder_videos,
             icon::get_file_icons,
             native_dnd::start_native_file_drag
         ])

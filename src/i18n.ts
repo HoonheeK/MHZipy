@@ -57,15 +57,44 @@ const resources = {
   'zh': { translation: zh },
 };
 
+const getInitialLanguage = (): string => {
+  try {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlLang = params.get('lang');
+      if (urlLang && Object.prototype.hasOwnProperty.call(resources, urlLang)) {
+        return urlLang;
+      }
+      const savedLang = localStorage.getItem('appLanguage') || localStorage.getItem('i18nextLng');
+      if (savedLang && Object.prototype.hasOwnProperty.call(resources, savedLang)) {
+        return savedLang;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to detect initial language:', e);
+  }
+  return 'en';
+};
+
 i18n
   .use(initReactI18next)
   .init({
     resources,
-    lng: 'en', // Default language
+    lng: getInitialLanguage(),
     fallbackLng: 'en',
     interpolation: {
       escapeValue: false // React already safes from xss
     }
   });
 
+if (typeof window !== 'undefined') {
+  i18n.on('languageChanged', (lng) => {
+    try {
+      localStorage.setItem('appLanguage', lng);
+      localStorage.setItem('i18nextLng', lng);
+    } catch {}
+  });
+}
+
 export default i18n;
+

@@ -1,6 +1,7 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message } from '@tauri-apps/plugin-dialog';
+import i18n from '../i18n';
 
 export interface ImageFileTarget {
   path: string;
@@ -39,8 +40,9 @@ export const openImageInWindow = async (file: ImageFileTarget) => {
       console.warn('현재 창 위치를 가져올 수 없습니다:', e);
     }
 
+    const currentLang = i18n.language || 'en';
     const webview = new WebviewWindow(windowLabel, {
-      url: `index.html?view=image-viewer&filePath=${encodeURIComponent(file.path)}&title=${encodeURIComponent(file.name)}`,
+      url: `index.html?view=image-viewer&filePath=${encodeURIComponent(file.path)}&title=${encodeURIComponent(file.name)}&lang=${encodeURIComponent(currentLang)}`,
       title: `${file.name} - MHZipy Image Viewer`,
       width: 1120,
       height: 820,

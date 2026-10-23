@@ -18,10 +18,12 @@ import {
   ChevronDown,
   X,
   Square,
+  HardDrive,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import logoImg from '../../assets/logo.png';
+import { useTranslation } from 'react-i18next';
 import './Toolbar.css';
 
 export interface ToolbarProps {
@@ -39,6 +41,10 @@ export interface ToolbarProps {
   onGoUp?: () => void;
   canGoUp?: boolean;
   onRefresh?: () => void;
+  backHistory?: string[];
+  forwardHistory?: string[];
+  onJumpBack?: (index: number) => void;
+  onJumpForward?: (index: number) => void;
 
   // Path & Filter
   currentPath: string;
@@ -59,6 +65,17 @@ export interface ToolbarProps {
   onToggleView: (view: 'folder' | 'search') => void;
 }
 
+function getFolderName(path: string): string {
+  if (!path) return '';
+  const trimmed = path.trim().replace(/[\\/]+$/, '');
+  if (!trimmed) return path;
+  if (/^[A-Za-z]:$/.test(trimmed)) {
+    return `${trimmed}\\`;
+  }
+  const parts = trimmed.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
 export const Toolbar: React.FC<ToolbarProps> = ({
   onAbout,
   onOpenSource,
@@ -71,6 +88,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onGoUp,
   canGoUp = true,
   onRefresh,
+  backHistory = [],
+  forwardHistory = [],
+  onJumpBack,
+  onJumpForward,
   currentPath,
   onNavigatePath,
   searchQuery,
@@ -84,11 +105,157 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   currentView,
   onToggleView,
 }) => {
+  const { t } = useTranslation();
   const [isBrandMenuOpen, setIsBrandMenuOpen] = useState(false);
   const brandMenuRef = useRef<HTMLDivElement>(null);
 
+  // History Dropdown State (Long-press / Right-click on Back/Forward buttons)
+  const [activeHistoryMenu, setActiveHistoryMenu] = useState<'back' | 'forward' | null>(null);
+  const backNavRef = useRef<HTMLDivElement>(null);
+  const forwardNavRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLongPressTriggeredRef = useRef(false);
+
   const [addressInput, setAddressInput] = useState(currentPath);
   const [localSearch, setLocalSearch] = useState(searchQuery);
+
+  // Close history menu on outside click or Escape key
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        activeHistoryMenu === 'back' &&
+        backNavRef.current &&
+        !backNavRef.current.contains(e.target as Node)
+      ) {
+        setActiveHistoryMenu(null);
+      } else if (
+        activeHistoryMenu === 'forward' &&
+        forwardNavRef.current &&
+        !forwardNavRef.current.contains(e.target as Node)
+      ) {
+        setActiveHistoryMenu(null);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActiveHistoryMenu(null);
+      }
+    };
+
+    if (activeHistoryMenu) {
+      document.addEventListener('mousedown', handleOutsideClick);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [activeHistoryMenu]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    };
+  }, []);
+
+  const handleBackMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !canGoBack) return;
+    isLongPressTriggeredRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      if (canGoBack && backHistory && backHistory.length > 0) {
+        isLongPressTriggeredRef.current = true;
+        setActiveHistoryMenu('back');
+      }
+    }, 400);
+  };
+
+  const handleBackMouseUp = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleNavMouseLeave = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleBackClick = () => {
+    if (isLongPressTriggeredRef.current) {
+      isLongPressTriggeredRef.current = false;
+      return;
+    }
+    if (activeHistoryMenu === 'back') {
+      setActiveHistoryMenu(null);
+      return;
+    }
+    onBack();
+  };
+
+  const handleBackContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (canGoBack && backHistory && backHistory.length > 0) {
+      setActiveHistoryMenu((prev) => (prev === 'back' ? null : 'back'));
+    }
+  };
+
+  const handleForwardMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0 || !canGoForward) return;
+    isLongPressTriggeredRef.current = false;
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => {
+      if (canGoForward && forwardHistory && forwardHistory.length > 0) {
+        isLongPressTriggeredRef.current = true;
+        setActiveHistoryMenu('forward');
+      }
+    }, 400);
+  };
+
+  const handleForwardMouseUp = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleForwardClick = () => {
+    if (isLongPressTriggeredRef.current) {
+      isLongPressTriggeredRef.current = false;
+      return;
+    }
+    if (activeHistoryMenu === 'forward') {
+      setActiveHistoryMenu(null);
+      return;
+    }
+    onNext();
+  };
+
+  const handleForwardContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (canGoForward && forwardHistory && forwardHistory.length > 0) {
+      setActiveHistoryMenu((prev) => (prev === 'forward' ? null : 'forward'));
+    }
+  };
+
+  const reversedBackHistory = React.useMemo(() => {
+    if (!backHistory) return [];
+    return backHistory
+      .map((path, originalIndex) => ({ path, originalIndex }))
+      .reverse();
+  }, [backHistory]);
+
+  const reversedForwardHistory = React.useMemo(() => {
+    if (!forwardHistory) return [];
+    return forwardHistory
+      .map((path, originalIndex) => ({ path, originalIndex }))
+      .reverse();
+  }, [forwardHistory]);
 
   // Sync address input when currentPath changes from outside
   useEffect(() => {
@@ -280,7 +447,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 }}
               >
                 <Settings size={15} />
-                <span className="menu-text">Preferences</span>
+                <span className="menu-text">{t('preferences.title', 'Preferences')}</span>
                 <span className="menu-shortcut">Alt+P</span>
               </button>
 
@@ -293,7 +460,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 }}
               >
                 <ShieldCheck size={15} />
-                <span className="menu-text">License</span>
+                <span className="menu-text">{t('preferences.license', 'License')}</span>
               </button>
 
               <div className="brand-menu-divider" />
@@ -307,7 +474,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 }}
               >
                 <Info size={15} />
-                <span className="menu-text">About MHZipy</span>
+                <span className="menu-text">{t('menu.about', 'About MHZipy')}</span>
               </button>
 
               <button
@@ -319,7 +486,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 }}
               >
                 <BookOpen size={15} />
-                <span className="menu-text">Open Source</span>
+                <span className="menu-text">{t('menu.openSource', 'Open Source')}</span>
               </button>
             </div>
           )}
@@ -327,26 +494,105 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         <div className="mhz-toolbar-divider" />
 
-        {/* Directory Navigation Buttons */}
-        <button
-          type="button"
-          className="tb-btn"
-          onClick={onBack}
-          disabled={!canGoBack}
-          title="Back (Alt+Left)"
-        >
-          <ChevronLeft size={16} />
-        </button>
+        {/* Back Button with Long-press / Right-click History Dropdown */}
+        <div className="tb-nav-btn-wrapper" ref={backNavRef}>
+          <button
+            type="button"
+            className={`tb-btn ${activeHistoryMenu === 'back' ? 'active' : ''}`}
+            onClick={handleBackClick}
+            onMouseDown={handleBackMouseDown}
+            onMouseUp={handleBackMouseUp}
+            onMouseLeave={handleNavMouseLeave}
+            onContextMenu={handleBackContextMenu}
+            disabled={!canGoBack}
+            title={`${t('menu.back', 'Back')} (Alt+Left)`}
+          >
+            <ChevronLeft size={16} />
+          </button>
 
-        <button
-          type="button"
-          className="tb-btn"
-          onClick={onNext}
-          disabled={!canGoForward}
-          title="Forward (Alt+Right)"
-        >
-          <ChevronRight size={16} />
-        </button>
+          {activeHistoryMenu === 'back' && canGoBack && reversedBackHistory.length > 0 && (
+            <div className="tb-history-dropdown" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="tb-history-header">
+                {t('toolbar.historyBack', 'History (Back)')}
+              </div>
+              {reversedBackHistory.map((item) => {
+                const isDrive = /^[A-Za-z]:[\\/]?$/.test(item.path);
+                const name = getFolderName(item.path);
+                return (
+                  <button
+                    key={`back-hist-${item.originalIndex}`}
+                    type="button"
+                    className="tb-history-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveHistoryMenu(null);
+                      onJumpBack?.(item.originalIndex);
+                    }}
+                    title={item.path}
+                  >
+                    <span className="tb-history-item-icon">
+                      {isDrive ? <HardDrive size={15} /> : <Folder size={15} />}
+                    </span>
+                    <div className="tb-history-item-info">
+                      <span className="tb-history-item-name">{name}</span>
+                      <span className="tb-history-item-path">{item.path}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Forward Button with Long-press / Right-click History Dropdown */}
+        <div className="tb-nav-btn-wrapper" ref={forwardNavRef}>
+          <button
+            type="button"
+            className={`tb-btn ${activeHistoryMenu === 'forward' ? 'active' : ''}`}
+            onClick={handleForwardClick}
+            onMouseDown={handleForwardMouseDown}
+            onMouseUp={handleForwardMouseUp}
+            onMouseLeave={handleNavMouseLeave}
+            onContextMenu={handleForwardContextMenu}
+            disabled={!canGoForward}
+            title={`${t('menu.forward', 'Forward')} (Alt+Right)`}
+          >
+            <ChevronRight size={16} />
+          </button>
+
+          {activeHistoryMenu === 'forward' && canGoForward && reversedForwardHistory.length > 0 && (
+            <div className="tb-history-dropdown" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="tb-history-header">
+                {t('toolbar.historyForward', 'History (Forward)')}
+              </div>
+              {reversedForwardHistory.map((item) => {
+                const isDrive = /^[A-Za-z]:[\\/]?$/.test(item.path);
+                const name = getFolderName(item.path);
+                return (
+                  <button
+                    key={`fwd-hist-${item.originalIndex}`}
+                    type="button"
+                    className="tb-history-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveHistoryMenu(null);
+                      onJumpForward?.(item.originalIndex);
+                    }}
+                    title={item.path}
+                  >
+                    <span className="tb-history-item-icon">
+                      {isDrive ? <HardDrive size={15} /> : <Folder size={15} />}
+                    </span>
+                    <div className="tb-history-item-info">
+                      <span className="tb-history-item-name">{name}</span>
+                      <span className="tb-history-item-path">{item.path}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {onGoUp && (
           <button
@@ -354,7 +600,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             className="tb-btn"
             onClick={onGoUp}
             disabled={!canGoUp}
-            title="Up to Parent Directory (Alt+Up)"
+            title={`${t('menu.up', 'Up')} (Alt+Up)`}
           >
             <ArrowUp size={16} />
           </button>
@@ -365,7 +611,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             type="button"
             className="tb-btn"
             onClick={onRefresh}
-            title="Refresh (F5 / Ctrl+R)"
+            title={`${t('menu.refresh', 'Refresh')} (F5 / Ctrl+R)`}
           >
             <RotateCw size={15} />
           </button>
@@ -375,7 +621,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       {/* 2. Center Group: Address Bar & In-Folder Filter */}
       {currentView === 'folder' && (
         <div className="tb-path-search-group">
-          <div className="tb-address-bar" title="Current Location (Press Enter to go)">
+          <div className="tb-address-bar" title={t('toolbar.currentLocation', 'Current Location (Press Enter to go)')}>
             <Folder size={15} color="#38bdf8" style={{ flexShrink: 0 }} />
             <input
               type="text"
@@ -383,19 +629,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               value={addressInput}
               onChange={(e) => setAddressInput(e.target.value)}
               onKeyDown={handleAddressKeyDown}
-              placeholder="Enter directory path..."
+              placeholder={t('toolbar.enterPath', 'Enter directory path...')}
               spellCheck={false}
             />
           </div>
 
-          <div className="tb-search-filter" title="Filter files in current folder">
+          <div className="tb-search-filter" title={t('menu.searchPlaceholder', 'Filter files in current folder')}>
             <Search size={14} color="#94a3b8" style={{ flexShrink: 0 }} />
             <input
               type="text"
               className="tb-search-input"
               value={localSearch}
               onChange={(e) => setLocalSearch(e.target.value)}
-              placeholder="Filter..."
+              placeholder={t('toolbar.filterPlaceholder', 'Filter...')}
               spellCheck={false}
             />
             {localSearch && (
@@ -403,7 +649,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 type="button"
                 className="tb-clear-btn"
                 onClick={() => setLocalSearch('')}
-                title="Clear filter"
+                title={t('toolbar.clearFilter', 'Clear filter')}
               >
                 <X size={13} />
               </button>
@@ -422,10 +668,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className={`tb-btn ${hasSelectedFiles ? 'primary' : ''}`}
           onClick={onCompress}
           disabled={!hasSelectedFiles}
-          title="Compress Selected Items to ZIP (Alt+C)"
+          title={`${t('fileList.compress', 'Compress')} (Alt+C)`}
         >
           <Package size={15} />
-          <span className="tb-btn-text">Compress</span>
+          <span className="tb-btn-text">{t('fileList.compress', 'Compress')}</span>
         </button>
 
         {/* Extract Action (Highlighted if ZIP selected) */}
@@ -434,10 +680,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           className={`tb-btn ${isZipSelected ? 'highlight-zip' : ''}`}
           onClick={onExtract}
           disabled={!isZipSelected}
-          title="Extract Archive (Alt+E)"
+          title={`${t('fileList.extract', 'Extract')} (Alt+E)`}
         >
           <PackageOpen size={15} />
-          <span className="tb-btn-text">Extract</span>
+          <span className="tb-btn-text">{t('fileList.extract', 'Extract')}</span>
         </button>
 
         {/* New Folder */}
@@ -445,10 +691,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           type="button"
           className="tb-btn"
           onClick={onNewFolder}
-          title="Create New Folder (Ctrl+Shift+N)"
+          title={`${t('contextMenu.createFolder', 'New Folder')} (Ctrl+Shift+N)`}
         >
           <FolderPlus size={15} />
-          <span className="tb-btn-text">New Folder</span>
+          <span className="tb-btn-text">{t('contextMenu.createFolder', 'New Folder')}</span>
         </button>
 
         {/* New MD File */}
@@ -456,10 +702,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           type="button"
           className="tb-btn"
           onClick={onNewMdFile}
-          title="Create New Markdown File (Ctrl+Shift+M)"
+          title={`${t('contextMenu.createMarkdownFile', 'New MD File')} (Ctrl+Shift+M)`}
         >
           <FilePlus size={15} />
-          <span className="tb-btn-text">New MD File</span>
+          <span className="tb-btn-text">{t('contextMenu.createMarkdownFile', 'New MD File')}</span>
         </button>
       </div>
 
@@ -488,19 +734,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             type="button"
             className={`tb-view-option ${currentView === 'folder' ? 'active' : ''}`}
             onClick={() => onToggleView('folder')}
-            title="Explorer Folder View"
+            title={t('menu.folderView', 'Folder View')}
           >
             <Folder size={13} />
-            <span>Folder</span>
+            <span>{t('menu.folderView', 'Folder')}</span>
           </button>
           <button
             type="button"
             className={`tb-view-option ${currentView === 'search' ? 'active' : ''}`}
             onClick={() => onToggleView('search')}
-            title="Ultra-fast MFT Index Search"
+            title={t('menu.search', 'Search')}
           >
             <Search size={13} />
-            <span>Search</span>
+            <span>{t('menu.search', 'Search')}</span>
           </button>
         </div>
 
@@ -511,7 +757,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             className="mhz-win-ctrl-btn"
             onClick={handleToggleMaximize}
             onMouseDown={(e) => e.stopPropagation()}
-            title={isMaximized ? 'Restore Down' : 'Maximize'}
+            title={isMaximized ? t('viewer.restore', 'Restore Down') : t('viewer.maximize', 'Maximize')}
           >
             {isMaximized ? (
               <Copy size={13} style={{ transform: 'rotate(180deg)' }} />
@@ -525,7 +771,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             className="mhz-win-ctrl-btn mhz-win-ctrl-close"
             onClick={handleCloseWindow}
             onMouseDown={(e) => e.stopPropagation()}
-            title={getCurrentWindow().label === 'main' ? 'Close to System Tray' : 'Close Window'}
+            title={getCurrentWindow().label === 'main' ? t('viewer.close', 'Close to System Tray') : t('viewer.close', 'Close Window')}
           >
             <X size={15} />
           </button>

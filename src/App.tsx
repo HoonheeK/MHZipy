@@ -51,6 +51,7 @@ interface AppConfig {
   language?: string;
   usePdfWorker?: boolean;
   useImageViewer?: boolean;
+  useVideoPlayer?: boolean;
   licenseEmail?: string;
   licenseCode?: string;
   recentOpenedFolders?: string[];
@@ -388,6 +389,32 @@ function App() {
     setRequestedPath(nextPath);
   };
 
+  const handleJumpBack = (targetIndex: number) => {
+    if (targetIndex < 0 || targetIndex >= history.length) return;
+    const targetPath = history[targetIndex];
+    const intermediateForward = history.slice(targetIndex + 1);
+    const newForward = currentPath
+      ? [...forwardHistory, currentPath, ...intermediateForward]
+      : [...forwardHistory, ...intermediateForward];
+    const newHistory = history.slice(0, targetIndex);
+    setHistory(newHistory);
+    setForwardHistory(newForward);
+    setRequestedPath(targetPath);
+  };
+
+  const handleJumpForward = (targetIndex: number) => {
+    if (targetIndex < 0 || targetIndex >= forwardHistory.length) return;
+    const targetPath = forwardHistory[targetIndex];
+    const intermediateHistory = forwardHistory.slice(targetIndex + 1);
+    const newHistory = currentPath
+      ? [...history, currentPath, ...intermediateHistory]
+      : [...history, ...intermediateHistory];
+    const newForward = forwardHistory.slice(0, targetIndex);
+    setHistory(newHistory);
+    setForwardHistory(newForward);
+    setRequestedPath(targetPath);
+  };
+
   useEffect(() => {
     const handleNavigationKeyDown = (e: KeyboardEvent) => {
       // Modal dialogs open check
@@ -481,6 +508,10 @@ function App() {
         canGoBack={history.length > 0}
         onNext={handleNext}
         canGoForward={forwardHistory.length > 0}
+        backHistory={history}
+        forwardHistory={forwardHistory}
+        onJumpBack={handleJumpBack}
+        onJumpForward={handleJumpForward}
         onGoUp={() => fileExplorerRef.current?.goUp()}
         canGoUp={selectionStatus.canGoUp}
         onRefresh={() => fileExplorerRef.current?.refresh()}
@@ -525,11 +556,12 @@ function App() {
         initialLanguage={config.language}
         initialUsePdfWorker={config.usePdfWorker}
         initialUseImageViewer={config.useImageViewer}
+        initialUseVideoPlayer={config.useVideoPlayer}
         initialLicenseEmail={config.licenseEmail}
         initialLicenseCode={config.licenseCode}
         initialDisableUpdateCheck={config.disableUpdateCheck}
         initialPdfExportPath={config.pdfExportPath}
-        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string, newUseImageViewer?: boolean) => {
+        onSave={(newDefault: string, newQuick?: string[], newEditable?: string[], newReadonly?: string[], newColumnSettings?: { key: string; visible: boolean }[], newLanguage?: string, newUsePdfWorker?: boolean, newLicenseEmail?: string, newLicenseCode?: string, newDisableUpdateCheck?: boolean, newPdfExportPath?: string, newUseImageViewer?: boolean, newUseVideoPlayer?: boolean) => {
           saveConfig({
             defaultPath: newDefault,
             quickAccess: newQuick ?? config.quickAccess,
@@ -539,6 +571,7 @@ function App() {
             language: newLanguage,
             usePdfWorker: newUsePdfWorker,
             useImageViewer: newUseImageViewer,
+            useVideoPlayer: newUseVideoPlayer,
             licenseEmail: newLicenseEmail,
             licenseCode: newLicenseCode,
             disableUpdateCheck: newDisableUpdateCheck,

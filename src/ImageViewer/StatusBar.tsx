@@ -1,5 +1,6 @@
 import React from 'react';
 import { ImageDimensions, ImageFileInfo } from './types';
+import { useTranslation } from 'react-i18next';
 
 interface StatusBarProps {
   currentFile: ImageFileInfo | null;
@@ -16,11 +17,13 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   totalImages,
   zoomLevel,
 }) => {
+  const { t } = useTranslation();
+
   if (!currentFile) {
     return (
       <footer className="mhz-iv-status-bar">
         <div className="mhz-iv-status-left">
-          <span>Ready</span>
+          <span>{t('viewer.ready', { defaultValue: 'Ready' })}</span>
         </div>
         <div className="mhz-iv-status-right">
           <span>MHZipy Image Viewer</span>

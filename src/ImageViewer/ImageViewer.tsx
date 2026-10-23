@@ -23,6 +23,7 @@ import { ImageFileInfo, ImageDimensions, ZoomMode } from './types';
 import { ImageViewerCanvas } from './ImageViewerCanvas';
 import { ThumbnailStrip } from './ThumbnailStrip';
 import { StatusBar } from './StatusBar';
+import { useTranslation } from 'react-i18next';
 import './ImageViewer.css';
 
 interface ImageViewerProps {
@@ -30,6 +31,7 @@ interface ImageViewerProps {
 }
 
 export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => {
+  const { t } = useTranslation();
   const [folderImages, setFolderImages] = useState<ImageFileInfo[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(-1);
   const [dimensions, setDimensions] = useState<ImageDimensions>({ width: 0, height: 0 });
@@ -403,7 +405,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
             className="mhz-iv-win-btn"
             onClick={handleToggleFullscreen}
             onMouseDown={(e) => e.stopPropagation()}
-            title={isFullscreen ? 'Exit Fullscreen (F)' : 'Fullscreen (F)'}
+            title={isFullscreen ? `${t('viewer.exitFullscreen', { defaultValue: 'Exit Fullscreen' })} (F)` : `${t('viewer.fullscreen', { defaultValue: 'Fullscreen' })} (F)`}
           >
             {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
           </button>
@@ -411,7 +413,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
             className="mhz-iv-win-btn"
             onClick={handleMinimize}
             onMouseDown={(e) => e.stopPropagation()}
-            title="Minimize"
+            title={t('viewer.minimize', { defaultValue: 'Minimize' })}
           >
             <Minus size={14} />
           </button>
@@ -419,7 +421,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
             className="mhz-iv-win-btn"
             onClick={handleToggleMaximize}
             onMouseDown={(e) => e.stopPropagation()}
-            title={isMaximized ? 'Restore' : 'Maximize'}
+            title={isMaximized ? t('viewer.restore', { defaultValue: 'Restore' }) : t('viewer.maximize', { defaultValue: 'Maximize' })}
           >
             <Square size={12} />
           </button>
@@ -427,7 +429,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
             className="mhz-iv-win-btn close"
             onClick={handleClose}
             onMouseDown={(e) => e.stopPropagation()}
-            title="Close (ESC)"
+            title={`${t('viewer.close', { defaultValue: 'Close' })} (ESC)`}
           >
             <X size={15} />
           </button>
@@ -441,18 +443,18 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
             className="mhz-iv-tool-btn"
             onClick={handlePrevImage}
             disabled={currentIndex <= 0}
-            title="Previous Image (← or PageUp)"
+            title={`${t('viewer.prevImage', { defaultValue: 'Previous Image' })} (← / PageUp)`}
           >
             <ChevronLeft size={16} />
-            <span>Prev</span>
+            <span>{t('viewer.prev', { defaultValue: 'Prev' })}</span>
           </button>
           <button
             className="mhz-iv-tool-btn"
             onClick={handleNextImage}
             disabled={currentIndex >= folderImages.length - 1}
-            title="Next Image (→ or PageDown)"
+            title={`${t('viewer.nextImage', { defaultValue: 'Next Image' })} (→ / PageDown)`}
           >
-            <span>Next</span>
+            <span>{t('viewer.next', { defaultValue: 'Next' })}</span>
             <ChevronRight size={16} />
           </button>
         </div>
@@ -466,7 +468,7 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
               setZoomLevel((z) => Math.min(30, z * 1.2));
               setZoomMode('free');
             }}
-            title="Zoom In (+)"
+            title={`${t('viewer.zoomIn', { defaultValue: 'Zoom In' })} (+)`}
           >
             <ZoomIn size={15} />
           </button>
@@ -476,22 +478,22 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
               setZoomLevel((z) => Math.max(0.05, z * 0.8));
               setZoomMode('free');
             }}
-            title="Zoom Out (-)"
+            title={`${t('viewer.zoomOut', { defaultValue: 'Zoom Out' })} (-)`}
           >
             <ZoomOut size={15} />
           </button>
           <button
             className={`mhz-iv-tool-btn ${zoomMode === 'fit' ? 'active' : ''}`}
             onClick={() => setZoomMode('fit')}
-            title="Fit to Window (0)"
+            title={`${t('viewer.fitWindow', { defaultValue: 'Fit to Window' })} (0)`}
           >
             <Maximize2 size={15} />
-            <span>Fit</span>
+            <span>{t('viewer.fit', { defaultValue: 'Fit' })}</span>
           </button>
           <button
             className={`mhz-iv-tool-btn ${zoomMode === 'actual' ? 'active' : ''}`}
             onClick={() => setZoomMode('actual')}
-            title="Original Size 100% (1)"
+            title={`${t('viewer.originalSize', { defaultValue: 'Original Size 100%' })} (1)`}
           >
             <Scale size={15} />
             <span>100%</span>
@@ -501,23 +503,23 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
         <div className="mhz-iv-toolbar-divider" />
 
         <div className="mhz-iv-toolbar-group">
-          <button className="mhz-iv-tool-btn" onClick={handleRotateCCW} title="Rotate Left 90° (L)">
+          <button className="mhz-iv-tool-btn" onClick={handleRotateCCW} title={`${t('viewer.rotateLeft', { defaultValue: 'Rotate Left 90°' })} (L)`}>
             <RotateCcw size={15} />
           </button>
-          <button className="mhz-iv-tool-btn" onClick={handleRotateCW} title="Rotate Right 90° (R)">
+          <button className="mhz-iv-tool-btn" onClick={handleRotateCW} title={`${t('viewer.rotateRight', { defaultValue: 'Rotate Right 90°' })} (R)`}>
             <RotateCw size={15} />
           </button>
           <button
             className={`mhz-iv-tool-btn ${flipH ? 'active' : ''}`}
             onClick={handleFlipH}
-            title="Flip Horizontal (H)"
+            title={`${t('viewer.flipH', { defaultValue: 'Flip Horizontal' })} (H)`}
           >
             <FlipHorizontal size={15} />
           </button>
           <button
             className={`mhz-iv-tool-btn ${flipV ? 'active' : ''}`}
             onClick={handleFlipV}
-            title="Flip Vertical (V)"
+            title={`${t('viewer.flipV', { defaultValue: 'Flip Vertical' })} (V)`}
           >
             <FlipVertical size={15} />
           </button>
@@ -529,10 +531,10 @@ export const ImageViewer: React.FC<ImageViewerProps> = ({ initialFilePath }) => 
           <button
             className={`mhz-iv-tool-btn ${isFullscreen ? 'active' : ''}`}
             onClick={handleToggleFullscreen}
-            title={isFullscreen ? 'Exit Fullscreen (F)' : 'Toggle Fullscreen (F)'}
+            title={isFullscreen ? `${t('viewer.exitFullscreen', { defaultValue: 'Exit Fullscreen' })} (F)` : `${t('viewer.fullscreen', { defaultValue: 'Fullscreen' })} (F)`}
           >
             {isFullscreen ? <Minimize2 size={15} /> : <Maximize size={15} />}
-            <span>{isFullscreen ? 'Exit' : 'Full'}</span>
+            <span>{isFullscreen ? t('viewer.exitFullscreen', { defaultValue: 'Exit' }) : t('viewer.fullscreen', { defaultValue: 'Full' })}</span>
           </button>
         </div>
       </div>

@@ -11,6 +11,7 @@ import { checkPathPermission } from '../command/fileOperations';
 import { openPdfInWindow } from '../PDFViewer/PDFViewer';
 import { openMarkdownInWindow } from '../MarkdownEditor/openMarkdownInWindow';
 import { openImageInWindow } from '../ImageViewer/openImageInWindow';
+import { openVideoInWindow } from '../VideoPlayer/openVideoInWindow';
 import MessageDialog from '../common/MessageDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
 import FileIcon from './FileIcon';
@@ -24,6 +25,11 @@ const isMarkdownOrText = (fileName: string) => {
 const isImageFile = (fileName: string) => {
   const ext = fileName.toLowerCase().split('.').pop() || '';
   return ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'ico', 'tiff', 'tif', 'gif', 'svg', 'avif'].includes(ext);
+};
+
+const isVideoFile = (fileName: string) => {
+  const ext = fileName.toLowerCase().split('.').pop() || '';
+  return ['mp4', 'mkv', 'webm', 'mov', 'avi', 'wmv', 'flv', 'm4v', '3gp', 'ts', 'asf', 'rmvb'].includes(ext);
 };
 
 
@@ -55,6 +61,7 @@ interface FileListProps {
   onRefresh?: () => void;
   usePdfWorker?: boolean;
   useImageViewer?: boolean;
+  useVideoPlayer?: boolean;
   pdfExportPath?: string;
   onSetDefault?: (path: string) => void;
   onAddToQuickAccess?: (paths: string | string[]) => void;
@@ -120,6 +127,7 @@ export default function FileList({
   onRefresh,
   usePdfWorker = true,
   useImageViewer = true,
+  useVideoPlayer = true,
   pdfExportPath,
   onSetDefault,
   onAddToQuickAccess
@@ -1175,6 +1183,8 @@ export default function FileList({
       await openPdfInWindow({ path: file.path, name: file.name });
     } else if (isImageFile(file.name) && useImageViewer) {
       await openImageInWindow({ path: file.path, name: file.name });
+    } else if (isVideoFile(file.name) && useVideoPlayer) {
+      await openVideoInWindow({ path: file.path, name: file.name });
     } else if (isMarkdownOrText(file.name)) {
       await openMarkdownInWindow({ path: file.path, name: file.name });
     } else {
@@ -1214,6 +1224,8 @@ export default function FileList({
         await openPdfInWindow({ path: item.path, name: item.name });
       } else if (isImageFile(item.name) && useImageViewer) {
         await openImageInWindow({ path: item.path, name: item.name });
+      } else if (isVideoFile(item.name) && useVideoPlayer) {
+        await openVideoInWindow({ path: item.path, name: item.name });
       } else if (isMarkdownOrText(item.name)) {
         await openMarkdownInWindow({ path: item.path, name: item.name });
       } else {
@@ -2207,7 +2219,7 @@ export default function FileList({
               {selectedFiles.size === 1 && (sortedFiles.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory || filesOverride?.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory) && (
                 <>
                   <div className="context-menu-item" onClick={() => handleCopyFileNames(Array.from(selectedFiles)[0])} style={{ padding: '2px 10px' }}>
-                    <span>{t('contextMenu.copyFileNames', 'Copy File Names')}</span>
+                    <span>{t('contextMenu.copyFileNames', { defaultValue: 'Copy File Names' })}</span>
                   </div>
                   {onSetDefault && (
                     <div className="context-menu-item" onClick={() => { onSetDefault(Array.from(selectedFiles)[0]); setContextMenu(null); }} style={{ padding: '2px 10px' }}>
@@ -2231,6 +2243,28 @@ export default function FileList({
                   <span>{t('contextMenu.extractHere')}</span> <span className="shortcut">Alt+E</span>
                 </div>
               )}
+              {selectedFiles.size === 1 && isImageFile(Array.from(selectedFiles)[0]) && (
+                <div className="context-menu-item" onClick={async () => {
+                  const firstPath = Array.from(selectedFiles)[0];
+                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
+                  const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
+                  await openImageInWindow({ path: firstPath, name: fileName });
+                  setContextMenu(null);
+                }} style={{ padding: '2px 10px' }}>
+                  <span>{t('contextMenu.openInImageViewer', { defaultValue: 'Open in Image Viewer' })}</span>
+                </div>
+              )}
+              {selectedFiles.size === 1 && isVideoFile(Array.from(selectedFiles)[0]) && (
+                <div className="context-menu-item" onClick={async () => {
+                  const firstPath = Array.from(selectedFiles)[0];
+                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
+                  const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
+                  await openVideoInWindow({ path: firstPath, name: fileName });
+                  setContextMenu(null);
+                }} style={{ padding: '2px 10px' }}>
+                  <span>{t('contextMenu.openInVideoPlayer', { defaultValue: 'Play in Video Player' })}</span>
+                </div>
+              )}
               {selectedFiles.size === 1 && isMarkdownOrText(Array.from(selectedFiles)[0]) && (
                 <div className="context-menu-item" onClick={async () => {
                   const firstPath = Array.from(selectedFiles)[0];
@@ -2239,7 +2273,7 @@ export default function FileList({
                   await openMarkdownInWindow({ path: firstPath, name: fileName });
                   setContextMenu(null);
                 }} style={{ padding: '2px 10px' }}>
-                  <span>{t('contextMenu.openInMarkdownEditor', 'Edit with Markdown Editor')}</span>
+                  <span>{t('contextMenu.openInMarkdownEditor', { defaultValue: 'Edit with Markdown Editor' })}</span>
                 </div>
               )}
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.pptx') && (
@@ -2248,7 +2282,7 @@ export default function FileList({
                   invoke('convert_pptx_to_pdf', { sourcePath: filePath, targetDir: pdfExportPath });
                   setContextMenu(null);
                 }} style={{ padding: '2px 10px' }}>
-                  <span>Export To PDF</span>
+                  <span>{t('contextMenu.exportToPdf', { defaultValue: 'Export to PDF' })}</span>
                 </div>
               )}
               <div className="context-menu-separator" />
@@ -2289,19 +2323,19 @@ export default function FileList({
             border: '1px solid rgba(255, 255, 255, 0.12)',
             display: 'flex', flexDirection: 'column', gap: '15px'
           }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: 0, color: '#f1f5f9' }}>Copy File Names</h3>
-            <p style={{ margin: 0, fontSize: '0.9em', color: '#94a3b8' }}>From: {copyNamesTarget}</p>
+            <h3 style={{ margin: 0, color: '#f1f5f9' }}>{t('contextMenu.copyFileNames', { defaultValue: 'Copy File Names' })}</h3>
+            <p style={{ margin: 0, fontSize: '0.9em', color: '#94a3b8' }}>{t('fileList.from', { defaultValue: 'From' })}: {copyNamesTarget}</p>
             <textarea 
               readOnly 
               value={copyNamesList.join('\n')} 
               style={{ width: '100%', height: '300px', padding: '8px', boxSizing: 'border-box', fontFamily: 'monospace', resize: 'none', backgroundColor: '#1e293b', color: '#f8fafc', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button onClick={() => setCopyNamesDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}>Close</button>
+              <button onClick={() => setCopyNamesDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}>{t('common.close', { defaultValue: 'Close' })}</button>
               <button onClick={() => {
                 navigator.clipboard.writeText(copyNamesList.join('\n'));
                 setCopyNamesDialogOpen(false);
-              }} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', border: 'none', borderRadius: '6px' }}>Copy to Clipboard</button>
+              }} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', border: 'none', borderRadius: '6px' }}>{t('fileList.copyToClipboard', { defaultValue: 'Copy to Clipboard' })}</button>
             </div>
           </div>
         </div>,
@@ -2352,18 +2386,18 @@ export default function FileList({
             }}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
-              ZIP Content: {zipPath?.split(/[/\\]/).pop()}
+              {t('fileList.zipContent', { defaultValue: 'ZIP Content' })}: {zipPath?.split(/[/\\]/).pop()}
             </span>
             <button
               onClick={() => setZipDialogOpen(false)}
               onMouseDown={(e) => e.stopPropagation()}
               style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.2em', padding: '0 8px', color: '#94a3b8' }}
-              title="Close"
+              title={t('common.close', { defaultValue: 'Close' })}
             >×</button>
           </div>
           <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#1e293b', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px', color: '#cbd5e1' }}>Extract to:</label>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px', color: '#cbd5e1' }}>{t('fileList.extractTo', { defaultValue: 'Extract to:' })}</label>
               <input
                 type="text"
                 autoFocus
@@ -2395,11 +2429,11 @@ export default function FileList({
                   }}
                   style={{ accentColor: '#38bdf8' }}
                 />
-                Sub-folder
+                {t('fileList.subFolder', { defaultValue: 'Sub-folder' })}
               </label>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px', color: '#cbd5e1' }}>Password:</label>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px', color: '#cbd5e1' }}>{t('fileList.password', { defaultValue: 'Password:' })}</label>
               <div style={{ flex: 1, position: 'relative', display: 'flex' }}>
                 <input
                   type={showPassword ? "text" : "password"}
@@ -2412,7 +2446,7 @@ export default function FileList({
                     }
                   }}
                   disabled={!isZipEncrypted}
-                  placeholder={isZipEncrypted ? "Enter password" : "No password"}
+                  placeholder={isZipEncrypted ? t('fileList.enterPassword', { defaultValue: 'Enter password' }) : t('fileList.noPassword', { defaultValue: 'No password' })}
                   style={{
                     width: '100%', padding: '6px 8px', paddingRight: '30px', fontSize: '0.9em',
                     backgroundColor: isZipEncrypted ? '#0f172a' : '#1e293b',
@@ -2439,7 +2473,7 @@ export default function FileList({
                       color: '#94a3b8'
                     }}
                     tabIndex={-1}
-                    title={showPassword ? "Hide password" : "Show password"}
+                    title={showPassword ? t('fileList.hidePassword', { defaultValue: 'Hide password' }) : t('fileList.showPassword', { defaultValue: 'Show password' })}
                   >
                     {showPassword ? '🔒' : '👁️'}
                   </button>
@@ -2480,7 +2514,7 @@ export default function FileList({
           </div>
           <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '0.85em', color: '#94a3b8', flex: 1 }}>
-              Drag or click buttons to extract.
+              {t('fileList.dragOrClickToExtract', { defaultValue: 'Drag or click buttons to extract.' })}
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
@@ -2490,7 +2524,7 @@ export default function FileList({
                   border: 'none', borderRadius: '4px', fontSize: '0.9em', fontWeight: 600
                 }}
               >
-                Extract All
+                {t('fileList.extractAll', { defaultValue: 'Extract All' })}
               </button>
               <button
                 onClick={handleExtractSelectedClick}
@@ -2499,7 +2533,7 @@ export default function FileList({
                   border: 'none', borderRadius: '4px', fontSize: '0.9em', fontWeight: 600
                 }}
               >
-                Extract Selected
+                {t('fileList.extractSelected', { defaultValue: 'Extract Selected' })}
               </button>
             </div>
           </div>
@@ -2535,14 +2569,14 @@ export default function FileList({
             if (e.key === 'Escape') setCompressDialogOpen(false);
             if (e.key === 'Enter' && !compressProgress) handleExecuteCompress();
           }}>
-            <h3 style={{ margin: 0, color: '#f1f5f9' }}>Compression Settings</h3>
+            <h3 style={{ margin: 0, color: '#f1f5f9' }}>{t('fileList.compressionSettings', { defaultValue: 'Compression Settings' })}</h3>
 
             {compressProgress ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px 0' }}>
                 <div style={{ fontSize: '0.9em', color: '#cbd5e1' }}>
                   {compressProgress.total > 0
-                    ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% completed`
-                    : 'Preparing...'}
+                    ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% ${t('fileList.completed', { defaultValue: 'completed' })}`
+                    : t('fileList.preparing', { defaultValue: 'Preparing...' })}
                 </div>
                 <progress
                   value={compressProgress.processed}
@@ -2550,17 +2584,17 @@ export default function FileList({
                   style={{ width: '100%', height: '20px' }}
                 />
                 <div style={{ fontSize: '0.8em', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  Processing: {compressProgress.filename}
+                  {t('fileList.processing', { defaultValue: 'Processing:' })} {compressProgress.filename}
                 </div>
                 <div style={{ fontSize: '0.8em', color: '#94a3b8', textAlign: 'right' }}>
                   {(() => {
-                    if (compressProgress.processed === 0 || compressProgress.total === 0) return 'Calculating...';
+                    if (compressProgress.processed === 0 || compressProgress.total === 0) return t('fileList.calculating', { defaultValue: 'Calculating...' });
                     const elapsed = (Date.now() - compressProgress.startTime) / 1000;
                     const speed = compressProgress.processed / elapsed; // bytes per second
                     const remainingBytes = compressProgress.total - compressProgress.processed;
                     const remainingSeconds = remainingBytes / speed;
-                    if (!isFinite(remainingSeconds)) return 'Calculating...';
-                    return `Time remaining: approx ${Math.ceil(remainingSeconds)}s`;
+                    if (!isFinite(remainingSeconds)) return t('fileList.calculating', { defaultValue: 'Calculating...' });
+                    return `${t('fileList.timeRemaining', { defaultValue: 'Time remaining:' })} ~${Math.ceil(remainingSeconds)}s`;
                   })()}
                 </div>
               </div>
@@ -2568,7 +2602,7 @@ export default function FileList({
               <>
                 <div style={{ marginBottom: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                    <label style={{ fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Save Location</label>
+                    <label style={{ fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>{t('fileList.saveLocation', { defaultValue: 'Save Location' })}</label>
                     <button
                       onClick={async () => {
                         const selected = await open({
@@ -2582,7 +2616,7 @@ export default function FileList({
                       }}
                       style={{ padding: '4px 10px', fontSize: '0.85em', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#f1f5f9', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px' }}
                     >
-                      Browse...
+                      {t('fileList.browse', { defaultValue: 'Browse...' })}
                     </button>
                   </div>
                   <div style={{ padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px', fontSize: '0.85em', wordBreak: 'break-all', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#cbd5e1' }}>
@@ -2591,7 +2625,7 @@ export default function FileList({
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Archive Name</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>{t('fileList.archiveName', { defaultValue: 'Archive Name' })}</label>
                   <input
                     type="text"
                     value={compressName}
@@ -2606,7 +2640,7 @@ export default function FileList({
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Compression Method</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>{t('fileList.method', { defaultValue: 'Compression Method' })}</label>
                   <select
                     value={compressMethod}
                     onChange={(e) => setCompressMethod(e.target.value)}
@@ -2616,13 +2650,13 @@ export default function FileList({
                       border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
                     }}
                   >
-                    <option value="deflated" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>Deflate (Standard)</option>
-                    <option value="stored" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>Store (No Compression)</option>
+                    <option value="deflated" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('fileList.deflateStandard', { defaultValue: 'Deflate (Standard)' })}</option>
+                    <option value="stored" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('fileList.storeNoCompression', { defaultValue: 'Store (No Compression)' })}</option>
                   </select>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Password (Optional)</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>{t('fileList.compressPassword', { defaultValue: 'Password (Optional)' })}</label>
                   <input
                     type="password"
                     value={compressPassword}
@@ -2632,12 +2666,12 @@ export default function FileList({
                       backgroundColor: '#1e293b', color: '#f8fafc',
                       border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
                     }}
-                    placeholder="Enter password to encrypt files"
+                    placeholder={t('fileList.compressPasswordPlaceholder', { defaultValue: 'Enter password to encrypt files' })}
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Encryption Method</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>{t('fileList.encryption', { defaultValue: 'Encryption Method' })}</label>
                   <select
                     value={compressEncryption}
                     onChange={(e) => setCompressEncryption(e.target.value)}
@@ -2648,8 +2682,8 @@ export default function FileList({
                     }}
                     disabled={!compressPassword}
                   >
-                    <option value="zipcrypto" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>ZipCrypto (Standard Windows Compatibility)</option>
-                    <option value="aes256" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>AES-256 (Enhanced Security)</option>
+                    <option value="zipcrypto" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('fileList.zipCryptoDesc', { defaultValue: 'ZipCrypto (Standard Windows Compatibility)' })}</option>
+                    <option value="aes256" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>{t('fileList.aes256Desc', { defaultValue: 'AES-256 (Enhanced Security)' })}</option>
                   </select>
                   {compressPassword && (
                     <div style={{ fontSize: '0.75em', marginTop: '4px', lineHeight: '1.4' }}>
@@ -2663,13 +2697,13 @@ export default function FileList({
                 </div>
 
                 <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid rgba(255, 255, 255, 0.1)', backgroundColor: '#1e293b', padding: '6px 8px', fontSize: '0.85em', color: '#94a3b8', borderRadius: '4px' }}>
-                  <div style={{ fontWeight: 600, color: '#cbd5e1', marginBottom: '2px' }}>Target files ({selectedFiles.size}):</div>
+                  <div style={{ fontWeight: 600, color: '#cbd5e1', marginBottom: '2px' }}>{t('fileList.targetFiles', { defaultValue: 'Target files' })} ({selectedFiles.size}):</div>
                   {Array.from(selectedFiles).map(f => <div key={f} style={{ wordBreak: 'break-all' }}>{f}</div>)}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}>Cancel</button>
-                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', border: 'none', borderRadius: '6px' }}>Compress</button>
+                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}>{t('fileList.cancel', { defaultValue: 'Cancel' })}</button>
+                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', border: 'none', borderRadius: '6px' }}>{t('fileList.compress', { defaultValue: 'Compress' })}</button>
                 </div>
               </>
             )}
@@ -2688,11 +2722,11 @@ export default function FileList({
           display: 'flex', flexDirection: 'column', gap: '10px',
           cursor: 'move'
         }} onMouseDown={handleExtractProgressMouseDown}>
-          <h4 style={{ margin: 0, fontSize: '1.05em', color: '#f1f5f9' }}>Extracting...</h4>
+          <h4 style={{ margin: 0, fontSize: '1.05em', color: '#f1f5f9' }}>{t('fileList.extracting', { defaultValue: 'Extracting...' })}</h4>
           <div style={{ fontSize: '0.9em', color: '#cbd5e1' }}>
             {extractProgress.total > 0
-              ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% completed`
-              : 'Preparing...'}
+              ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% ${t('fileList.completed', { defaultValue: 'completed' })}`
+              : t('fileList.preparing', { defaultValue: 'Preparing...' })}
           </div>
           <progress
             value={extractProgress.processed}
@@ -2700,17 +2734,17 @@ export default function FileList({
             style={{ width: '100%', height: '20px' }}
           />
           <div style={{ fontSize: '0.8em', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            Processing: {extractProgress.filename}
+            {t('fileList.processing', { defaultValue: 'Processing:' })} {extractProgress.filename}
           </div>
           <div style={{ fontSize: '0.8em', color: '#94a3b8', textAlign: 'right' }}>
             {(() => {
-              if (extractProgress.processed === 0 || extractProgress.total === 0) return 'Calculating...';
+              if (extractProgress.processed === 0 || extractProgress.total === 0) return t('fileList.calculating', { defaultValue: 'Calculating...' });
               const elapsed = (Date.now() - extractProgress.startTime) / 1000;
               const speed = extractProgress.processed / elapsed;
               const remainingBytes = extractProgress.total - extractProgress.processed;
               const remainingSeconds = remainingBytes / speed;
-              if (!isFinite(remainingSeconds)) return 'Calculating...';
-              return `Time remaining: approx ${Math.ceil(remainingSeconds)}s`;
+              if (!isFinite(remainingSeconds)) return t('fileList.calculating', { defaultValue: 'Calculating...' });
+              return `${t('fileList.timeRemaining', { defaultValue: 'Time remaining:' })} ~${Math.ceil(remainingSeconds)}s`;
             })()}
           </div>
         </div>,

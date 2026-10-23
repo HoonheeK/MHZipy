@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ImageFileInfo } from './types';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { ChevronUp, ChevronDown, Film } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface ThumbnailStripProps {
   images: ImageFileInfo[];
@@ -18,6 +19,7 @@ export const ThumbnailStrip: React.FC<ThumbnailStripProps> = ({
   isOpen,
   onToggleOpen,
 }) => {
+  const { t } = useTranslation();
   const activeItemRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -93,7 +95,7 @@ export const ThumbnailStrip: React.FC<ThumbnailStripProps> = ({
         <button
           className="mhz-iv-filmstrip-toggle-btn"
           onClick={onToggleOpen}
-          title={isOpen ? 'Collapse Thumbnails' : 'Expand Thumbnails'}
+          title={isOpen ? t('viewer.collapseThumbs', { defaultValue: 'Collapse Thumbnails' }) : t('viewer.expandThumbs', { defaultValue: 'Expand Thumbnails' })}
         >
           {isOpen ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </button>
