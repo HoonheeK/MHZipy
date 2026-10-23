@@ -2280,27 +2280,28 @@ export default function FileList({
       {copyNamesDialogOpen && createPortal(
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1200,
+          backgroundColor: 'rgba(10, 15, 29, 0.75)', backdropFilter: 'blur(8px)', zIndex: 1200,
           display: 'flex', justifyContent: 'center', alignItems: 'center'
         }} onClick={() => setCopyNamesDialogOpen(false)}>
           <div style={{
-            backgroundColor: 'white', width: '500px', padding: '20px',
-            borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            backgroundColor: '#0f172a', color: '#f8fafc', width: '500px', padding: '20px',
+            borderRadius: '12px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.15)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
             display: 'flex', flexDirection: 'column', gap: '15px'
           }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ margin: 0 }}>Copy File Names</h3>
-            <p style={{ margin: 0, fontSize: '0.9em', color: '#666' }}>From: {copyNamesTarget}</p>
+            <h3 style={{ margin: 0, color: '#f1f5f9' }}>Copy File Names</h3>
+            <p style={{ margin: 0, fontSize: '0.9em', color: '#94a3b8' }}>From: {copyNamesTarget}</p>
             <textarea 
               readOnly 
               value={copyNamesList.join('\n')} 
-              style={{ width: '100%', height: '300px', padding: '8px', boxSizing: 'border-box', fontFamily: 'monospace', resize: 'none' }}
+              style={{ width: '100%', height: '300px', padding: '8px', boxSizing: 'border-box', fontFamily: 'monospace', resize: 'none', backgroundColor: '#1e293b', color: '#f8fafc', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button className="btn-secondary" onClick={() => setCopyNamesDialogOpen(false)}>Close</button>
-              <button className="btn-primary" onClick={() => {
+              <button onClick={() => setCopyNamesDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}>Close</button>
+              <button onClick={() => {
                 navigator.clipboard.writeText(copyNamesList.join('\n'));
                 setCopyNamesDialogOpen(false);
-              }}>Copy to Clipboard</button>
+              }} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', border: 'none', borderRadius: '6px' }}>Copy to Clipboard</button>
             </div>
           </div>
         </div>,
@@ -2311,10 +2312,10 @@ export default function FileList({
         <div style={{
           position: 'fixed', top: zipDialogPos.y, left: zipDialogPos.x,
           width: `${zipDialogSize.width}px`, height: `${zipDialogSize.height}px`,
-          backgroundColor: 'white', zIndex: 1000,
+          backgroundColor: '#0f172a', color: '#f8fafc', zIndex: 1000,
           display: 'flex', flexDirection: 'column', borderRadius: '8px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.2)', overflow: 'hidden',
-          border: '1px solid #ccc'
+          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(56, 189, 248, 0.15)', overflow: 'hidden',
+          border: '1px solid rgba(255, 255, 255, 0.14)'
         }} onClick={e => e.stopPropagation()} onKeyDown={e => {
           e.stopPropagation();
           if (e.key === 'Escape') {
@@ -2344,9 +2345,10 @@ export default function FileList({
           <div
             onMouseDown={handleZipHeaderMouseDown}
             style={{
-              padding: '12px', borderBottom: '1px solid #eee',
+              padding: '12px 14px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
               fontWeight: 'bold', display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', backgroundColor: '#f8f9fa', cursor: 'move'
+              alignItems: 'center', backgroundColor: '#111827', cursor: 'move',
+              color: '#f1f5f9'
             }}
           >
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
@@ -2355,20 +2357,25 @@ export default function FileList({
             <button
               onClick={() => setZipDialogOpen(false)}
               onMouseDown={(e) => e.stopPropagation()}
-              style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.2em', padding: '0 8px' }}
+              style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: '1.2em', padding: '0 8px', color: '#94a3b8' }}
+              title="Close"
             >×</button>
           </div>
-          <div style={{ padding: '10px', borderBottom: '1px solid #eee', backgroundColor: '#fff', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#1e293b', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Extract to:</label>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px', color: '#cbd5e1' }}>Extract to:</label>
               <input
                 type="text"
                 autoFocus
                 value={extractPath}
                 onChange={(e) => setExtractPath(e.target.value)}
-                style={{ flex: 1, padding: '4px', fontSize: '0.9em' }}
+                style={{
+                  flex: 1, padding: '6px 8px', fontSize: '0.9em',
+                  backgroundColor: '#0f172a', color: '#f8fafc',
+                  border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
+                }}
               />
-              <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <label style={{ fontSize: '0.85em', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap', color: '#cbd5e1' }}>
                 <input
                   type="checkbox"
                   checked={extractToSubfolder}
@@ -2386,12 +2393,13 @@ export default function FileList({
                       }
                     }
                   }}
+                  style={{ accentColor: '#38bdf8' }}
                 />
                 Sub-folder
               </label>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px' }}>Password:</label>
+              <label style={{ fontSize: '0.9em', fontWeight: 'bold', minWidth: '80px', color: '#cbd5e1' }}>Password:</label>
               <div style={{ flex: 1, position: 'relative', display: 'flex' }}>
                 <input
                   type={showPassword ? "text" : "password"}
@@ -2405,7 +2413,13 @@ export default function FileList({
                   }}
                   disabled={!isZipEncrypted}
                   placeholder={isZipEncrypted ? "Enter password" : "No password"}
-                  style={{ width: '100%', padding: '4px', paddingRight: '30px', fontSize: '0.9em', backgroundColor: isZipEncrypted ? 'white' : '#f0f0f0', boxSizing: 'border-box' }}
+                  style={{
+                    width: '100%', padding: '6px 8px', paddingRight: '30px', fontSize: '0.9em',
+                    backgroundColor: isZipEncrypted ? '#0f172a' : '#1e293b',
+                    color: isZipEncrypted ? '#f8fafc' : '#64748b',
+                    border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px',
+                    boxSizing: 'border-box'
+                  }}
                 />
                 {isZipEncrypted && (
                   <button
@@ -2421,7 +2435,8 @@ export default function FileList({
                       padding: '0 8px',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center'
+                      justifyContent: 'center',
+                      color: '#94a3b8'
                     }}
                     tabIndex={-1}
                     title={showPassword ? "Hide password" : "Show password"}
@@ -2431,13 +2446,13 @@ export default function FileList({
                 )}
               </div>
               {extractError && (
-                <div style={{ color: '#c00', fontSize: '0.85em', marginTop: '6px' }}>
+                <div style={{ color: '#f87171', fontSize: '0.85em', marginTop: '6px' }}>
                   {extractError}
                 </div>
               )}
             </div>
           </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: '0' }}>
+          <div style={{ flex: 1, overflow: 'auto', padding: '0', backgroundColor: '#090d16' }}>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
               {zipEntries.map((entry) => (
                 <li
@@ -2447,31 +2462,32 @@ export default function FileList({
                   onDragStart={(e) => handleZipDragStart(e, entry.name)}
                   onDragEnd={() => broadcastDragEnd()}
                   style={{
-                    padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
-                    backgroundColor: selectedZipEntries.has(entry.name) ? '#e6f3ff' : 'transparent',
+                    padding: '8px 12px', borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                    backgroundColor: selectedZipEntries.has(entry.name) ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                    color: '#f1f5f9',
                     cursor: 'default', display: 'flex', alignItems: 'center'
                   }}
                 >
                   <FileIcon name={entry.name} isDirectory={entry.isDir} />
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: '6px' }}>
                     {entry.name}
                     {entry.isEncrypted && <span style={{ marginLeft: '6px', fontSize: '0.8em' }}>🔒</span>}
                   </span>
-                  <span style={{ color: '#888', fontSize: '0.9em' }}>{entry.isDir ? '' : formatSize(entry.size)}</span>
+                  <span style={{ color: '#94a3b8', fontSize: '0.9em' }}>{entry.isDir ? '' : formatSize(entry.size)}</span>
                 </li>
               ))}
             </ul>
           </div>
-          <div style={{ padding: '10px', borderTop: '1px solid #eee', backgroundColor: '#f8f9fa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.85em', color: '#666', flex: 1 }}>
+          <div style={{ padding: '10px 14px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.85em', color: '#94a3b8', flex: 1 }}>
               Drag or click buttons to extract.
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 onClick={handleExtractAllClick}
                 style={{
-                  padding: '6px 12px', cursor: 'pointer', backgroundColor: '#28a745', color: 'white',
-                  border: 'none', borderRadius: '4px', fontSize: '0.9em'
+                  padding: '6px 14px', cursor: 'pointer', backgroundColor: '#10b981', color: 'white',
+                  border: 'none', borderRadius: '4px', fontSize: '0.9em', fontWeight: 600
                 }}
               >
                 Extract All
@@ -2479,8 +2495,8 @@ export default function FileList({
               <button
                 onClick={handleExtractSelectedClick}
                 style={{
-                  padding: '6px 12px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white',
-                  border: 'none', borderRadius: '4px', fontSize: '0.9em'
+                  padding: '6px 14px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a',
+                  border: 'none', borderRadius: '4px', fontSize: '0.9em', fontWeight: 600
                 }}
               >
                 Extract Selected
@@ -2497,7 +2513,7 @@ export default function FileList({
               display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end'
             }}
           >
-            <div style={{ width: 0, height: 0, borderBottom: '10px solid #ccc', borderLeft: '10px solid transparent', margin: '2px' }}></div>
+            <div style={{ width: 0, height: 0, borderBottom: '10px solid #64748b', borderLeft: '10px solid transparent', margin: '2px' }}></div>
           </div>
         </div>,
         document.body
@@ -2506,23 +2522,24 @@ export default function FileList({
       {compressDialogOpen && createPortal(
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1100,
+          backgroundColor: 'rgba(10, 15, 29, 0.75)', backdropFilter: 'blur(8px)', zIndex: 1100,
           display: 'flex', justifyContent: 'center', alignItems: 'center'
         }} onClick={() => setCompressDialogOpen(false)}>
           <div style={{
-            backgroundColor: 'white', width: '400px', padding: '20px',
-            borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            backgroundColor: '#0f172a', color: '#f8fafc', width: '420px', padding: '20px',
+            borderRadius: '12px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.15)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
             display: 'flex', flexDirection: 'column', gap: '15px'
           }} onClick={e => e.stopPropagation()} onKeyDown={e => {
             e.stopPropagation();
             if (e.key === 'Escape') setCompressDialogOpen(false);
             if (e.key === 'Enter' && !compressProgress) handleExecuteCompress();
           }}>
-            <h3 style={{ margin: 0 }}>Compression Settings</h3>
+            <h3 style={{ margin: 0, color: '#f1f5f9' }}>Compression Settings</h3>
 
             {compressProgress ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px 0' }}>
-                <div style={{ fontSize: '0.9em', color: '#333' }}>
+                <div style={{ fontSize: '0.9em', color: '#cbd5e1' }}>
                   {compressProgress.total > 0
                     ? `${Math.round((compressProgress.processed / compressProgress.total) * 100)}% completed`
                     : 'Preparing...'}
@@ -2532,10 +2549,10 @@ export default function FileList({
                   max={compressProgress.total || 100}
                   style={{ width: '100%', height: '20px' }}
                 />
-                <div style={{ fontSize: '0.8em', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: '0.8em', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   Processing: {compressProgress.filename}
                 </div>
-                <div style={{ fontSize: '0.8em', color: '#666', textAlign: 'right' }}>
+                <div style={{ fontSize: '0.8em', color: '#94a3b8', textAlign: 'right' }}>
                   {(() => {
                     if (compressProgress.processed === 0 || compressProgress.total === 0) return 'Calculating...';
                     const elapsed = (Date.now() - compressProgress.startTime) / 1000;
@@ -2551,7 +2568,7 @@ export default function FileList({
               <>
                 <div style={{ marginBottom: '15px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                    <label style={{ fontWeight: 'bold', fontSize: '0.9em' }}>Save Location</label>
+                    <label style={{ fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Save Location</label>
                     <button
                       onClick={async () => {
                         const selected = await open({
@@ -2563,80 +2580,96 @@ export default function FileList({
                           setCompressTargetDir(selected);
                         }
                       }}
-                      style={{ padding: '2px 8px', fontSize: '0.85em', cursor: 'pointer', backgroundColor: '#e2e8f0', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                      style={{ padding: '4px 10px', fontSize: '0.85em', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#f1f5f9', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px' }}
                     >
                       Browse...
                     </button>
                   </div>
-                  <div style={{ padding: '8px', backgroundColor: '#f0f0f0', borderRadius: '4px', fontSize: '0.85em', wordBreak: 'break-all', border: '1px solid #ddd' }}>
+                  <div style={{ padding: '8px', backgroundColor: '#1e293b', borderRadius: '4px', fontSize: '0.85em', wordBreak: 'break-all', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#cbd5e1' }}>
                     {compressTargetDir}
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Archive Name</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Archive Name</label>
                   <input
                     type="text"
                     value={compressName}
                     onChange={(e) => setCompressName(e.target.value)}
-                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%', padding: '8px', boxSizing: 'border-box',
+                      backgroundColor: '#1e293b', color: '#f8fafc',
+                      border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
+                    }}
                     autoFocus
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Compression Method</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Compression Method</label>
                   <select
                     value={compressMethod}
                     onChange={(e) => setCompressMethod(e.target.value)}
-                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%', padding: '8px', boxSizing: 'border-box',
+                      backgroundColor: '#1e293b', color: '#f8fafc',
+                      border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
+                    }}
                   >
-                    <option value="deflated">Deflate (Standard)</option>
-                    <option value="stored">Store (No Compression)</option>
+                    <option value="deflated" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>Deflate (Standard)</option>
+                    <option value="stored" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>Store (No Compression)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Password (Optional)</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Password (Optional)</label>
                   <input
                     type="password"
                     value={compressPassword}
                     onChange={(e) => setCompressPassword(e.target.value)}
-                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%', padding: '8px', boxSizing: 'border-box',
+                      backgroundColor: '#1e293b', color: '#f8fafc',
+                      border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
+                    }}
                     placeholder="Enter password to encrypt files"
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em' }}>Encryption Method</label>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', fontSize: '0.9em', color: '#cbd5e1' }}>Encryption Method</label>
                   <select
                     value={compressEncryption}
                     onChange={(e) => setCompressEncryption(e.target.value)}
-                    style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                    style={{
+                      width: '100%', padding: '8px', boxSizing: 'border-box',
+                      backgroundColor: '#1e293b', color: '#f8fafc',
+                      border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '4px'
+                    }}
                     disabled={!compressPassword}
                   >
-                  <option value="zipcrypto">ZipCrypto (Standard Windows Compatibility)</option>
-                  <option value="aes256">AES-256 (Enhanced Security)</option>
+                    <option value="zipcrypto" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>ZipCrypto (Standard Windows Compatibility)</option>
+                    <option value="aes256" style={{ backgroundColor: '#1e293b', color: '#f8fafc' }}>AES-256 (Enhanced Security)</option>
                   </select>
                   {compressPassword && (
-                    <div style={{ fontSize: '0.75em', color: '#e11d48', marginTop: '4px', lineHeight: '1.4' }}>
+                    <div style={{ fontSize: '0.75em', marginTop: '4px', lineHeight: '1.4' }}>
                       {compressEncryption === 'zipcrypto' ? (
-                        <span style={{ color: '#059669' }}>✔️ ZipCrypto is compatible with Windows standard Zip extractor.</span>
+                        <span style={{ color: '#34d399' }}>✔️ ZipCrypto is compatible with Windows standard Zip extractor.</span>
                       ) : (
-                        <span>⚠️ AES-256 is more secure but incompatible with Windows built-in extractor. (Use 7-Zip/BandiZip)</span>
+                        <span style={{ color: '#fbbf24' }}>⚠️ AES-256 is more secure but incompatible with Windows built-in extractor. (Use 7-Zip/BandiZip)</span>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid #eee', padding: '5px', fontSize: '0.85em', color: '#666' }}>
-                  <div>Target files ({selectedFiles.size}):</div>
-                  {Array.from(selectedFiles).map(f => <div key={f}>{f}</div>)}
+                <div style={{ maxHeight: '100px', overflowY: 'auto', border: '1px solid rgba(255, 255, 255, 0.1)', backgroundColor: '#1e293b', padding: '6px 8px', fontSize: '0.85em', color: '#94a3b8', borderRadius: '4px' }}>
+                  <div style={{ fontWeight: 600, color: '#cbd5e1', marginBottom: '2px' }}>Target files ({selectedFiles.size}):</div>
+                  {Array.from(selectedFiles).map(f => <div key={f} style={{ wordBreak: 'break-all' }}>{f}</div>)}
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer' }}>Cancel</button>
-                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#007bff', color: 'white', border: 'none', borderRadius: '4px' }}>Compress</button>
+                  <button onClick={() => setCompressDialogOpen(false)} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: 'rgba(255, 255, 255, 0.08)', color: '#e2e8f0', border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '6px' }}>Cancel</button>
+                  <button onClick={handleExecuteCompress} style={{ padding: '8px 16px', cursor: 'pointer', backgroundColor: '#38bdf8', color: '#0f172a', fontWeight: 'bold', border: 'none', borderRadius: '6px' }}>Compress</button>
                 </div>
               </>
             )}
@@ -2648,15 +2681,15 @@ export default function FileList({
       {extractProgress && createPortal(
         <div style={{
           position: 'fixed', top: extractProgressPos.y, left: extractProgressPos.x,
-          width: '350px', padding: '15px',
-          backgroundColor: 'white', zIndex: 2000,
-          borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          border: '1px solid #ccc',
+          width: '350px', padding: '16px',
+          backgroundColor: '#0f172a', color: '#f8fafc', zIndex: 2000,
+          borderRadius: '12px', boxShadow: '0 20px 40px rgba(0,0,0,0.6), 0 0 16px rgba(56, 189, 248, 0.15)',
+          border: '1px solid rgba(255, 255, 255, 0.14)',
           display: 'flex', flexDirection: 'column', gap: '10px',
           cursor: 'move'
         }} onMouseDown={handleExtractProgressMouseDown}>
-          <h4 style={{ margin: 0, fontSize: '1em' }}>Extracting...</h4>
-          <div style={{ fontSize: '0.9em', color: '#333' }}>
+          <h4 style={{ margin: 0, fontSize: '1.05em', color: '#f1f5f9' }}>Extracting...</h4>
+          <div style={{ fontSize: '0.9em', color: '#cbd5e1' }}>
             {extractProgress.total > 0
               ? `${Math.round((extractProgress.processed / extractProgress.total) * 100)}% completed`
               : 'Preparing...'}
@@ -2666,10 +2699,10 @@ export default function FileList({
             max={extractProgress.total || 100}
             style={{ width: '100%', height: '20px' }}
           />
-          <div style={{ fontSize: '0.8em', color: '#666', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {extractProgress.filename}
+          <div style={{ fontSize: '0.8em', color: '#94a3b8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            Processing: {extractProgress.filename}
           </div>
-          <div style={{ fontSize: '0.8em', color: '#666', textAlign: 'right' }}>
+          <div style={{ fontSize: '0.8em', color: '#94a3b8', textAlign: 'right' }}>
             {(() => {
               if (extractProgress.processed === 0 || extractProgress.total === 0) return 'Calculating...';
               const elapsed = (Date.now() - extractProgress.startTime) / 1000;
