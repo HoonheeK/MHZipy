@@ -423,6 +423,9 @@ export const serializeBlocksToMarkdown = (blocks: Block[]): string => {
     }
 
     if (b.type === 'divider') {
+      if (lines.length > 0 && lines[lines.length - 1].trim() !== '') {
+        lines.push('');
+      }
       lines.push('---');
       continue;
     }

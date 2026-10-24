@@ -55,14 +55,21 @@ interface MarkdownEditorProps {
  */
 const renderMarkdown = (text: string): string => {
   if (!text || !text.trim()) return '';
-  // Normalize hyphen without space before bold: '-**' -> '- **'
-  let normalized = text.replace(/^-(\*\*|__)/gm, '- $1');
-  // Normalize spaces inside bold asterisks: '** foo **' -> '**foo**'
+  // 1. Normalize line endings (CRLF / CR -> LF) for Windows & textarea compatibility
+  let normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  // 2. Normalize hyphen without space before bold: '-**' -> '- **'
+  normalized = normalized.replace(/^-(\*\*|__)/gm, '- $1');
+  // 3. Normalize spaces inside bold asterisks: '** foo **' -> '**foo**'
   normalized = normalized.replace(/\*\*\s+([^\s*](?:[\s\S]*?[^\s*])?)\s+\*\*/g, '**$1**');
+  // 4. Prevent Setext heading misinterpretation:
+  // When '---', '***', '___', or '===' immediately follows text without an empty line (and optional trailing whitespace),
+  // standard CommonMark/marked parser treats the preceding text as <h2> or <h1>.
+  // Automatically insert a blank line so it renders properly as a paragraph + horizontal rule (<hr>).
+  normalized = normalized.replace(/([^\n])\n\s*(-{3,}|\*{3,}|_{3,}|={3,})\s*(?=\n|$)/g, '$1\n\n$2');
   try {
     return marked.parse(normalized, { breaks: true, gfm: true }) as string;
   } catch {
-    return marked.parse(text, { breaks: true, gfm: true }) as string;
+    return marked.parse(normalized, { breaks: true, gfm: true }) as string;
   }
 };
 
