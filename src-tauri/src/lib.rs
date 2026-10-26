@@ -1597,6 +1597,93 @@ fn open_pdf_viewer(app: &AppHandle, pdf_path: &str, pdf_title: Option<&str>) {
     }
 }
 
+/// PDF 문서에서 특정 페이지만 추출하여 새 PDF 파일로 저장
+#[tauri::command]
+fn extract_pdf_pages(input_path: String, output_path: String, pages: Vec<u32>) -> Result<String, String> {
+    if pages.is_empty() {
+        return Err("추출할 페이지가 지정되지 않았습니다.".to_string());
+    }
+
+    let mut doc = lopdf::Document::load(&input_path)
+        .map_err(|e| format!("PDF 문서를 읽을 수 없습니다: {}", e))?;
+
+    let all_pages = doc.get_pages();
+    let total_pages = all_pages.len() as u32;
+
+    for &p in &pages {
+        if p == 0 || p > total_pages {
+            return Err(format!("유효하지 않은 페이지 번호입니다: {} (총 {}페이지)", p, total_pages));
+        }
+    }
+
+    let pages_to_delete: Vec<u32> = all_pages
+        .keys()
+        .filter(|p| !pages.contains(p))
+        .cloned()
+        .collect();
+
+    doc.delete_pages(&pages_to_delete);
+    doc.save(&output_path)
+        .map_err(|e| format!("새 PDF 파일 저장에 실패했습니다: {}", e))?;
+
+    Ok(format!("{}개 페이지가 성공적으로 추출되어 저장되었습니다.", pages.len()))
+}
+
+/// PDF 문서를 AES-256으로 암호화하여 저장
+#[tauri::command]
+fn encrypt_pdf_file(input_path: String, output_path: String, password: String) -> Result<String, String> {
+    if password.is_empty() {
+        return Err("암호를 입력해 주세요.".to_string());
+    }
+
+    pdf_encrypt::encrypt_pdf(&input_path, &output_path, &password)
+        .map_err(|e| format!("PDF 암호화에 실패했습니다: {}", e))?;
+
+    Ok("PDF 파일이 암호화되어 성공적으로 저장되었습니다.".to_string())
+}
+
+/// 암호화된 PDF 문서의 암호를 해제하여 무암호 PDF로 저장
+#[tauri::command]
+fn decrypt_pdf_file(input_path: String, output_path: String, password: String) -> Result<String, String> {
+    pdf_encrypt::decrypt_pdf(&input_path, &output_path, &password)
+        .map_err(|e| format!("PDF 암호 해제에 실패했습니다 (비밀번호 확인 필요): {}", e))?;
+
+    Ok("PDF 암호가 성공적으로 해제되어 저장되었습니다.".to_string())
+}
+
+/// PDF 문서가 암호화되어 있는지 확인
+#[tauri::command]
+fn check_pdf_encrypted(file_path: String) -> Result<bool, String> {
+    match lopdf::Document::load(&file_path) {
+        Ok(doc) => Ok(doc.is_encrypted()),
+        Err(e) => {
+            let err_str = e.to_string().to_lowercase();
+            if err_str.contains("encrypt") || err_str.contains("password") {
+                Ok(true)
+            } else {
+                Err(format!("PDF 확인 실패: {}", e))
+            }
+        }
+    }
+}
+
+/// 바이너리 데이터(PDF 바이트)를 지정된 경로에 파일로 저장
+#[tauri::command]
+fn save_pdf_bytes(output_path: String, data: Vec<u8>) -> Result<String, String> {
+    if data.is_empty() {
+        return Err("저장할 데이터가 비어 있습니다.".to_string());
+    }
+    std::fs::write(&output_path, &data)
+        .map_err(|e| format!("파일 저장 실패: {}", e))?;
+    Ok("파일이 성공적으로 저장되었습니다.".to_string())
+}
+
+/// 바이너리 데이터(PDF 바이트 등)를 파일에서 읽기
+#[tauri::command]
+fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(|e| format!("파일 읽기 실패 {}: {}", path, e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1889,7 +1976,13 @@ pub fn run() {
             get_folder_images,
             get_folder_videos,
             icon::get_file_icons,
-            native_dnd::start_native_file_drag
+            native_dnd::start_native_file_drag,
+            extract_pdf_pages,
+            encrypt_pdf_file,
+            decrypt_pdf_file,
+            check_pdf_encrypted,
+            save_pdf_bytes,
+            read_binary_file
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

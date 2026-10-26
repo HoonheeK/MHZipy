@@ -7,9 +7,10 @@
         body { margin: 0; background-color: #525659; font-family: sans-serif; overflow: hidden; }
         
         /* Custom Window Header for Frameless PDF Viewer */
+        /* Custom Window Header for Frameless PDF Viewer */
         #pdf-custom-header {
-            height: 38px;
-            background: #111827;
+            height: 40px;
+            background: #0f172a;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             color: #f1f5f9;
             display: flex;
@@ -20,6 +21,7 @@
             z-index: 2000;
             box-sizing: border-box;
             width: 100vw;
+            -webkit-app-region: drag;
         }
         #pdf-header-left {
             display: flex;
@@ -27,11 +29,9 @@
             gap: 8px;
             font-size: 13px;
             font-weight: 600;
-            color: #e2e8f0;
-            max-width: 75%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            color: #f8fafc;
+            flex-shrink: 0;
+            -webkit-app-region: drag;
         }
         #pdf-header-filename {
             font-weight: 600;
@@ -39,15 +39,71 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            max-width: 200px;
         }
-        #pdf-header-path {
-            font-size: 11px;
-            font-weight: 400;
-            color: #64748b;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+        
+        /* Title Bar Feature Menu Toolbar */
+        #pdf-header-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-left: 14px;
+            -webkit-app-region: no-drag;
+            overflow-x: auto;
         }
+        .pdf-tool-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #cbd5e1;
+            border-radius: 6px;
+            width: 28px;
+            height: 28px;
+            font-size: 13.5px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            user-select: none;
+            box-sizing: border-box;
+            flex-shrink: 0;
+            padding: 0;
+        }
+        .pdf-tool-btn:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+        .pdf-tool-btn:active {
+            transform: scale(0.95);
+        }
+        .pdf-tool-btn.primary {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: #3b82f6;
+        }
+        .pdf-tool-btn.primary:hover {
+            background: #1d4ed8;
+        }
+        .pdf-tool-btn:disabled,
+        .pdf-tool-btn.disabled {
+            opacity: 0.28 !important;
+            cursor: not-allowed !important;
+            background: transparent !important;
+            border-color: rgba(255, 255, 255, 0.05) !important;
+            pointer-events: none !important;
+        }
+        .pdf-tool-btn.pending-feature:hover {
+            opacity: 1;
+        }
+        .pdf-header-sep {
+            width: 1px;
+            height: 16px;
+            background: rgba(255, 255, 255, 0.12);
+            margin: 0 4px;
+            flex-shrink: 0;
+        }
+
         #pdf-header-drag-spacer {
             flex: 1;
             height: 100%;
@@ -63,6 +119,7 @@
             align-items: center;
             gap: 3px;
             -webkit-app-region: no-drag;
+            flex-shrink: 0;
         }
         .pdf-win-btn {
             background: transparent;
@@ -92,7 +149,7 @@
 
         /* Status Bar at the bottom */
         #pdf-status-bar {
-            height: 24px;
+            height: 26px;
             background: #090d16;
             border-top: 1px solid rgba(255, 255, 255, 0.08);
             color: #94a3b8;
@@ -109,11 +166,46 @@
         #pdf-status-left {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 10px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            max-width: 75%;
+            max-width: 80%;
+        }
+        .status-path-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            color: #94a3b8;
+            cursor: pointer;
+            max-width: 500px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.15s ease;
+        }
+        .status-path-box:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #38bdf8;
+        }
+        .status-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #94a3b8;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+        .status-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #ffffff;
         }
         #pdf-status-source {
             overflow: hidden;
@@ -129,8 +221,8 @@
             font-size: 11px;
         }
 
-        /* Layout (38px Header + 24px Status Bar = 62px) */
-        #app-container { display: flex; height: calc(100vh - 62px); width: 100vw; }
+        /* Layout (40px Header + 26px Status Bar = 66px) */
+        #app-container { display: flex; height: calc(100vh - 66px); width: 100vw; }
         
         /* Sidebar (Outline) */
         #sidebar {
@@ -189,8 +281,23 @@
 
         /* Main Content */
         #main-container { flex: 1; position: relative; overflow: hidden; display: flex; flex-direction: column; }
-        #viewer-scroll-container { flex: 1; overflow: auto; padding: 20px; position: relative; }
-        #viewer-content { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 20px; }
+        #viewer-scroll-container {
+            flex: 1;
+            overflow: auto;
+            padding: 24px;
+            position: relative;
+            box-sizing: border-box;
+        }
+        #viewer-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 100%;
+            width: max-content;
+            gap: 24px;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
         
         /* Page & Canvas */
         .page-wrapper {
@@ -202,6 +309,9 @@
             transition: outline 0.15s, box-shadow 0.15s;
             outline: 3px solid transparent;
             outline-offset: 3px;
+            margin-left: auto;
+            margin-right: auto;
+            box-sizing: border-box;
         }
         .page-wrapper.selected { outline: 3px solid #1a73e8; box-shadow: 0 0 18px rgba(26, 115, 232, 0.5); }
         canvas { display: block; }
@@ -375,47 +485,369 @@
             z-index: 100;
         }
 
-        /* Custom Password Dialog */
+        /* Custom MessageDialog & Prompt Styles (Matching src/common/MessageDialog.css) */
         .message-dialog-overlay {
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: rgba(0, 0, 0, 0.5); display: flex;
-            align-items: center; justify-content: center; z-index: 2000;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(10, 15, 29, 0.78);
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            animation: dialogFadeIn 0.18s ease-out;
         }
         .message-dialog {
-            background: white; border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            width: 400px; max-width: 90%; display: flex; flex-direction: column;
-            overflow: hidden; animation: fadeIn 0.2s ease-out; font-family: sans-serif;
+            background: #0f172a;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 24px rgba(56, 189, 248, 0.15);
+            width: 440px;
+            max-width: 90%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            color: #f8fafc;
+            animation: dialogScaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+            font-family: inherit;
         }
         .message-dialog-header {
-            padding: 12px 16px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef;
-            font-weight: 600; color: #333; font-size: 16px;
+            padding: 14px 18px;
+            background: rgba(17, 24, 39, 0.85);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            font-weight: 600;
+            font-size: 1.05rem;
+            color: #f1f5f9;
         }
         .message-dialog-body {
-            padding: 20px 16px; color: #495057; font-size: 15px; line-height: 1.5;
-            display: flex; flex-direction: column; gap: 10px;
+            padding: 20px 18px;
+            color: #cbd5e1;
+            font-size: 0.92rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 60vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
         .message-dialog-input {
-            padding: 8px 12px; border: 1px solid #ced4da; border-radius: 4px;
-            font-size: 14px; outline: none; width: 100%; box-sizing: border-box;
+            padding: 9px 12px;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            font-size: 13.5px;
+            outline: none;
+            width: 100%;
+            box-sizing: border-box;
+            background: #0f172a;
+            color: #f8fafc;
+            transition: border-color 0.15s;
         }
-        .message-dialog-input:focus { border-color: #80bdff; box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25); }
+        .message-dialog-input:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+        }
         .message-dialog-footer {
-            padding: 12px 16px; border-top: 1px solid #e9ecef; display: flex;
-            justify-content: flex-end; background-color: #f8f9fa; gap: 8px;
+            padding: 12px 18px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            background: rgba(17, 24, 39, 0.5);
         }
         .message-dialog-button {
-            padding: 6px 16px; background-color: #3b82f6; color: white; border: none;
-            border-radius: 4px; cursor: pointer; font-size: 14px; transition: background-color 0.2s;
+            padding: 8px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 600;
+            transition: all 0.15s ease;
+            user-select: none;
+            border: none;
         }
-        .message-dialog-button:hover { background-color: #2563eb; }
-        .message-dialog-button.cancel { background-color: #6c757d; }
-        .message-dialog-button.cancel:hover { background-color: #5a6268; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .message-dialog-button.ok,
+        .message-dialog-button:not(.cancel) {
+            background-color: #38bdf8;
+            color: #0f172a;
+        }
+        .message-dialog-button.ok:hover,
+        .message-dialog-button:not(.cancel):hover {
+            background-color: #7dd3fc;
+            box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+        }
+        .message-dialog-button.cancel {
+            background-color: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .message-dialog-button.cancel:hover {
+            background-color: rgba(255, 255, 255, 0.14);
+            color: #ffffff;
+        }
+        @keyframes dialogFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes dialogScaleIn {
+            from { opacity: 0; transform: scale(0.96); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        /* Feature Modals & Form Styles */
+        .pdf-modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(4px);
+            display: none; align-items: center; justify-content: center;
+            z-index: 3000; animation: fadeIn 0.15s ease-out;
+        }
+        .pdf-modal-overlay.active { display: flex; }
+        .pdf-modal {
+            background: #1e293b; color: #f1f5f9; border-radius: 10px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            width: 440px; max-width: 92%; display: flex; flex-direction: column;
+            overflow: hidden; animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            font-family: inherit;
+        }
+        @keyframes modalPop {
+            from { opacity: 0; transform: scale(0.95) translateY(-8px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .pdf-modal-header {
+            padding: 14px 18px; background-color: #0f172a; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            font-weight: 600; color: #f8fafc; font-size: 14px; display: flex;
+            align-items: center; justify-content: space-between;
+        }
+        .pdf-modal-close-btn {
+            background: transparent; border: none; color: #94a3b8; font-size: 16px;
+            cursor: pointer; border-radius: 4px; padding: 2px 6px;
+        }
+        .pdf-modal-close-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
+        .pdf-modal-body {
+            padding: 18px 20px; font-size: 13px; line-height: 1.5;
+            display: flex; flex-direction: column; gap: 14px; color: #cbd5e1;
+        }
+        .modal-field-label {
+            font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .modal-input {
+            padding: 8px 12px; background: #0f172a; border: 1px solid #334155;
+            border-radius: 6px; font-size: 13px; color: #f8fafc; outline: none;
+            width: 100%; box-sizing: border-box; transition: border-color 0.15s;
+        }
+        .modal-input:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2); }
+        .chips-container {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;
+        }
+        .range-chip {
+            background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #94a3b8; font-size: 11px; padding: 3px 8px; border-radius: 4px;
+            cursor: pointer; transition: all 0.15s; user-select: none;
+        }
+        .range-chip:hover { background: #38bdf8; color: #0f172a; font-weight: 600; border-color: #38bdf8; }
+        .pdf-modal-footer {
+            padding: 12px 18px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+            background-color: #0f172a; display: flex; justify-content: flex-end; gap: 8px;
+        }
+        .modal-btn {
+            padding: 7px 16px; border-radius: 6px; font-size: 12.5px; font-weight: 500;
+            cursor: pointer; border: none; transition: all 0.15s;
+        }
+        .modal-btn.primary { background: #2563eb; color: #ffffff; }
+        .modal-btn.primary:hover { background: #1d4ed8; }
+        .modal-btn.cancel { background: #334155; color: #cbd5e1; }
+        .modal-btn.cancel:hover { background: #475569; color: #ffffff; }
+
+        /* Toast notification */
+        #pdf-toast {
+            position: fixed; top: 52px; left: 50%; transform: translateX(-50%) translateY(-20px);
+            background: #0f172a; color: #f8fafc; padding: 8px 16px; border-radius: 8px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.15);
+            font-size: 12.5px; font-weight: 500; z-index: 99999; opacity: 0; pointer-events: none;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1); display: flex; align-items: center; gap: 8px;
+        }
+        #pdf-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+
+        /* Region Capture Space Hint Badge */
+        .region-key-hint {
+            position: absolute;
+            top: -34px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0f172a;
+            color: #38bdf8;
+            border: 1px solid #38bdf8;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 11.5px;
+            font-weight: 600;
+            white-space: nowrap;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            z-index: 1000;
+        }
+        .region-key-hint.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(-2px);
+        }
+
+        /* Floating Feature Toolbars */
+        .pdf-floating-toolbar {
+            position: fixed;
+            top: 48px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            z-index: 2500;
+            color: #f1f5f9;
+            font-size: 13px;
+            user-select: none;
+        }
+        .pdf-floating-toolbar.active {
+            display: flex;
+        }
+        .float-tool-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #cbd5e1;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.15s ease;
+        }
+        .float-tool-btn:hover {
+            background: rgba(255, 255, 255, 0.18);
+            color: #fff;
+        }
+        .float-tool-btn.active {
+            background: #2563eb;
+            border-color: #3b82f6;
+            color: #fff;
+        }
+        .float-tool-btn.primary {
+            background: #059669;
+            border-color: #10b981;
+            color: #fff;
+        }
+        .float-tool-btn.primary:hover {
+            background: #047857;
+        }
+        .float-tool-btn.danger {
+            background: rgba(239, 68, 68, 0.2);
+            border-color: rgba(239, 68, 68, 0.4);
+            color: #fca5a5;
+        }
+        .float-tool-btn.danger:hover {
+            background: #ef4444;
+            color: #fff;
+        }
+        .float-sep {
+            width: 1px;
+            height: 18px;
+            background: rgba(255, 255, 255, 0.15);
+            margin: 0 2px;
+        }
+
+        /* Movable Overlay Items (Signature, Whiteout, Text, Image) */
+        .placed-overlay-item {
+            position: absolute;
+            cursor: move;
+            user-select: none;
+            z-index: 50;
+            box-sizing: border-box;
+            border: 1.5px dashed #38bdf8;
+            border-radius: 4px;
+        }
+        .placed-overlay-item:hover, .placed-overlay-item.selected {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
+        }
+        .placed-overlay-item .item-del-btn {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            width: 20px;
+            height: 20px;
+            background: #ef4444;
+            color: #fff;
+            border: 1.5px solid #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            cursor: pointer;
+            z-index: 60;
+        }
+        .placed-overlay-item .resize-handle {
+            position: absolute;
+            right: -4px;
+            bottom: -4px;
+            width: 10px;
+            height: 10px;
+            background: #38bdf8;
+            border: 1.5px solid #fff;
+            cursor: se-resize;
+            border-radius: 2px;
+            z-index: 60;
+        }
+
+        /* Signature Canvas Pad */
+        #sig-canvas {
+            border: 1.5px dashed #475569;
+            border-radius: 6px;
+            background: #ffffff;
+            cursor: crosshair;
+            touch-action: none;
+            display: block;
+        }
+
+        /* Outline toolbar */
+        #outline-action-bar {
+            padding: 8px 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.03);
+        }
+        .outline-action-btn {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #cbd5e1;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11.5px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .outline-action-btn:hover {
+            background: #38bdf8;
+            color: #0f172a;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
-    <header id="pdf-custom-header">
-        <div id="pdf-header-left">
+    <header id="pdf-custom-header" data-tauri-drag-region>
+        <div id="pdf-header-left" data-tauri-drag-region>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                 <polyline points="14 2 14 8 20 8"></polyline>
@@ -424,8 +856,39 @@
                 <polyline points="10 9 9 9 8 9"></polyline>
             </svg>
             <span id="pdf-header-filename">PDF Viewer</span>
-            <span id="pdf-header-path"></span>
         </div>
+
+        <!-- Title Bar Feature Menus (Icon-only with English tooltips) -->
+        <div id="pdf-header-toolbar">
+            <button type="button" class="pdf-tool-btn" id="btn-extract-pages" title="Extract Pages (Create new PDF from selected pages)">
+                <span>✂️</span>
+            </button>
+            <button type="button" class="pdf-tool-btn" id="btn-protect-pdf" title="Protect PDF (Encrypt with AES-256 password)">
+                <span>🔒</span>
+            </button>
+            <button type="button" class="pdf-tool-btn disabled" id="btn-unlock-pdf" disabled title="Unlock PDF (Document is not password-protected)">
+                <span>🔓</span>
+            </button>
+            <div class="pdf-header-sep"></div>
+            <button type="button" class="pdf-tool-btn" id="btn-header-capture" title="Capture Region (Select area to copy to clipboard)">
+                <span>🔲</span>
+            </button>
+            <div class="pdf-header-sep"></div>
+            <!-- Feature Buttons -->
+            <button type="button" class="pdf-tool-btn" id="btn-sign-pdf" title="Digital Signature (Draw or place signature & stamp on page)">
+                <span>✍️</span>
+            </button>
+            <button type="button" class="pdf-tool-btn" id="btn-annotate-pdf" title="Annotate PDF (Highlight, sticky note, pen drawing)">
+                <span>📝</span>
+            </button>
+            <button type="button" class="pdf-tool-btn" id="btn-edit-pdf" title="Edit Text & Images (Whiteout, add text, insert image)">
+                <span>✏️</span>
+            </button>
+            <button type="button" class="pdf-tool-btn" id="btn-bookmark-pdf" title="Bookmarks & Outline (Add and manage bookmarks)">
+                <span>🔖</span>
+            </button>
+        </div>
+
         <div id="pdf-header-drag-spacer" data-tauri-drag-region title="Drag to move window, double-click to toggle maximize"></div>
         <div id="pdf-window-controls">
             <button type="button" class="pdf-win-btn" id="pdf-btn-minimize" title="Minimize">
@@ -450,6 +913,14 @@
                 <button class="search-btn" id="sidebar-close-btn" style="margin-right: 8px;">✕</button>
             </div>
             <div id="outline-panel" class="sidebar-panel active">
+                <div id="outline-action-bar">
+                    <button type="button" class="outline-action-btn" id="btn-add-bookmark" title="Add bookmark for current page">
+                        <span>➕ Add Bookmark</span>
+                    </button>
+                    <button type="button" class="outline-action-btn" id="btn-save-bookmarks" title="Save bookmarks into PDF">
+                        <span>💾 Save</span>
+                    </button>
+                </div>
                 <div id="outline-container"></div>
             </div>
             <div id="pages-panel" class="sidebar-panel">
@@ -511,12 +982,254 @@
     <!-- Bottom Status Bar -->
     <footer id="pdf-status-bar">
         <div id="pdf-status-left">
+            <span id="pdf-status-filepath" class="status-path-box" title="Click to copy full path">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+                <span id="pdf-status-filepath-text"></span>
+            </span>
+            <button type="button" id="btn-status-open-folder" class="status-btn" title="Show in File Explorer">
+                📁 Explorer
+            </button>
             <span id="pdf-status-source"></span>
         </div>
         <div id="pdf-status-right">
             <span id="pdf-status-info">Ready</span>
         </div>
     </footer>
+
+    <!-- Toast Notification -->
+    <div id="pdf-toast">
+        <span id="pdf-toast-icon">ℹ️</span>
+        <span id="pdf-toast-msg">Notification</span>
+    </div>
+
+    <!-- Modal 1: Extract Pages -->
+    <div id="modal-extract" class="pdf-modal-overlay">
+        <div class="pdf-modal">
+            <div class="pdf-modal-header">
+                <span>✂️ Extract Pages</span>
+                <button type="button" class="pdf-modal-close-btn" data-close-modal="modal-extract">✕</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div>
+                    <div class="modal-field-label">
+                        <span>Page Range</span>
+                        <span id="extract-total-pages" style="color: #64748b; font-weight: normal;">Total 0 pages</span>
+                    </div>
+                    <input type="text" id="extract-range-input" class="modal-input" placeholder="e.g. 1, 3-5, 8 (comma or dash separated)">
+                    <div class="chips-container">
+                        <span class="range-chip" id="chip-cur-page">Current Page</span>
+                        <span class="range-chip" id="chip-first-page">Page 1</span>
+                        <span class="range-chip" id="chip-odd-pages">Odd Pages</span>
+                        <span class="range-chip" id="chip-even-pages">Even Pages</span>
+                        <span class="range-chip" id="chip-all-pages">All Pages</span>
+                    </div>
+                </div>
+                <div>
+                    <div class="modal-field-label">Output File Path</div>
+                    <input type="text" id="extract-output-path" class="modal-input" placeholder="Full output file path">
+                </div>
+            </div>
+            <div class="pdf-modal-footer">
+                <button type="button" class="modal-btn cancel" data-close-modal="modal-extract">Cancel</button>
+                <button type="button" class="modal-btn primary" id="btn-do-extract">Extract & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 2: Protect (Encrypt) PDF -->
+    <div id="modal-protect" class="pdf-modal-overlay">
+        <div class="pdf-modal">
+            <div class="pdf-modal-header">
+                <span>🔒 Protect PDF</span>
+                <button type="button" class="pdf-modal-close-btn" data-close-modal="modal-protect">✕</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div style="font-size: 12px; color: #94a3b8; line-height: 1.4;">
+                    Encrypt this document with standard <b>AES-256</b> encryption. Please keep your password safe, as it cannot be recovered if forgotten.
+                </div>
+                <div>
+                    <div class="modal-field-label">Password</div>
+                    <input type="password" id="protect-password-input" class="modal-input" placeholder="Enter password">
+                </div>
+                <div>
+                    <div class="modal-field-label">Confirm Password</div>
+                    <input type="password" id="protect-password-confirm" class="modal-input" placeholder="Confirm password">
+                </div>
+                <div>
+                    <div class="modal-field-label">Output File Path</div>
+                    <input type="text" id="protect-output-path" class="modal-input" placeholder="Full output file path">
+                </div>
+            </div>
+            <div class="pdf-modal-footer">
+                <button type="button" class="modal-btn cancel" data-close-modal="modal-protect">Cancel</button>
+                <button type="button" class="modal-btn primary" id="btn-do-protect">Protect & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 3: Unlock (Decrypt) PDF -->
+    <div id="modal-unlock" class="pdf-modal-overlay">
+        <div class="pdf-modal">
+            <div class="pdf-modal-header">
+                <span>🔓 Unlock PDF</span>
+                <button type="button" class="pdf-modal-close-btn" data-close-modal="modal-unlock">✕</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div style="font-size: 12px; color: #94a3b8; line-height: 1.4;">
+                    Removes password protection from this document and saves an unlocked copy.
+                </div>
+                <div>
+                    <div class="modal-field-label">Current Password</div>
+                    <input type="password" id="unlock-password-input" class="modal-input" placeholder="Enter current document password">
+                </div>
+                <div>
+                    <div class="modal-field-label">Output File Path</div>
+                    <input type="text" id="unlock-output-path" class="modal-input" placeholder="Full output file path">
+                </div>
+            </div>
+            <div class="pdf-modal-footer">
+                <button type="button" class="modal-btn cancel" data-close-modal="modal-unlock">Cancel</button>
+                <button type="button" class="modal-btn primary" id="btn-do-unlock">Unlock & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Floating Toolbar 1: Annotations (Highlight, Sticky Note, Pen Draw, Eraser, Undo/Redo) -->
+    <div id="toolbar-annotate" class="pdf-floating-toolbar">
+        <span style="font-weight: 600; font-size: 12px; color: #94a3b8; margin-right: 4px;">📝 Annotate:</span>
+        <button type="button" class="float-tool-btn active" id="btn-annot-pen" title="Freehand Pen Tool">🖊️ Pen</button>
+        <button type="button" class="float-tool-btn" id="btn-annot-highlighter" title="Highlighter (Semi-transparent)">🖍️ Highlight</button>
+        <button type="button" class="float-tool-btn" id="btn-annot-eraser" title="Object Eraser (Click stroke to delete entire object)">🧹 Eraser</button>
+        <button type="button" class="float-tool-btn" id="btn-annot-note" title="Sticky Note (Click on page to add memo)">💬 Note</button>
+        <div class="float-sep"></div>
+        <!-- Color Presets -->
+        <div id="annot-color-palette" style="display: flex; gap: 5px; align-items: center;">
+            <button type="button" class="annot-preset-color active" data-color="#f59e0b" style="width: 18px; height: 18px; background: #f59e0b; border-radius: 50%; border: 2px solid #fff; cursor: pointer; padding: 0;" title="Amber / Yellow"></button>
+            <button type="button" class="annot-preset-color" data-color="#ef4444" style="width: 18px; height: 18px; background: #ef4444; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Red"></button>
+            <button type="button" class="annot-preset-color" data-color="#22c55e" style="width: 18px; height: 18px; background: #22c55e; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Green"></button>
+            <button type="button" class="annot-preset-color" data-color="#3b82f6" style="width: 18px; height: 18px; background: #3b82f6; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Blue"></button>
+            <button type="button" class="annot-preset-color" data-color="#a855f7" style="width: 18px; height: 18px; background: #a855f7; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Purple"></button>
+            <button type="button" class="annot-preset-color" data-color="#0f172a" style="width: 18px; height: 18px; background: #0f172a; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Black"></button>
+            <input type="color" id="annot-color-picker" value="#f59e0b" style="width: 22px; height: 22px; border: none; background: transparent; cursor: pointer; padding: 0;" title="Custom Color">
+        </div>
+        <select id="annot-size-select" style="background: #0f172a; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 2px 4px; font-size: 12px;" title="Thickness">
+            <option value="2">Thin (2px)</option>
+            <option value="4" selected>Medium (4px)</option>
+            <option value="8">Thick (8px)</option>
+            <option value="16">Broad (16px)</option>
+        </select>
+        <div class="float-sep"></div>
+        <button type="button" class="float-tool-btn" id="btn-annot-undo" title="Undo (Ctrl+Z)">↩️</button>
+        <button type="button" class="float-tool-btn" id="btn-annot-redo" title="Redo (Ctrl+Y)">↪️</button>
+        <div class="float-sep"></div>
+        <button type="button" class="float-tool-btn danger" id="btn-annot-clear" title="Clear all drawings on current page">🗑️ Clear</button>
+        <button type="button" class="float-tool-btn primary" id="btn-annot-save" title="Burn annotations into PDF file">💾 Save to PDF</button>
+        <button type="button" class="float-tool-btn" id="btn-annot-close" style="padding: 5px 8px;">✕</button>
+    </div>
+
+    <!-- Floating Toolbar 2: Edit Text & Image (Whiteout, Add Text, Insert Image) -->
+    <div id="toolbar-edit" class="pdf-floating-toolbar">
+        <span style="font-weight: 600; font-size: 12px; color: #94a3b8; margin-right: 4px;">✏️ Edit:</span>
+        <button type="button" class="float-tool-btn active" id="btn-edit-whiteout" title="Drag rectangle on page to cover content with white">◻️ Whiteout</button>
+        <button type="button" class="float-tool-btn" id="btn-edit-text" title="Click on page to add custom text">🔤 Add Text</button>
+        <button type="button" class="float-tool-btn" id="btn-edit-image" title="Insert image stamp/logo on page">🖼️ Add Image</button>
+        <input type="file" id="edit-img-file-input" accept="image/*" multiple style="display: none;">
+        <div class="float-sep"></div>
+        <button type="button" class="float-tool-btn primary" id="btn-edit-save" title="Save changes into PDF file">💾 Save to PDF</button>
+        <button type="button" class="float-tool-btn" id="btn-edit-close" style="padding: 5px 8px;">✕</button>
+    </div>
+
+    <!-- Floating Toolbar 3: Placement guide for Signature / Image -->
+    <div id="toolbar-place-item" class="pdf-floating-toolbar">
+        <span style="font-size: 12.5px; color: #38bdf8;">💡 Drag to position, resize by bottom-right handle.</span>
+        <button type="button" class="float-tool-btn primary" id="btn-place-save" title="Apply and save into PDF file">💾 Apply & Save to PDF</button>
+        <button type="button" class="float-tool-btn danger" id="btn-place-cancel">Cancel</button>
+    </div>
+
+    <!-- Modal 4: Digital Signature (Draw or upload stamp) -->
+    <div id="modal-sign" class="pdf-modal-overlay">
+        <div class="pdf-modal" style="width: 480px;">
+            <div class="pdf-modal-header">
+                <span>✍️ Digital Signature & Stamp</span>
+                <button type="button" class="pdf-modal-close-btn" data-close-modal="modal-sign">✕</button>
+            </div>
+            <div class="pdf-modal-body">
+                <div style="display: flex; gap: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 8px;">
+                    <button type="button" class="float-tool-btn active" id="tab-sig-draw">✍️ Draw Signature</button>
+                    <button type="button" class="float-tool-btn" id="tab-sig-upload">📁 Upload Image</button>
+                </div>
+
+                <!-- Tab 1: Draw Signature -->
+                <div id="sig-draw-pane">
+                    <div style="font-size: 12px; color: #94a3b8; margin-bottom: 6px;">Draw your signature using mouse or pen:</div>
+                    <canvas id="sig-canvas" width="440" height="180"></canvas>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <span style="font-size: 12px; color: #94a3b8;">Color:</span>
+                            <button type="button" class="sig-color-btn active" data-color="#000000" style="width: 18px; height: 18px; background: #000; border-radius: 50%; border: 2px solid #fff; cursor: pointer;" title="Black"></button>
+                            <button type="button" class="sig-color-btn" data-color="#1d4ed8" style="width: 18px; height: 18px; background: #1d4ed8; border-radius: 50%; border: 1px solid #fff; cursor: pointer;" title="Blue"></button>
+                            <button type="button" class="sig-color-btn" data-color="#dc2626" style="width: 18px; height: 18px; background: #dc2626; border-radius: 50%; border: 1px solid #fff; cursor: pointer;" title="Red"></button>
+                        </div>
+                        <button type="button" class="float-tool-btn danger" id="btn-sig-clear" style="padding: 3px 8px; font-size: 11px;">Clear</button>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Upload Image -->
+                <div id="sig-upload-pane" style="display: none;">
+                    <div style="font-size: 12px; color: #94a3b8; margin-bottom: 8px;">Select a transparent PNG signature or stamp image:</div>
+                    <input type="file" id="sig-img-upload-input" class="modal-input" accept="image/*">
+                    <div id="sig-img-preview-container" style="margin-top: 10px; text-align: center; min-height: 120px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                        <span style="font-size: 12px; color: #64748b;">Image preview will appear here.</span>
+                    </div>
+                </div>
+            </div>
+            <div class="pdf-modal-footer">
+                <button type="button" class="modal-btn cancel" data-close-modal="modal-sign">Cancel</button>
+                <button type="button" class="modal-btn primary" id="btn-sig-place">Place on Page</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal 5: Save Choice (Overwrite vs New File) -->
+    <div id="modal-save-choice" class="pdf-modal-overlay">
+        <div class="pdf-modal" style="width: 480px;">
+            <div class="pdf-modal-header">
+                <span>💾 Save PDF Options</span>
+                <button type="button" class="pdf-modal-close-btn" data-close-modal="modal-save-choice">✕</button>
+            </div>
+            <div class="pdf-modal-body" style="gap: 14px;">
+                <div style="font-size: 12.5px; color: #94a3b8; line-height: 1.4;">
+                    Choose how you want to save the applied signature and changes:
+                </div>
+
+                <!-- Option 1: Overwrite Current File -->
+                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600; color: #f8fafc; font-size: 13px;">⚡ Option 1: Overwrite Current File</span>
+                        <button type="button" class="modal-btn" id="btn-save-overwrite" style="background: #e11d48; color: #fff; padding: 5px 12px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer;">Overwrite</button>
+                    </div>
+                    <div style="font-size: 11.5px; color: #64748b; word-break: break-all;" id="save-current-file-label">
+                        Original: Vitality.pdf
+                    </div>
+                </div>
+
+                <!-- Option 2: Save as New File -->
+                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-weight: 600; color: #f8fafc; font-size: 13px;">📄 Option 2: Save as New File</span>
+                        <button type="button" class="modal-btn primary" id="btn-save-newfile" style="padding: 5px 12px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer;">Save as New</button>
+                    </div>
+                    <input type="text" id="save-newfile-input" class="modal-input" placeholder="New file path" style="font-size: 12px;">
+                </div>
+            </div>
+            <div class="pdf-modal-footer">
+                <button type="button" class="modal-btn cancel" data-close-modal="modal-save-choice">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF-Lib for Client-side PDF editing, drawing, and embedding -->
+    <script src="/lib/pdf-lib.min.js"></script>
 
     <!-- pdf.js 라이브러리를 로드합니다. 프로젝트의 버전에 맞게 수정할 수 있습니다. -->
     <script type="module">
@@ -533,6 +1246,41 @@
         let currentRotation = 0; // 기본 회전 각도
         let selectedPageNum = null; // 선택된 페이지 번호 (줌 앵커용)
         let isFitWidthMode = true; // 기본 모드: 화면 폭 맞춤 (Fit to Width)
+        let isPdfEncrypted = false; // 암호화 문서 여부
+        let pdfSessionPassword = ''; // 문서 열람에 사용된 비밀번호
+
+        function setPdfEncryptedState(encrypted, password = '') {
+            isPdfEncrypted = Boolean(encrypted);
+            if (password) pdfSessionPassword = password;
+            const btnUnlock = document.getElementById('btn-unlock-pdf');
+            if (btnUnlock) {
+                if (isPdfEncrypted) {
+                    btnUnlock.disabled = false;
+                    btnUnlock.classList.remove('disabled');
+                    btnUnlock.title = 'Unlock PDF (Remove password protection)';
+                } else {
+                    btnUnlock.disabled = true;
+                    btnUnlock.classList.add('disabled');
+                    btnUnlock.title = 'Unlock PDF (Document is not password-protected)';
+                }
+            }
+        }
+
+        async function checkEncryptionStatus() {
+            const fullPath = pdfPath || fileUrl || '';
+            if (!fullPath) return;
+            try {
+                const invoke = window.__TAURI__?.core?.invoke;
+                if (invoke) {
+                    const isEnc = await invoke('check_pdf_encrypted', { filePath: fullPath });
+                    if (isEnc) {
+                        setPdfEncryptedState(true);
+                    }
+                }
+            } catch (e) {
+                console.warn('Encryption check:', e);
+            }
+        }
 
         // 화면 폭에 맞춰 스케일 계산 함수
         async function fitToWidth() {
@@ -544,12 +1292,12 @@
             const page = await pdfDoc.getPage(Math.min(pdfDoc.numPages, Math.max(1, curPageNum)));
             const viewport = page.getViewport({ scale: 1.0, rotation: currentRotation });
 
-            // 좌우 패딩(20px * 2) 및 스크롤바 너비 고려
-            const availableWidth = Math.max(200, scrollContainer.clientWidth - 48);
+            // 좌우 패딩(24px * 2) 및 스크롤바 너비 고려
+            const availableWidth = Math.max(100, scrollContainer.clientWidth - 56);
             const calculatedScale = availableWidth / viewport.width;
 
             if (calculatedScale > 0) {
-                currentScale = Math.max(0.2, Math.min(calculatedScale, 5.0));
+                currentScale = Math.max(0.02, Math.min(calculatedScale, 30.0));
                 const zoomInput = document.getElementById('zoom-level');
                 if (zoomInput) {
                     zoomInput.value = Math.round(currentScale * 100) + '%';
@@ -569,6 +1317,139 @@
             // 썸네일도 동기화
             updateActiveThumbnail(pageNum || parseInt(document.getElementById('current-page')?.textContent) || 1);
         }
+
+        // Custom Message Dialog matching src/common/MessageDialog.tsx
+        function showMessageDialog(title, message) {
+            return new Promise((resolve) => {
+                document.querySelectorAll('.message-dialog-overlay').forEach(el => el.remove());
+
+                const overlay = document.createElement('div');
+                overlay.className = 'message-dialog-overlay';
+
+                const dialog = document.createElement('div');
+                dialog.className = 'message-dialog';
+                dialog.onclick = (e) => e.stopPropagation();
+
+                const header = document.createElement('div');
+                header.className = 'message-dialog-header';
+                header.textContent = title || 'Notification';
+
+                const body = document.createElement('div');
+                body.className = 'message-dialog-body';
+                body.textContent = message || '';
+
+                const footer = document.createElement('div');
+                footer.className = 'message-dialog-footer';
+
+                const okBtn = document.createElement('button');
+                okBtn.className = 'message-dialog-button ok';
+                okBtn.textContent = 'OK';
+
+                const closeDialog = () => {
+                    window.removeEventListener('keydown', handleKey);
+                    overlay.remove();
+                    resolve(true);
+                };
+
+                const handleKey = (e) => {
+                    if (e.key === 'Escape' || e.key === 'Enter') {
+                        closeDialog();
+                    }
+                };
+
+                okBtn.onclick = closeDialog;
+                overlay.onclick = closeDialog;
+                window.addEventListener('keydown', handleKey);
+
+                footer.appendChild(okBtn);
+                dialog.appendChild(header);
+                dialog.appendChild(body);
+                dialog.appendChild(footer);
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+
+                setTimeout(() => okBtn.focus(), 50);
+            });
+        }
+        window.showMessageDialog = showMessageDialog;
+        // Override native window.alert with Custom MessageDialog
+        window.alert = (msg) => showMessageDialog('Notification', String(msg));
+
+        // Custom Prompt Dialog with dark glassmorphism styling
+        function showPromptDialog(title, message, defaultValue = '') {
+            return new Promise((resolve) => {
+                document.querySelectorAll('.message-dialog-overlay').forEach(el => el.remove());
+
+                const overlay = document.createElement('div');
+                overlay.className = 'message-dialog-overlay';
+
+                const dialog = document.createElement('div');
+                dialog.className = 'message-dialog';
+                dialog.onclick = (e) => e.stopPropagation();
+
+                const header = document.createElement('div');
+                header.className = 'message-dialog-header';
+                header.textContent = title || 'Input';
+
+                const body = document.createElement('div');
+                body.className = 'message-dialog-body';
+
+                const label = document.createElement('div');
+                label.textContent = message || '';
+
+                const inputEl = document.createElement('input');
+                inputEl.type = 'text';
+                inputEl.className = 'message-dialog-input';
+                inputEl.value = defaultValue;
+
+                body.appendChild(label);
+                body.appendChild(inputEl);
+
+                const footer = document.createElement('div');
+                footer.className = 'message-dialog-footer';
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'message-dialog-button cancel';
+                cancelBtn.textContent = 'Cancel';
+
+                const okBtn = document.createElement('button');
+                okBtn.className = 'message-dialog-button ok';
+                okBtn.textContent = 'OK';
+
+                const finish = (result) => {
+                    window.removeEventListener('keydown', handleKey);
+                    overlay.remove();
+                    resolve(result);
+                };
+
+                const handleKey = (e) => {
+                    if (e.key === 'Enter') finish(inputEl.value.trim());
+                    if (e.key === 'Escape') finish(null);
+                };
+
+                okBtn.onclick = () => finish(inputEl.value.trim());
+                cancelBtn.onclick = () => finish(null);
+                overlay.onmousedown = (e) => {
+                    if (e.target === overlay) finish(null);
+                };
+
+                window.addEventListener('keydown', handleKey);
+
+                footer.appendChild(cancelBtn);
+                footer.appendChild(okBtn);
+                dialog.appendChild(header);
+                dialog.appendChild(body);
+                dialog.appendChild(footer);
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+
+                setTimeout(() => {
+                    inputEl.focus();
+                    inputEl.select();
+                }, 50);
+            });
+        }
+        window.showPromptDialog = showPromptDialog;
 
         function showPasswordDialog(msg) {
             return new Promise((resolve) => {
@@ -734,12 +1615,14 @@
             try {
                 // Prompt the user for password if the PDF is password-protected
                 loadingTask.onPassword = async (callback, reason) => {
+                    setPdfEncryptedState(true);
                     let msg = "Please enter the PDF password:";
                     if (reason === 2 || (pdfjsLib.PasswordResponses && reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD)) {
                         msg = "Incorrect password. Please try again:";
                     }
                     const pwd = await showPasswordDialog(msg);
                     if (pwd !== null) {
+                        pdfSessionPassword = pwd;
                         callback(pwd);
                     } else {
                         // Cancel loading if the user presses Cancel
@@ -749,6 +1632,9 @@
 
                 pdfDoc = await loadingTask.promise;
                 loadingEl.style.display = 'none';
+
+                // 암호화 여부 체크 및 Unlock 버튼 상태 갱신
+                checkEncryptionStatus();
 
                 // 메타데이터(원본 파일 정보) 확인 및 저장
                 try {
@@ -803,25 +1689,29 @@
 
         // 개별 페이지 렌더링 함수
         async function renderSinglePage(pageData, version) {
-            const { pageNum, page, viewport, pageWrapper } = pageData;
+            const { pageNum, page, pageWrapper } = pageData;
+            const viewport = pageData.targetViewport || pageData.viewport;
+            const renderViewport = pageData.canvasViewport || viewport;
 
             // 버전이 바뀌었으면 (줌이 변경됨) 중단
             if (version !== _renderVersion) return;
 
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
+            canvas.height = renderViewport.height;
+            canvas.width = renderViewport.width;
+            canvas.style.width = '100%';
+            canvas.style.height = '100%';
             pageWrapper.appendChild(canvas);
 
-            // 텍스트 레이어 생성
+            // 텍스트 레이어 생성 (논리적 뷰포트 크기 기준)
             const textLayerDiv = document.createElement('div');
             textLayerDiv.className = 'textLayer';
             textLayerDiv.style.width = `${viewport.width}px`;
             textLayerDiv.style.height = `${viewport.height}px`;
             pageWrapper.appendChild(textLayerDiv);
 
-            await page.render({ canvasContext: context, viewport: viewport }).promise;
+            await page.render({ canvasContext: context, viewport: renderViewport }).promise;
             if (version !== _renderVersion) return;
 
             // 검색을 위해 텍스트 컨텐츠 추출 및 저장
@@ -1018,25 +1908,27 @@
             // === 1단계: 모든 페이지의 플레이스홀더(wrapper)를 먼저 생성 ===
             for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
                 const page = await pdfDoc.getPage(pageNum);
-                let viewport = page.getViewport({ scale: currentScale, rotation: currentRotation });
+                // 사용자가 요청한 전체 표시용 논리적 뷰포트
+                const targetViewport = page.getViewport({ scale: currentScale, rotation: currentRotation });
                 
-                // Canvas 크기 제한 (메모리 최적화)
-                const MAX_CANVAS_DIMENSION = 4096;
-                if (viewport.width > MAX_CANVAS_DIMENSION || viewport.height > MAX_CANVAS_DIMENSION) {
-                    const scaleFactor = Math.min(MAX_CANVAS_DIMENSION / viewport.width, MAX_CANVAS_DIMENSION / viewport.height);
-                    viewport = page.getViewport({ scale: currentScale * scaleFactor });
+                // Canvas 크기 제한 (Chromium 하드웨어 한계 방어: 16384px)
+                const MAX_CANVAS_DIMENSION = 16384;
+                let canvasViewport = targetViewport;
+                if (targetViewport.width > MAX_CANVAS_DIMENSION || targetViewport.height > MAX_CANVAS_DIMENSION) {
+                    const scaleFactor = Math.min(MAX_CANVAS_DIMENSION / targetViewport.width, MAX_CANVAS_DIMENSION / targetViewport.height);
+                    canvasViewport = page.getViewport({ scale: currentScale * scaleFactor, rotation: currentRotation });
                 }
                 
-                // 페이지 래퍼 생성 (빈 플레이스홀더)
+                // 페이지 래퍼 생성 (빈 플레이스홀더: 항상 전체 targetViewport 크기 유지하여 무제한 확대 가능)
                 const pageWrapper = document.createElement('div');
                 pageWrapper.className = 'page-wrapper';
                 if (selectedPageNum === pageNum) pageWrapper.classList.add('selected');
                 pageWrapper.id = `page-${pageNum}`;
-                pageWrapper.style.width = `${viewport.width}px`;
-                pageWrapper.style.height = `${viewport.height}px`;
+                pageWrapper.style.width = `${targetViewport.width}px`;
+                pageWrapper.style.height = `${targetViewport.height}px`;
                 container.appendChild(pageWrapper);
 
-                _pageDataList.push({ pageNum, page, viewport, pageWrapper });
+                _pageDataList.push({ pageNum, page, targetViewport, canvasViewport, viewport: targetViewport, pageWrapper });
 
                 if (pageNum === 1 && window.__SOURCE_PPTX_PATH__) {
                     updateStatusBarSource(window.__SOURCE_PPTX_PATH__);
@@ -1073,6 +1965,11 @@
             // 모든 페이지 래퍼에 영역 캡쳐 박스를 동기화
             if (typeof applyRegionBoxToAllPages === 'function') {
                 applyRegionBoxToAllPages();
+            }
+
+            // 주석 모드가 활성화되어 있다면 주석 레이어 동기화
+            if (window.isAnnotActive && typeof window.setupPageAnnotationLayer === 'function') {
+                window.setupPageAnnotationLayer();
             }
         }
 
@@ -1429,11 +2326,21 @@
             input.select();
         }
 
-        async function updateZoom(delta, mouseClientX, mouseClientY) {
+        async function updateZoom(deltaOrTarget, mouseClientX, mouseClientY, isDirectValue = false) {
             isFitWidthMode = false; // 수동 줌 조작 시 폭 맞춤 모드 해제
-            let newScale = currentScale + delta;
-            if (newScale < 0.1) newScale = 0.1;
-            if (newScale > 10.0) newScale = 10.0;
+            let newScale;
+            if (isDirectValue) {
+                newScale = deltaOrTarget;
+            } else if (deltaOrTarget > 0) {
+                // 확대: 현재 스케일 기준 비례 확대 (약 1.25배)
+                newScale = currentScale * 1.25;
+            } else {
+                // 축소: 현재 스케일 기준 비례 축소 (약 0.8배)
+                newScale = currentScale / 1.25;
+            }
+
+            if (newScale < 0.02) newScale = 0.02;
+            if (newScale > 30.0) newScale = 30.0;
 
             // 1페이지 높이에 맞춰지는 스케일(Fit Height) 자동 스냅
             if (pdfDoc && pdfDoc.numPages > 0) {
@@ -1441,7 +2348,7 @@
                 const page = await pdfDoc.getPage(Math.min(pdfDoc.numPages, Math.max(1, currentPage)));
                 const viewport = page.getViewport({ scale: 1.0, rotation: currentRotation });
                 const scrollContainer = document.getElementById('viewer-scroll-container');
-                const containerHeight = scrollContainer.clientHeight - 40;
+                const containerHeight = scrollContainer.clientHeight - 48;
                 const fitHeightScale = containerHeight / viewport.height;
                 
                 // 확대/축소 중 페이지 높이에 딱 맞는 스케일 근처면 알아서 스냅(맞춤)
@@ -1623,7 +2530,7 @@
                 await navigator.clipboard.write([item]);
             } catch (err) {
                 console.error('Clipboard copy failed:', err);
-                alert('Failed to copy to clipboard: ' + err.message);
+                showMessageDialog('Copy Failed', 'Failed to copy to clipboard: ' + err.message);
             }
         }
 
@@ -1733,9 +2640,26 @@
             });
         };
 
+        // Region Capture 모드 해제 함수 (상호 배타적 동작 지원)
+        window.turnOffRegionCapture = () => {
+            if (isRegionCaptureMode) {
+                isRegionCaptureMode = false;
+                document.getElementById('capture-region').style.background = 'transparent';
+                viewerContainer.style.cursor = '';
+                regionBounds = null;
+                applyRegionBoxToAllPages();
+                document.querySelectorAll('.region-key-hint').forEach(el => el.remove());
+            }
+        };
+
         document.getElementById('capture-region').onclick = () => {
             isRegionCaptureMode = !isRegionCaptureMode;
             if (isRegionCaptureMode) {
+                // 다른 편집/주석/서명 모드 해제 (Capture Region이 On일 때는 Off 상태로 전환)
+                if (typeof window.turnOffAnnotate === 'function') window.turnOffAnnotate();
+                if (typeof window.turnOffEdit === 'function') window.turnOffEdit();
+                if (typeof window.turnOffSignPlacement === 'function') window.turnOffSignPlacement();
+
                 document.getElementById('capture-region').style.background = 'rgba(255,255,255,0.3)';
                 viewerContainer.style.cursor = 'crosshair';
                 
@@ -1744,10 +2668,7 @@
                     document.getElementById('capture-full').click();
                 }
             } else {
-                document.getElementById('capture-region').style.background = 'transparent';
-                viewerContainer.style.cursor = '';
-                regionBounds = null;
-                applyRegionBoxToAllPages();
+                window.turnOffRegionCapture();
             }
         };
 
@@ -1794,9 +2715,43 @@
             applyRegionBoxToAllPages();
         });
 
+        let hintFadeTimer = null;
+        function showRegionSpaceHint() {
+            // 선택된 박스 상단에 가이드 배지 1곳에서만 영어로 표시
+            const currentPageEl = document.getElementById('current-page');
+            const currentPageNum = parseInt(currentPageEl?.textContent) || 1;
+            const activePageEl = document.getElementById(`page-${currentPageNum}`) || activeRegionPage;
+            if (!activePageEl) return;
+            const box = activePageEl.querySelector('.region-select-box');
+            if (!box) return;
+
+            let hint = box.querySelector('.region-key-hint');
+            if (!hint) {
+                hint = document.createElement('div');
+                hint.className = 'region-key-hint';
+                hint.textContent = '⌨️ Press [Space] to Capture';
+                box.appendChild(hint);
+            }
+
+            // 부드럽게 나타남
+            requestAnimationFrame(() => hint.classList.add('show'));
+
+            // 2.5초 후 서서히 사라짐 (페이드아웃)
+            clearTimeout(hintFadeTimer);
+            hintFadeTimer = setTimeout(() => {
+                if (hint) {
+                    hint.classList.remove('show');
+                    setTimeout(() => hint.remove(), 400);
+                }
+            }, 2500);
+        }
+
         window.addEventListener('mouseup', () => {
             if (isDrawingRegion) {
                 isDrawingRegion = false;
+                if (regionBounds && regionBounds.widthPct > 0.5 && regionBounds.heightPct > 0.5) {
+                    showRegionSpaceHint();
+                }
             }
         });
 
@@ -1848,6 +2803,26 @@
                 return;
             }
 
+            // 주석 Undo / Redo 단축키 (텍스트 입력창이 아닐 때)
+            if (isCtrl && !e.altKey) {
+                const isInputActive = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+                if (keyLower === 'z' && !e.shiftKey) {
+                    if (!isInputActive && typeof window.executeAnnotUndo === 'function') {
+                        if (window.executeAnnotUndo()) {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                } else if (keyLower === 'y' || (keyLower === 'z' && e.shiftKey)) {
+                    if (!isInputActive && typeof window.executeAnnotRedo === 'function') {
+                        if (window.executeAnnotRedo()) {
+                            e.preventDefault();
+                            return;
+                        }
+                    }
+                }
+            }
+
             if (isCtrl && keyLower === 'f') {
                 e.preventDefault();
                 searchBar.classList.add('visible');
@@ -1895,6 +2870,7 @@
             else if (key === ' ' && !e.ctrlKey) {
                 if (isRegionCaptureMode && regionBounds) {
                     e.preventDefault();
+                    document.querySelectorAll('.region-key-hint').forEach(el => el.remove());
                     // 현재 보이는 페이지를 기준으로 캡쳐
                     const currentPageEl = document.getElementById('current-page');
                     const currentPageNum = parseInt(currentPageEl.textContent) || 1;
@@ -2066,15 +3042,15 @@
         zoomInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                let val = parseInt(zoomInput.value.replace('%', ''));
+                let val = parseFloat(zoomInput.value.replace('%', ''));
                 if (isNaN(val)) {
                     zoomInput.value = Math.round(currentScale * 100) + '%';
                     return;
                 }
-                val = Math.max(10, Math.min(1000, val));
+                val = Math.max(2, Math.min(3000, val));
                 const newScale = val / 100;
                 isFitWidthMode = false;
-                updateZoom(newScale - currentScale);
+                updateZoom(newScale, undefined, undefined, true);
                 zoomInput.blur();
             }
         });
@@ -2141,10 +3117,59 @@
             }
         }
 
-        // --- PDF Viewer Custom Window Controls ---
+        // Toast Notification Function
+        let _toastTimer = null;
+        function showToast(msg, icon = 'ℹ️', duration = 3000) {
+            const toast = document.getElementById('pdf-toast');
+            if (!toast) return;
+            document.getElementById('pdf-toast-icon').textContent = icon;
+            document.getElementById('pdf-toast-msg').textContent = msg;
+            toast.classList.add('show');
+            if (_toastTimer) clearTimeout(_toastTimer);
+            _toastTimer = setTimeout(() => {
+                toast.classList.remove('show');
+            }, duration);
+        }
+
+        // Helper: Generate Default Output Path based on input path and suffix
+        function getDefaultOutputPath(suffix = '_modified') {
+            const fullPath = pdfPath || fileUrl || '';
+            if (!fullPath) return `document${suffix}.pdf`;
+            const dotIdx = fullPath.lastIndexOf('.');
+            if (dotIdx > 0) {
+                return fullPath.substring(0, dotIdx) + suffix + fullPath.substring(dotIdx);
+            }
+            return fullPath + suffix + '.pdf';
+        }
+
+        // Page Range Parser (e.g., "1, 3-5, 8")
+        function parsePageRanges(rangeStr, maxPages) {
+            const pages = new Set();
+            const tokens = rangeStr.split(/[,;\s]+/);
+            for (const token of tokens) {
+                if (!token.trim()) continue;
+                if (token.includes('-')) {
+                    const [s, e] = token.split('-');
+                    const start = parseInt(s);
+                    const end = parseInt(e);
+                    if (isNaN(start) || isNaN(end)) continue;
+                    const minP = Math.max(1, Math.min(start, end));
+                    const maxP = Math.min(maxPages, Math.max(start, end));
+                    for (let p = minP; p <= maxP; p++) pages.add(p);
+                } else {
+                    const p = parseInt(token);
+                    if (!isNaN(p) && p >= 1 && p <= maxPages) pages.add(p);
+                }
+            }
+            return Array.from(pages).sort((a, b) => a - b);
+        }
+
+        // --- PDF Viewer Custom Window Controls & Feature Menu Handlers ---
         const initPdfWindowControls = () => {
             const filenameEl = document.getElementById('pdf-header-filename');
-            const pathEl = document.getElementById('pdf-header-path');
+            const statusPathTextEl = document.getElementById('pdf-status-filepath-text');
+            const statusPathBox = document.getElementById('pdf-status-filepath');
+            const openFolderBtn = document.getElementById('btn-status-open-folder');
 
             const fullPath = pdfPath || fileUrl || '';
             let fileName = title || 'PDF Viewer';
@@ -2156,11 +3181,40 @@
             }
 
             if (filenameEl) filenameEl.textContent = fileName;
-            if (pathEl && fullPath) {
-                pathEl.textContent = `— ${fullPath}`;
-                pathEl.title = fullPath;
+            
+            // Status bar에 File Path 표시
+            if (statusPathTextEl) {
+                statusPathTextEl.textContent = fullPath || 'Unknown Source';
+            }
+            if (statusPathBox && fullPath) {
+                statusPathBox.title = `Click to copy full path: ${fullPath}`;
+                statusPathBox.onclick = async () => {
+                    try {
+                        await navigator.clipboard.writeText(fullPath);
+                        showToast('File path copied to clipboard!', '📋', 2000);
+                    } catch (e) {
+                        showToast(`Path: ${fullPath}`, '📄');
+                    }
+                };
             }
 
+            // Status bar explorer open button
+            if (openFolderBtn) {
+                openFolderBtn.onclick = async () => {
+                    if (!fullPath) return;
+                    try {
+                        const invoke = getTauriInvoke();
+                        if (invoke) {
+                            await invoke('open_in_explorer', { path: fullPath });
+                            showToast('Opened file in file manager.', '📁', 2000);
+                        }
+                    } catch (err) {
+                        console.warn('Failed to open in explorer', err);
+                    }
+                };
+            }
+
+            // Window Controls (Min, Max, Close)
             const btnMin = document.getElementById('pdf-btn-minimize');
             const btnMax = document.getElementById('pdf-btn-maximize');
             const btnClose = document.getElementById('pdf-btn-close');
@@ -2234,9 +3288,7 @@
                 }
             };
 
-            if (btnMax) {
-                btnMax.onclick = toggleMax;
-            }
+            if (btnMax) btnMax.onclick = toggleMax;
 
             if (btnClose) {
                 btnClose.onclick = async (e) => {
@@ -2261,6 +3313,1765 @@
                 };
                 dragSpacer.ondblclick = toggleMax;
             }
+
+            // Modal Close Helper
+            document.querySelectorAll('[data-close-modal]').forEach(btn => {
+                btn.onclick = () => {
+                    const modalId = btn.getAttribute('data-close-modal');
+                    const modal = document.getElementById(modalId);
+                    if (modal) modal.classList.remove('active');
+                };
+            });
+
+            // Modal Outer Click to Close
+            document.querySelectorAll('.pdf-modal-overlay').forEach(overlay => {
+                overlay.onmousedown = (e) => {
+                    if (e.target === overlay) {
+                        overlay.classList.remove('active');
+                    }
+                };
+            });
+
+            // === Feature 1: Page Extraction (페이지 추출) ===
+            const btnExtractPages = document.getElementById('btn-extract-pages');
+            const modalExtract = document.getElementById('modal-extract');
+            const extractRangeInput = document.getElementById('extract-range-input');
+            const extractTotalPages = document.getElementById('extract-total-pages');
+            const extractOutputPath = document.getElementById('extract-output-path');
+            const btnDoExtract = document.getElementById('btn-do-extract');
+
+            if (btnExtractPages && modalExtract) {
+                btnExtractPages.onclick = () => {
+                    const totalPages = pdfDoc ? pdfDoc.numPages : 1;
+                    const curPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
+                    extractTotalPages.textContent = `Total ${totalPages} pages`;
+                    extractRangeInput.value = `${curPage}`;
+                    extractOutputPath.value = getDefaultOutputPath('_extracted');
+                    modalExtract.classList.add('active');
+                    extractRangeInput.focus();
+                    extractRangeInput.select();
+                };
+
+                // Quick Range Chips
+                document.getElementById('chip-cur-page')?.addEventListener('click', () => {
+                    const curPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
+                    extractRangeInput.value = `${curPage}`;
+                });
+                document.getElementById('chip-first-page')?.addEventListener('click', () => {
+                    extractRangeInput.value = '1';
+                });
+                document.getElementById('chip-odd-pages')?.addEventListener('click', () => {
+                    const total = pdfDoc ? pdfDoc.numPages : 1;
+                    const odds = [];
+                    for (let i = 1; i <= total; i += 2) odds.push(i);
+                    extractRangeInput.value = odds.join(', ');
+                });
+                document.getElementById('chip-even-pages')?.addEventListener('click', () => {
+                    const total = pdfDoc ? pdfDoc.numPages : 1;
+                    const evens = [];
+                    for (let i = 2; i <= total; i += 2) evens.push(i);
+                    extractRangeInput.value = evens.join(', ');
+                });
+                document.getElementById('chip-all-pages')?.addEventListener('click', () => {
+                    const total = pdfDoc ? pdfDoc.numPages : 1;
+                    extractRangeInput.value = `1-${total}`;
+                });
+
+                // Execute Page Extraction
+                btnDoExtract.onclick = async () => {
+                    const rangeVal = extractRangeInput.value.trim();
+                    const outPath = extractOutputPath.value.trim();
+                    const totalPages = pdfDoc ? pdfDoc.numPages : 1;
+
+                    if (!rangeVal) {
+                        showMessageDialog('Notice', 'Please enter page numbers or ranges to extract.');
+                        extractRangeInput.focus();
+                        return;
+                    }
+                    if (!outPath) {
+                        showMessageDialog('Notice', 'Please enter an output file path.');
+                        extractOutputPath.focus();
+                        return;
+                    }
+
+                    const parsedPages = parsePageRanges(rangeVal, totalPages);
+                    if (parsedPages.length === 0) {
+                        showMessageDialog('Invalid Range', 'Please enter valid page numbers (1 or greater).');
+                        return;
+                    }
+
+                    btnDoExtract.textContent = 'Extracting...';
+                    btnDoExtract.disabled = true;
+
+                    try {
+                        const invoke = getTauriInvoke();
+                        if (invoke) {
+                            const res = await invoke('extract_pdf_pages', {
+                                inputPath: fullPath,
+                                outputPath: outPath,
+                                pages: parsedPages
+                            });
+                            modalExtract.classList.remove('active');
+                            showToast(`✂️ Saved ${parsedPages.length} pages to new PDF!`, '✅', 4000);
+                        } else {
+                            showMessageDialog('Notice', 'Tauri API is not available.');
+                        }
+                    } catch (err) {
+                        showMessageDialog('Extraction Failed', `Failed to extract pages: ${err}`);
+                    } finally {
+                        btnDoExtract.textContent = 'Extract & Save';
+                        btnDoExtract.disabled = false;
+                    }
+                };
+            }
+
+            // === Feature 2: PDF Protect (Encrypt) ===
+            const btnProtectPdf = document.getElementById('btn-protect-pdf');
+            const modalProtect = document.getElementById('modal-protect');
+            const protectPwdInput = document.getElementById('protect-password-input');
+            const protectPwdConfirm = document.getElementById('protect-password-confirm');
+            const protectOutputPath = document.getElementById('protect-output-path');
+            const btnDoProtect = document.getElementById('btn-do-protect');
+
+            if (btnProtectPdf && modalProtect) {
+                btnProtectPdf.onclick = () => {
+                    protectPwdInput.value = '';
+                    protectPwdConfirm.value = '';
+                    protectOutputPath.value = getDefaultOutputPath('_protected');
+                    modalProtect.classList.add('active');
+                    protectPwdInput.focus();
+                };
+
+                btnDoProtect.onclick = async () => {
+                    const pwd = protectPwdInput.value;
+                    const confirm = protectPwdConfirm.value;
+                    const outPath = protectOutputPath.value.trim();
+
+                    if (!pwd) {
+                        showMessageDialog('Notice', 'Please enter a password.');
+                        protectPwdInput.focus();
+                        return;
+                    }
+                    if (pwd !== confirm) {
+                        showMessageDialog('Password Mismatch', 'Password confirmation does not match.');
+                        protectPwdConfirm.focus();
+                        return;
+                    }
+                    if (!outPath) {
+                        showMessageDialog('Notice', 'Please enter an output file path.');
+                        protectOutputPath.focus();
+                        return;
+                    }
+
+                    btnDoProtect.textContent = 'Encrypting...';
+                    btnDoProtect.disabled = true;
+
+                    try {
+                        const invoke = getTauriInvoke();
+                        if (invoke) {
+                            await invoke('encrypt_pdf_file', {
+                                inputPath: fullPath,
+                                outputPath: outPath,
+                                password: pwd
+                            });
+                            modalProtect.classList.remove('active');
+                            showToast('🔒 PDF encrypted with AES-256 successfully!', '✅', 4000);
+                        } else {
+                            showMessageDialog('Notice', 'Tauri API is not available.');
+                        }
+                    } catch (err) {
+                        showMessageDialog('Encryption Failed', `Failed to encrypt PDF: ${err}`);
+                    } finally {
+                        btnDoProtect.textContent = 'Protect & Save';
+                        btnDoProtect.disabled = false;
+                    }
+                };
+            }
+
+            // === Feature 3: PDF Unlock (Decrypt) ===
+            const btnUnlockPdf = document.getElementById('btn-unlock-pdf');
+            const modalUnlock = document.getElementById('modal-unlock');
+            const unlockPwdInput = document.getElementById('unlock-password-input');
+            const unlockOutputPath = document.getElementById('unlock-output-path');
+            const btnDoUnlock = document.getElementById('btn-do-unlock');
+
+            if (btnUnlockPdf && modalUnlock) {
+                btnUnlockPdf.onclick = () => {
+                    if (!isPdfEncrypted) {
+                        showToast('This document is not password-protected.', 'ℹ️', 2500);
+                        return;
+                    }
+                    unlockPwdInput.value = pdfSessionPassword || '';
+                    unlockOutputPath.value = getDefaultOutputPath('_unlocked');
+                    modalUnlock.classList.add('active');
+                    unlockPwdInput.focus();
+                    if (pdfSessionPassword) unlockPwdInput.select();
+                };
+
+                btnDoUnlock.onclick = async () => {
+                    const pwd = unlockPwdInput.value;
+                    const outPath = unlockOutputPath.value.trim();
+
+                    if (!outPath) {
+                        showMessageDialog('Notice', 'Please enter an output file path.');
+                        unlockOutputPath.focus();
+                        return;
+                    }
+
+                    btnDoUnlock.textContent = 'Decrypting...';
+                    btnDoUnlock.disabled = true;
+
+                    try {
+                        const invoke = getTauriInvoke();
+                        if (invoke) {
+                            await invoke('decrypt_pdf_file', {
+                                inputPath: fullPath,
+                                outputPath: outPath,
+                                password: pwd
+                            });
+                            modalUnlock.classList.remove('active');
+                            showToast('🔓 Password protection removed successfully!', '✅', 4000);
+                        } else {
+                            showMessageDialog('Notice', 'Tauri API is not available.');
+                        }
+                    } catch (err) {
+                        showMessageDialog('Decryption Failed', `Failed to decrypt PDF. Please check if password is correct. (${err})`);
+                    } finally {
+                        btnDoUnlock.textContent = 'Unlock & Save';
+                        btnDoUnlock.disabled = false;
+                    }
+                };
+            }
+
+            // ----------------------------------------------------
+            // Helper: 현재 열려있는 원본 PDF 바이트 데이터 가져오기
+            // (file:// CORS 에러를 방지하기 위해 pdfDoc.getData 및 Tauri invoke 우선 사용)
+            // ----------------------------------------------------
+            async function getCurrentPdfBytes() {
+                // 1. 현재 로드된 pdfDoc에서 getData()로 메모리 상의 원본 바이트 직접 가져오기 (가장 안전하고 빠름)
+                if (pdfDoc && typeof pdfDoc.getData === 'function') {
+                    try {
+                        const data = await pdfDoc.getData();
+                        if (data && data.length > 0) {
+                            return new Uint8Array(data);
+                        }
+                    } catch (e) {
+                        console.warn('pdfDoc.getData() failed:', e);
+                    }
+                }
+
+                // 2. Tauri invoke로 파일 직접 바이너리 읽기 (file:// URL 차단 문제 원천 해결)
+                const filePath = fullPath || pdfPath;
+                if (filePath) {
+                    const invoke = getTauriInvoke();
+                    if (invoke) {
+                        try {
+                            const rawBytes = await invoke('read_binary_file', { path: filePath });
+                            if (rawBytes && rawBytes.length > 0) {
+                                return new Uint8Array(rawBytes);
+                            }
+                        } catch (e) {
+                            console.warn('Tauri read_binary_file failed:', e);
+                        }
+                    }
+                }
+
+                // 3. window.__PDF_BASE64__ 데이터가 있는 경우
+                if (window.__PDF_BASE64__) {
+                    const bin = atob(window.__PDF_BASE64__);
+                    const bytes = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                    return bytes;
+                }
+
+                // 4. fileUrl이 http/https 또는 pdf-data:// 인 경우에만 fetch 시도
+                if (fileUrl && !fileUrl.startsWith('file:')) {
+                    try {
+                        const res = await fetch(fileUrl);
+                        if (res.ok) {
+                            const ab = await res.arrayBuffer();
+                            return new Uint8Array(ab);
+                        }
+                    } catch (e) {
+                        console.warn('Network fetch failed:', e);
+                    }
+                }
+
+                throw new Error('Unable to read PDF byte data. Please check file permissions.');
+            }
+
+            // ----------------------------------------------------
+            // Helper: PDF 바이트 저장 (덮어쓰기 vs 새 파일 선택 모달)
+            // ----------------------------------------------------
+            function promptSaveChoice(bytes, defaultSuffix = '_signed') {
+                return new Promise((resolve) => {
+                    const modal = document.getElementById('modal-save-choice');
+                    const curLabel = document.getElementById('save-current-file-label');
+                    const newInput = document.getElementById('save-newfile-input');
+                    const btnOverwrite = document.getElementById('btn-save-overwrite');
+                    const btnNewFile = document.getElementById('btn-save-newfile');
+
+                    const origPath = fullPath || pdfPath || '';
+                    const origFileName = origPath.split(/[/\\]/).pop() || 'Current File';
+                    if (curLabel) {
+                        curLabel.textContent = origPath ? `Target: ${origPath}` : `Original: ${origFileName}`;
+                    }
+                    if (newInput) {
+                        newInput.value = getDefaultOutputPath(defaultSuffix);
+                    }
+
+                    modal.classList.add('active');
+
+                    const cleanup = () => {
+                        modal.classList.remove('active');
+                        btnOverwrite.onclick = null;
+                        btnNewFile.onclick = null;
+                    };
+
+                    btnOverwrite.onclick = async () => {
+                        cleanup();
+                        if (!origPath) {
+                            showMessageDialog('Notice', 'Original file path not found. Please choose Save as New File.');
+                            resolve(false);
+                            return;
+                        }
+                        const ok = await performSaveBytes(bytes, origPath, true);
+                        resolve(ok);
+                    };
+
+                    btnNewFile.onclick = async () => {
+                        const targetPath = newInput.value.trim();
+                        if (!targetPath) {
+                            showMessageDialog('Invalid Path', 'Please enter a valid file path.');
+                            return;
+                        }
+                        cleanup();
+                        const ok = await performSaveBytes(bytes, targetPath, false);
+                        resolve(ok);
+                    };
+
+                    modal.querySelectorAll('[data-close-modal="modal-save-choice"]').forEach(btn => {
+                        btn.onclick = () => {
+                            cleanup();
+                            resolve(false);
+                        };
+                    });
+                });
+            }
+
+            async function performSaveBytes(bytes, targetPath, isOverwrite) {
+                const invoke = getTauriInvoke();
+                if (!invoke) {
+                    const blob = new Blob([bytes], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = targetPath.split(/[/\\]/).pop() || 'edited.pdf';
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showToast('💾 PDF file downloaded successfully!', '✅', 3000);
+                    return true;
+                }
+
+                try {
+                    await invoke('save_pdf_bytes', {
+                        outputPath: targetPath,
+                        data: Array.from(bytes)
+                    });
+
+                    if (isOverwrite) {
+                        showToast(`💾 Original PDF file has been overwritten!\n${targetPath.split(/[/\\]/).pop()}`, '✅', 4000);
+                        // 원본 파일 덮어쓰기 후 화면 즉시 새로고침
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1200);
+                    } else {
+                        showToast(`💾 New PDF saved successfully!\n${targetPath.split(/[/\\]/).pop()}`, '✅', 4000);
+                    }
+                    return true;
+                } catch (e) {
+                    showMessageDialog('Save Failed', `Failed to save PDF: ${e}`);
+                    return false;
+                }
+            }
+
+            async function savePdfBytesToFile(bytes, defaultSuffix = '_edited') {
+                return await promptSaveChoice(bytes, defaultSuffix);
+            }
+
+            // ====================================================
+            // Feature 1: Bookmarks & Outline (Bookmark Management)
+            // ====================================================
+            let customBookmarks = []; // [{ title, pageNum }]
+            const btnBookmarkPdf = document.getElementById('btn-bookmark-pdf');
+            const btnAddBookmark = document.getElementById('btn-add-bookmark');
+            const btnSaveBookmarks = document.getElementById('btn-save-bookmarks');
+            const outlineContainer = document.getElementById('outline-container');
+
+            if (btnBookmarkPdf) {
+                btnBookmarkPdf.onclick = () => {
+                    const sidebar = document.getElementById('sidebar');
+                    if (!sidebar.classList.contains('open')) {
+                        window.toggleSidebar();
+                    }
+                    const outlineTab = document.querySelector('.sidebar-tab[data-tab="outline"]');
+                    if (outlineTab) outlineTab.click();
+                };
+            }
+
+            if (btnAddBookmark) {
+                btnAddBookmark.onclick = async () => {
+                    const currentPageEl = document.getElementById('current-page');
+                    const pageNum = parseInt(currentPageEl?.textContent) || 1;
+                    const title = await showPromptDialog('Add Bookmark', `Enter title for page ${pageNum} bookmark:`, `Page ${pageNum} Bookmark`);
+                    if (!title || !title.trim()) return;
+
+                    customBookmarks.push({ title: title.trim(), pageNum });
+
+                    const item = document.createElement('div');
+                    item.className = 'outline-item';
+                    item.style.display = 'flex';
+                    item.style.alignItems = 'center';
+                    item.style.justifyContent = 'space-between';
+                    item.style.padding = '6px 8px';
+                    item.style.cursor = 'pointer';
+
+                    const labelSpan = document.createElement('span');
+                    labelSpan.textContent = `🔖 ${title.trim()} (p.${pageNum})`;
+                    labelSpan.onclick = () => goToPage(pageNum);
+
+                    const delBtn = document.createElement('button');
+                    delBtn.textContent = '✕';
+                    delBtn.style.background = 'transparent';
+                    delBtn.style.border = 'none';
+                    delBtn.style.color = '#ef4444';
+                    delBtn.style.cursor = 'pointer';
+                    delBtn.title = 'Delete Bookmark';
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        item.remove();
+                        customBookmarks = customBookmarks.filter(b => b !== item.__bm);
+                    };
+
+                    item.__bm = { title: title.trim(), pageNum };
+                    item.appendChild(labelSpan);
+                    item.appendChild(delBtn);
+                    outlineContainer.appendChild(item);
+
+                    showToast(`🔖 Bookmark added for page ${pageNum}: "${title.trim()}"`, '✅', 2500);
+                };
+            }
+
+            if (btnSaveBookmarks) {
+                btnSaveBookmarks.onclick = async () => {
+                    if (customBookmarks.length === 0) {
+                        showMessageDialog('No Bookmarks', 'No bookmarks added yet. Click [➕ Add Bookmark] first.');
+                        return;
+                    }
+                    try {
+                        showToast('Writing bookmarks into PDF...', '⏳', 2000);
+                        const pdfBytes = await getCurrentPdfBytes();
+                        const pdfDocLib = await PDFLib.PDFDocument.load(pdfBytes);
+                        
+                        const bmSummary = customBookmarks.map(b => `${b.pageNum}:${b.title}`).join(';');
+                        pdfDocLib.setSubject(`Bookmarks: ${bmSummary}`);
+                        
+                        const savedBytes = await pdfDocLib.save();
+                        await savePdfBytesToFile(savedBytes, '_bookmarked');
+                    } catch (err) {
+                        showMessageDialog('Save Failed', `Failed to save bookmarks: ${err.message}`);
+                    }
+                };
+            }
+
+            // ====================================================
+            // Feature 2: Digital Signature & Stamp (전자 서명 & 도장)
+            // ====================================================
+            const btnSignPdf = document.getElementById('btn-sign-pdf');
+            const modalSign = document.getElementById('modal-sign');
+            const sigCanvas = document.getElementById('sig-canvas');
+            const sigCtx = sigCanvas ? sigCanvas.getContext('2d') : null;
+            let isSigDrawing = false;
+            let sigColor = '#000000';
+            let uploadedSigImgData = null;
+
+            if (sigCanvas && sigCtx) {
+                sigCtx.lineWidth = 2.5;
+                sigCtx.lineCap = 'round';
+                sigCtx.lineJoin = 'round';
+                sigCtx.strokeStyle = sigColor;
+
+                const getCanvasCoords = (e) => {
+                    const rect = sigCanvas.getBoundingClientRect();
+                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    return {
+                        x: (clientX - rect.left) * (sigCanvas.width / rect.width),
+                        y: (clientY - rect.top) * (sigCanvas.height / rect.height)
+                    };
+                };
+
+                const startSig = (e) => {
+                    isSigDrawing = true;
+                    const { x, y } = getCanvasCoords(e);
+                    sigCtx.beginPath();
+                    sigCtx.moveTo(x, y);
+                    e.preventDefault();
+                };
+                const drawSig = (e) => {
+                    if (!isSigDrawing) return;
+                    const { x, y } = getCanvasCoords(e);
+                    sigCtx.lineTo(x, y);
+                    sigCtx.stroke();
+                    e.preventDefault();
+                };
+                const stopSig = () => { isSigDrawing = false; };
+
+                sigCanvas.addEventListener('mousedown', startSig);
+                sigCanvas.addEventListener('mousemove', drawSig);
+                window.addEventListener('mouseup', stopSig);
+                sigCanvas.addEventListener('touchstart', startSig);
+                sigCanvas.addEventListener('touchmove', drawSig);
+                window.addEventListener('touchend', stopSig);
+
+                document.getElementById('btn-sig-clear')?.addEventListener('click', () => {
+                    sigCtx.clearRect(0, 0, sigCanvas.width, sigCanvas.height);
+                });
+
+                document.querySelectorAll('.sig-color-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.sig-color-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        sigColor = btn.dataset.color || '#000000';
+                        sigCtx.strokeStyle = sigColor;
+                    });
+                });
+            }
+
+            const tabSigDraw = document.getElementById('tab-sig-draw');
+            const tabSigUpload = document.getElementById('tab-sig-upload');
+            const paneSigDraw = document.getElementById('sig-draw-pane');
+            const paneSigUpload = document.getElementById('sig-upload-pane');
+
+            tabSigDraw?.addEventListener('click', () => {
+                tabSigDraw.classList.add('active');
+                tabSigUpload.classList.remove('active');
+                paneSigDraw.style.display = 'block';
+                paneSigUpload.style.display = 'none';
+            });
+            tabSigUpload?.addEventListener('click', () => {
+                tabSigUpload.classList.add('active');
+                tabSigDraw.classList.remove('active');
+                paneSigUpload.style.display = 'block';
+                paneSigDraw.style.display = 'none';
+            });
+
+            const sigFileInput = document.getElementById('sig-img-upload-input');
+            const sigPreviewContainer = document.getElementById('sig-img-preview-container');
+            sigFileInput?.addEventListener('change', (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    uploadedSigImgData = ev.target.result;
+                    sigPreviewContainer.innerHTML = `<img src="${uploadedSigImgData}" style="max-height: 120px; max-width: 90%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));">`;
+                };
+                reader.readAsDataURL(file);
+            });
+
+            let activeOverlayItem = null;
+            const toolbarPlaceItem = document.getElementById('toolbar-place-item');
+
+            window.turnOffSignPlacement = () => {
+                if (activeOverlayItem) {
+                    activeOverlayItem.remove();
+                    activeOverlayItem = null;
+                }
+                toolbarPlaceItem?.classList.remove('active');
+                modalSign?.classList.remove('active');
+            };
+
+            if (btnSignPdf) {
+                btnSignPdf.onclick = () => {
+                    // Capture Region 및 다른 모드 해제 (Capture Region이 On일 때는 Off 상태로 전환)
+                    if (typeof window.turnOffRegionCapture === 'function') window.turnOffRegionCapture();
+                    if (typeof window.turnOffAnnotate === 'function') window.turnOffAnnotate();
+                    if (typeof window.turnOffEdit === 'function') window.turnOffEdit();
+
+                    modalSign.classList.add('active');
+                };
+            }
+
+            document.getElementById('btn-sig-place')?.addEventListener('click', () => {
+                let imgData = null;
+                if (paneSigDraw.style.display !== 'none') {
+                    imgData = sigCanvas.toDataURL('image/png');
+                } else {
+                    imgData = uploadedSigImgData;
+                }
+                if (!imgData) {
+                    showMessageDialog('Notice', 'Please draw a signature or upload a stamp image first.');
+                    return;
+                }
+
+                modalSign.classList.remove('active');
+                placeOverlayItemOnCurrentPage(imgData, 'signature', 160, 80);
+            });
+
+            function placeOverlayItemOnCurrentPage(src, type, defaultW = 180, defaultH = 120, offsetIndex = 0) {
+                const currentPageEl = document.getElementById('current-page');
+                const pageNum = parseInt(currentPageEl?.textContent) || 1;
+                const pageEl = document.getElementById(`page-${pageNum}`);
+                if (!pageEl) {
+                    showMessageDialog('Notice', 'Page element not found.');
+                    return;
+                }
+
+                if (type === 'signature') {
+                    document.querySelectorAll('.placed-overlay-item[data-type="signature"]').forEach(el => el.remove());
+                }
+
+                const item = document.createElement('div');
+                item.className = 'placed-overlay-item';
+                item.dataset.type = type;
+                item.dataset.pageNum = pageNum;
+
+                const img = document.createElement('img');
+                img.src = src;
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.pointerEvents = 'none';
+                img.style.display = 'block';
+
+                // 이미지 원본 비율 계산 후 박스 크기 초기화
+                let initialRatio = defaultW / defaultH;
+                const tempImg = new Image();
+                tempImg.onload = () => {
+                    const natW = tempImg.naturalWidth || defaultW;
+                    const natH = tempImg.naturalHeight || defaultH;
+                    initialRatio = natW / natH;
+
+                    // 원본 비율을 보존하면서 적절한 기본 크기 산출 (최대 너비 220px, 최대 높이 180px 기준)
+                    let calcW = 200;
+                    let calcH = Math.round(calcW / initialRatio);
+                    if (calcH > 180) {
+                        calcH = 180;
+                        calcW = Math.round(calcH * initialRatio);
+                    }
+                    item.style.width = `${Math.max(40, calcW)}px`;
+                    item.style.height = `${Math.max(30, calcH)}px`;
+                };
+                tempImg.src = src;
+
+                item.style.width = `${defaultW}px`;
+                item.style.height = `${defaultH}px`;
+                const cascadeOffset = (offsetIndex % 8) * 24;
+                item.style.left = `calc(50% - ${defaultW / 2}px + ${cascadeOffset}px)`;
+                item.style.top = `calc(50% - ${defaultH / 2}px + ${cascadeOffset}px)`;
+
+                item.appendChild(img);
+
+                const delBtn = document.createElement('div');
+                delBtn.className = 'item-del-btn';
+                delBtn.textContent = '✕';
+                delBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    item.remove();
+                    if (type === 'signature') {
+                        toolbarPlaceItem.classList.remove('active');
+                    }
+                };
+                item.appendChild(delBtn);
+
+                const resizeHandle = document.createElement('div');
+                resizeHandle.className = 'resize-handle';
+                resizeHandle.title = 'Drag to resize (Hold Shift to lock aspect ratio)';
+                item.appendChild(resizeHandle);
+
+                let isDragging = false;
+                let dragStartX, dragStartY, itemStartX, itemStartY;
+                item.addEventListener('mousedown', (e) => {
+                    if (e.target === delBtn || e.target === resizeHandle) return;
+                    isDragging = true;
+                    dragStartX = e.clientX;
+                    dragStartY = e.clientY;
+                    itemStartX = item.offsetLeft;
+                    itemStartY = item.offsetTop;
+                    e.preventDefault();
+                });
+
+                let isResizingItem = false;
+                let resizeStartX, resizeStartY, startW, startH;
+                resizeHandle.addEventListener('mousedown', (e) => {
+                    isResizingItem = true;
+                    resizeStartX = e.clientX;
+                    resizeStartY = e.clientY;
+                    startW = item.offsetWidth;
+                    startH = item.offsetHeight;
+                    if (startW > 0 && startH > 0) {
+                        initialRatio = startW / startH;
+                    }
+                    e.stopPropagation();
+                    e.preventDefault();
+                });
+
+                const onMove = (e) => {
+                    if (isDragging) {
+                        const dx = e.clientX - dragStartX;
+                        const dy = e.clientY - dragStartY;
+                        item.style.left = `${Math.max(0, itemStartX + dx)}px`;
+                        item.style.top = `${Math.max(0, itemStartY + dy)}px`;
+                    } else if (isResizingItem) {
+                        const dw = e.clientX - resizeStartX;
+                        const dh = e.clientY - resizeStartY;
+                        let newW = Math.max(30, startW + dw);
+                        let newH = Math.max(20, startH + dh);
+
+                        // Shift 키를 누르고 드래그 시 원래 가로세로 비율(Aspect Ratio) 엄격 유지
+                        if (e.shiftKey && initialRatio > 0) {
+                            newH = Math.max(20, Math.round(newW / initialRatio));
+                        }
+
+                        item.style.width = `${newW}px`;
+                        item.style.height = `${newH}px`;
+                    }
+                };
+                const onEnd = () => {
+                    isDragging = false;
+                    isResizingItem = false;
+                };
+
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onEnd);
+
+                pageEl.appendChild(item);
+                activeOverlayItem = item;
+
+                // 서명 모드일 때만 전용 Save 플로팅 바를 띄우고, 일반 이미지 편집(Edit) 모드에서는 기존 Edit 툴바를 유지하여 여러 이미지를 한꺼번에 배치 및 일괄 저장할 수 있게 지원
+                if (type === 'signature') {
+                    toolbarPlaceItem.classList.add('active');
+                }
+            }
+
+            document.getElementById('btn-place-cancel')?.addEventListener('click', () => {
+                if (activeOverlayItem) activeOverlayItem.remove();
+                toolbarPlaceItem.classList.remove('active');
+            });
+
+            // 어떤 이미지 포맷(JPG, WebP, GIF 등)이든 안전하게 PNG dataURL로 변환하는 헬퍼
+            async function ensurePngDataUrl(imgSrcOrDataUrl) {
+                if (typeof imgSrcOrDataUrl === 'string' && imgSrcOrDataUrl.startsWith('data:image/png')) {
+                    return imgSrcOrDataUrl;
+                }
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.max(1, img.naturalWidth || img.width || 100);
+                        canvas.height = Math.max(1, img.naturalHeight || img.height || 100);
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        resolve(canvas.toDataURL('image/png'));
+                    };
+                    img.onerror = () => reject(new Error('Failed to load image format'));
+                    img.src = imgSrcOrDataUrl;
+                });
+            }
+
+            document.getElementById('btn-place-save')?.addEventListener('click', async () => {
+                if (!activeOverlayItem) return;
+                const pageNum = parseInt(activeOverlayItem.dataset.pageNum) || 1;
+                const pageEl = document.getElementById(`page-${pageNum}`);
+                const pageRect = pageEl.getBoundingClientRect();
+                const itemRect = activeOverlayItem.getBoundingClientRect();
+
+                const relX = (itemRect.left - pageRect.left) / pageRect.width;
+                const relY = (itemRect.top - pageRect.top) / pageRect.height;
+                const relW = itemRect.width / pageRect.width;
+                const relH = itemRect.height / pageRect.height;
+
+                const imgSrc = activeOverlayItem.querySelector('img')?.src;
+                if (!imgSrc) return;
+
+                try {
+                    showToast('Applying image and saving PDF...', '⏳', 2000);
+                    const pdfBytes = await getCurrentPdfBytes();
+                    const pdfDocLib = await PDFLib.PDFDocument.load(pdfBytes);
+                    const page = pdfDocLib.getPages()[pageNum - 1];
+                    const { width: pW, height: pH } = page.getSize();
+
+                    const targetX = relX * pW;
+                    const targetW = relW * pW;
+                    const targetH = relH * pH;
+                    const targetY = pH - (relY * pH) - targetH;
+
+                    const pngDataUrl = await ensurePngDataUrl(imgSrc);
+                    const pngImage = await pdfDocLib.embedPng(pngDataUrl);
+                    page.drawImage(pngImage, {
+                        x: targetX,
+                        y: targetY,
+                        width: targetW,
+                        height: targetH
+                    });
+
+                    const savedBytes = await pdfDocLib.save();
+                    const ok = await savePdfBytesToFile(savedBytes, '_signed');
+                    if (ok) {
+                        activeOverlayItem.remove();
+                        activeOverlayItem = null;
+                        toolbarPlaceItem.classList.remove('active');
+                    }
+                } catch (err) {
+                    showMessageDialog('Save Failed', `Failed to save image/signature: ${err.message}`);
+                }
+            });
+
+            // ====================================================
+            // Feature 3: Annotations (주석 달기: 형광펜 / 펜 / 객체 지우개 / 메모 / Undo / Redo)
+            // ====================================================
+            const btnAnnotatePdf = document.getElementById('btn-annotate-pdf');
+            const toolbarAnnotate = document.getElementById('toolbar-annotate');
+            let annotMode = 'pen';
+            let isAnnotActive = false;
+            window.isAnnotActive = false;
+
+            let annotColor = '#f59e0b';
+            let annotStrokes = []; // [{ id, pageNum, type: 'pen'|'highlighter', color, size, points: [{x, y}] }]
+            let annotUndoStack = [];
+            let annotRedoStack = [];
+
+            // Undo / Redo 버튼 상태 업데이트
+            function updateUndoRedoBtnState() {
+                const btnUndo = document.getElementById('btn-annot-undo');
+                const btnRedo = document.getElementById('btn-annot-redo');
+                if (btnUndo) {
+                    btnUndo.style.opacity = annotUndoStack.length > 0 ? '1' : '0.4';
+                    btnUndo.style.pointerEvents = annotUndoStack.length > 0 ? 'auto' : 'none';
+                }
+                if (btnRedo) {
+                    btnRedo.style.opacity = annotRedoStack.length > 0 ? '1' : '0.4';
+                    btnRedo.style.pointerEvents = annotRedoStack.length > 0 ? 'auto' : 'none';
+                }
+            }
+
+            function pushUndoAction(action) {
+                annotUndoStack.push(action);
+                annotRedoStack = []; // 새 작업 시 redo 스택 리셋
+                updateUndoRedoBtnState();
+            }
+
+            window.executeAnnotUndo = () => {
+                if (annotUndoStack.length === 0) return false;
+                const action = annotUndoStack.pop();
+                if (action.type === 'add_stroke') {
+                    const idx = annotStrokes.findIndex(s => s.id === action.stroke.id);
+                    if (idx !== -1) {
+                        annotStrokes.splice(idx, 1);
+                        redrawPageAnnotationCanvas(action.stroke.pageNum);
+                    }
+                } else if (action.type === 'delete_stroke') {
+                    annotStrokes.splice(action.index, 0, action.stroke);
+                    redrawPageAnnotationCanvas(action.stroke.pageNum);
+                } else if (action.type === 'clear_page') {
+                    annotStrokes.push(...action.strokes);
+                    redrawPageAnnotationCanvas(action.pageNum);
+                }
+                annotRedoStack.push(action);
+                updateUndoRedoBtnState();
+                showToast('Undo', '↩️', 1200);
+                return true;
+            };
+
+            window.executeAnnotRedo = () => {
+                if (annotRedoStack.length === 0) return false;
+                const action = annotRedoStack.pop();
+                if (action.type === 'add_stroke') {
+                    annotStrokes.push(action.stroke);
+                    redrawPageAnnotationCanvas(action.stroke.pageNum);
+                } else if (action.type === 'delete_stroke') {
+                    const idx = annotStrokes.findIndex(s => s.id === action.stroke.id);
+                    if (idx !== -1) {
+                        annotStrokes.splice(idx, 1);
+                        redrawPageAnnotationCanvas(action.stroke.pageNum);
+                    }
+                } else if (action.type === 'clear_page') {
+                    const idSet = new Set(action.strokes.map(s => s.id));
+                    annotStrokes = annotStrokes.filter(s => !idSet.has(s.id));
+                    redrawPageAnnotationCanvas(action.pageNum);
+                }
+                annotUndoStack.push(action);
+                updateUndoRedoBtnState();
+                showToast('Redo', '↪️', 1200);
+                return true;
+            };
+
+            window.turnOffAnnotate = () => {
+                isAnnotActive = false;
+                window.isAnnotActive = false;
+                toolbarAnnotate?.classList.remove('active');
+                removePageAnnotationLayer();
+            };
+
+            // 점과 선분 사이의 최단 거리 계산
+            function distToSegment(px, py, x1, y1, x2, y2) {
+                const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+                if (l2 === 0) return Math.hypot(px - x1, py - y1);
+                let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+                t = Math.max(0, Math.min(1, t));
+                return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+            }
+
+            // 특정 마우스 좌표와 스트로크 사이의 최소 픽셀 거리 계산
+            function getMinDistanceToStroke(px, py, stroke, canvasW, canvasH) {
+                const pts = stroke.points;
+                if (!pts || pts.length === 0) return Infinity;
+                if (pts.length === 1) {
+                    return Math.hypot(px - pts[0].x * canvasW, py - pts[0].y * canvasH);
+                }
+                let minDist = Infinity;
+                for (let i = 0; i < pts.length - 1; i++) {
+                    const d = distToSegment(
+                        px, py,
+                        pts[i].x * canvasW, pts[i].y * canvasH,
+                        pts[i + 1].x * canvasW, pts[i + 1].y * canvasH
+                    );
+                    if (d < minDist) minDist = d;
+                }
+                return minDist;
+            }
+
+            // 페이지 캔버스의 모든 스트로크를 고화질로 다시 그리기
+            function redrawPageAnnotationCanvas(pageNum) {
+                const pageEl = document.getElementById(`page-${pageNum}`);
+                if (!pageEl) return;
+                const canvas = pageEl.querySelector('.annot-canvas');
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                const strokesOnPage = annotStrokes.filter(s => s.pageNum === pageNum);
+                for (const s of strokesOnPage) {
+                    if (!s.points || s.points.length === 0) continue;
+                    ctx.save();
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+
+                    if (s.type === 'highlighter') {
+                        ctx.strokeStyle = hexToRgba(s.color, 0.4);
+                        ctx.fillStyle = hexToRgba(s.color, 0.4);
+                        ctx.lineWidth = s.size * 4;
+                    } else {
+                        ctx.strokeStyle = s.color;
+                        ctx.fillStyle = s.color;
+                        ctx.lineWidth = s.size;
+                    }
+
+                    const p0 = s.points[0];
+                    const p0x = p0.x * canvas.width;
+                    const p0y = p0.y * canvas.height;
+
+                    if (s.points.length === 1) {
+                        ctx.beginPath();
+                        ctx.arc(p0x, p0y, Math.max(1, ctx.lineWidth / 2), 0, Math.PI * 2);
+                        ctx.fill();
+                    } else {
+                        ctx.beginPath();
+                        ctx.moveTo(p0x, p0y);
+                        for (let i = 1; i < s.points.length; i++) {
+                            ctx.lineTo(s.points[i].x * canvas.width, s.points[i].y * canvas.height);
+                        }
+                        ctx.stroke();
+                    }
+                    ctx.restore();
+                }
+            }
+
+            if (btnAnnotatePdf && toolbarAnnotate) {
+                btnAnnotatePdf.onclick = () => {
+                    isAnnotActive = !isAnnotActive;
+                    window.isAnnotActive = isAnnotActive;
+                    window.setupPageAnnotationLayer = setupPageAnnotationLayer;
+                    if (isAnnotActive) {
+                        // Hand tool / Pan Mode 켜져 있다면 해제
+                        if (isPanMode && typeof modeToggleBtn !== 'undefined') {
+                            modeToggleBtn.click();
+                        }
+                        // Capture Region 및 다른 모드 해제
+                        if (typeof window.turnOffRegionCapture === 'function') window.turnOffRegionCapture();
+                        if (typeof window.turnOffEdit === 'function') window.turnOffEdit();
+                        if (typeof window.turnOffSignPlacement === 'function') window.turnOffSignPlacement();
+
+                        toolbarAnnotate.classList.add('active');
+                        setupPageAnnotationLayer();
+                        updateUndoRedoBtnState();
+                    } else {
+                        window.turnOffAnnotate();
+                    }
+                };
+
+                document.getElementById('btn-annot-close')?.addEventListener('click', () => {
+                    window.turnOffAnnotate();
+                });
+
+                document.getElementById('btn-annot-pen')?.addEventListener('click', () => {
+                    annotMode = 'pen';
+                    document.querySelectorAll('#toolbar-annotate .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-annot-pen').classList.add('active');
+                    updateAnnotCanvasCursor('crosshair');
+                });
+
+                document.getElementById('btn-annot-highlighter')?.addEventListener('click', () => {
+                    annotMode = 'highlighter';
+                    document.querySelectorAll('#toolbar-annotate .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-annot-highlighter').classList.add('active');
+                    updateAnnotCanvasCursor('crosshair');
+                });
+
+                document.getElementById('btn-annot-eraser')?.addEventListener('click', () => {
+                    annotMode = 'eraser';
+                    document.querySelectorAll('#toolbar-annotate .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-annot-eraser').classList.add('active');
+                    updateAnnotCanvasCursor('pointer');
+                    showToast('Click or drag over any stroke to delete the entire object.', '🧹', 2500);
+                });
+
+                document.getElementById('btn-annot-note')?.addEventListener('click', () => {
+                    annotMode = 'note';
+                    document.querySelectorAll('#toolbar-annotate .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-annot-note').classList.add('active');
+                    updateAnnotCanvasCursor('cell');
+                    showToast('Click anywhere on the page to place a Sticky Note.', '💬', 2500);
+                });
+
+                // Undo / Redo 버튼 클릭 이벤트
+                document.getElementById('btn-annot-undo')?.addEventListener('click', () => {
+                    window.executeAnnotUndo();
+                });
+                document.getElementById('btn-annot-redo')?.addEventListener('click', () => {
+                    window.executeAnnotRedo();
+                });
+
+                // 색상 팔레트 프리셋 바인딩
+                document.querySelectorAll('.annot-preset-color').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        document.querySelectorAll('.annot-preset-color').forEach(b => {
+                            b.classList.remove('active');
+                            b.style.border = '1px solid rgba(255,255,255,0.3)';
+                        });
+                        btn.classList.add('active');
+                        btn.style.border = '2px solid #fff';
+                        annotColor = btn.dataset.color || '#f59e0b';
+                        const colorPicker = document.getElementById('annot-color-picker');
+                        if (colorPicker) colorPicker.value = annotColor;
+                    });
+                });
+
+                const colorPicker = document.getElementById('annot-color-picker');
+                colorPicker?.addEventListener('input', (e) => {
+                    annotColor = e.target.value;
+                    document.querySelectorAll('.annot-preset-color').forEach(b => {
+                        b.classList.remove('active');
+                        b.style.border = '1px solid rgba(255,255,255,0.3)';
+                    });
+                });
+
+                document.getElementById('btn-annot-clear')?.addEventListener('click', () => {
+                    const currentPageEl = document.getElementById('current-page');
+                    const pageNum = parseInt(currentPageEl?.textContent) || 1;
+                    const pageEl = document.getElementById(`page-${pageNum}`);
+
+                    const strokesToClear = annotStrokes.filter(s => s.pageNum === pageNum);
+                    if (strokesToClear.length > 0) {
+                        pushUndoAction({ type: 'clear_page', pageNum, strokes: strokesToClear });
+                        annotStrokes = annotStrokes.filter(s => s.pageNum !== pageNum);
+                        redrawPageAnnotationCanvas(pageNum);
+                    }
+
+                    pageEl?.querySelectorAll('.annot-sticky-note').forEach(n => n.remove());
+                    showToast('Cleared annotations on current page (Ctrl+Z to Undo).', '🗑️', 2500);
+                });
+
+                document.getElementById('btn-annot-save')?.addEventListener('click', async () => {
+                    try {
+                        showToast('Burning annotations into PDF...', '⏳', 2000);
+                        const pdfBytes = await getCurrentPdfBytes();
+                        const pdfDocLib = await PDFLib.PDFDocument.load(pdfBytes);
+                        const pages = pdfDocLib.getPages();
+
+                        for (let i = 0; i < pages.length; i++) {
+                            const pageNum = i + 1;
+                            const pageEl = document.getElementById(`page-${pageNum}`);
+                            if (!pageEl) continue;
+                            const page = pages[i];
+                            const { width: pW, height: pH } = page.getSize();
+                            const pRect = pageEl.getBoundingClientRect();
+
+                            // 1. 드로잉 캔버스 합성
+                            redrawPageAnnotationCanvas(pageNum);
+                            const c = pageEl.querySelector('.annot-canvas');
+                            if (c && c.width > 0 && c.height > 0) {
+                                const dataUrl = c.toDataURL('image/png');
+                                const emptyData = document.createElement('canvas').toDataURL('image/png');
+                                if (dataUrl !== emptyData) {
+                                    const img = await pdfDocLib.embedPng(dataUrl);
+                                    page.drawImage(img, { x: 0, y: 0, width: pW, height: pH });
+                                }
+                            }
+
+                            // 2. 스티커 메모 합성 (노란색 박스 + 텍스트)
+                            pageEl.querySelectorAll('.annot-sticky-note').forEach(note => {
+                                const textVal = note.querySelector('textarea')?.value || '';
+                                if (!textVal.trim()) return;
+
+                                const nRect = note.getBoundingClientRect();
+                                const rx = (nRect.left - pRect.left) / pRect.width;
+                                const ry = (nRect.top - pRect.top) / pRect.height;
+                                const rw = nRect.width / pRect.width;
+                                const rh = nRect.height / pRect.height;
+
+                                const targetX = rx * pW;
+                                const targetW = rw * pW;
+                                const targetH = rh * pH;
+                                const targetY = pH - (ry * pH) - targetH;
+
+                                // 노란 배경
+                                page.drawRectangle({
+                                    x: targetX,
+                                    y: targetY,
+                                    width: targetW,
+                                    height: targetH,
+                                    color: PDFLib.rgb(1, 0.94, 0.54) // #fef08a
+                                });
+                                // 텍스트
+                                const lines = textVal.split('\n');
+                                let lineY = targetY + targetH - 14;
+                                for (const line of lines) {
+                                    if (lineY < targetY + 6) break;
+                                    page.drawText(line.substring(0, 32), {
+                                        x: targetX + 6,
+                                        y: lineY,
+                                        size: 10,
+                                        color: PDFLib.rgb(0.44, 0.25, 0.07)
+                                    });
+                                    lineY -= 12;
+                                }
+                            });
+                        }
+
+                        const savedBytes = await pdfDocLib.save();
+                        await savePdfBytesToFile(savedBytes, '_annotated');
+                    } catch (err) {
+                        showMessageDialog('Save Failed', `Failed to save annotations: ${err.message}`);
+                    }
+                });
+            }
+
+            let currentDrawingCanvas = null;
+            let currentDrawingCtx = null;
+            let currentActiveStroke = null;
+            let isAnnotDrawing = false;
+            let isEraserDragging = false;
+
+            function hexToRgba(hex, alpha) {
+                let c = hex.replace('#', '');
+                if (c.length === 3) c = c.split('').map(x => x + x).join('');
+                const r = parseInt(c.substring(0, 2), 16) || 0;
+                const g = parseInt(c.substring(2, 4), 16) || 0;
+                const b = parseInt(c.substring(4, 6), 16) || 0;
+                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+            }
+
+            function updateAnnotCanvasCursor(cursor) {
+                document.querySelectorAll('.annot-canvas').forEach(c => c.style.cursor = cursor);
+            }
+
+            function syncAnnotationCanvas(canvas, pageEl, pageNum) {
+                const targetW = Math.max(10, Math.round(pageEl.offsetWidth || pageEl.clientWidth));
+                const targetH = Math.max(10, Math.round(pageEl.offsetHeight || pageEl.clientHeight));
+
+                if (canvas.width !== targetW || canvas.height !== targetH) {
+                    canvas.width = targetW;
+                    canvas.height = targetH;
+                    canvas.style.width = '100%';
+                    canvas.style.height = '100%';
+                    if (pageNum) {
+                        redrawPageAnnotationCanvas(pageNum);
+                    }
+                }
+            }
+
+            // 객체 지우개: 특정 캔버스 좌표 근처의 스트로크를 찾아 통째로 삭제
+            function eraseStrokeAtPoint(canvas, pageNum, clientX, clientY) {
+                const rect = canvas.getBoundingClientRect();
+                const px = (clientX - rect.left) * (canvas.width / rect.width);
+                const py = (clientY - rect.top) * (canvas.height / rect.height);
+
+                for (let i = annotStrokes.length - 1; i >= 0; i--) {
+                    const stroke = annotStrokes[i];
+                    if (stroke.pageNum !== pageNum) continue;
+
+                    const threshold = Math.max(14, stroke.size * 3);
+                    const dist = getMinDistanceToStroke(px, py, stroke, canvas.width, canvas.height);
+                    if (dist <= threshold) {
+                        // 객체 단위 삭제 수행
+                        annotStrokes.splice(i, 1);
+                        pushUndoAction({ type: 'delete_stroke', stroke, index: i });
+                        redrawPageAnnotationCanvas(pageNum);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function setupPageAnnotationLayer() {
+                const pages = document.querySelectorAll('.page-wrapper');
+                pages.forEach(page => {
+                    const pageNum = parseInt(page.id.replace('page-', '')) || 1;
+                    let canvas = page.querySelector('.annot-canvas');
+                    if (!canvas) {
+                        canvas = document.createElement('canvas');
+                        canvas.className = 'annot-canvas';
+                        canvas.style.position = 'absolute';
+                        canvas.style.top = '0';
+                        canvas.style.left = '0';
+                        canvas.style.width = '100%';
+                        canvas.style.height = '100%';
+                        canvas.style.zIndex = '45';
+                        canvas.style.cursor = (annotMode === 'note') ? 'cell' : (annotMode === 'eraser' ? 'pointer' : 'crosshair');
+                        page.appendChild(canvas);
+
+                        canvas.addEventListener('mousedown', (e) => {
+                            if (e.button !== 0) return; // 좌클릭만
+                            e.stopPropagation();
+
+                            const rect = canvas.getBoundingClientRect();
+                            const x = e.clientX - rect.left;
+                            const y = e.clientY - rect.top;
+
+                            if (annotMode === 'note') {
+                                createStickyNote(page, x, y);
+                                return;
+                            }
+
+                            if (annotMode === 'eraser') {
+                                isEraserDragging = true;
+                                currentDrawingCanvas = canvas;
+                                eraseStrokeAtPoint(canvas, pageNum, e.clientX, e.clientY);
+                                return;
+                            }
+
+                            // 펜 / 형광펜 드로잉 시작
+                            isAnnotDrawing = true;
+                            currentDrawingCanvas = canvas;
+                            currentDrawingCtx = canvas.getContext('2d');
+
+                            const sizeVal = parseInt(document.getElementById('annot-size-select')?.value) || 4;
+                            const normX = Math.max(0, Math.min(1, x / rect.width));
+                            const normY = Math.max(0, Math.min(1, y / rect.height));
+
+                            currentActiveStroke = {
+                                id: 'stroke_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+                                pageNum,
+                                type: annotMode,
+                                color: annotColor,
+                                size: sizeVal,
+                                points: [{ x: normX, y: normY }]
+                            };
+
+                            currentDrawingCtx.lineCap = 'round';
+                            currentDrawingCtx.lineJoin = 'round';
+
+                            const startPx = normX * canvas.width;
+                            const startPy = normY * canvas.height;
+
+                            if (annotMode === 'highlighter') {
+                                const rgba = hexToRgba(annotColor, 0.4);
+                                currentDrawingCtx.strokeStyle = rgba;
+                                currentDrawingCtx.fillStyle = rgba;
+                                currentDrawingCtx.lineWidth = sizeVal * 4;
+                            } else {
+                                currentDrawingCtx.strokeStyle = annotColor;
+                                currentDrawingCtx.fillStyle = annotColor;
+                                currentDrawingCtx.lineWidth = sizeVal;
+                            }
+
+                            // 단일 클릭 점 찍기
+                            currentDrawingCtx.beginPath();
+                            currentDrawingCtx.arc(startPx, startPy, Math.max(1, currentDrawingCtx.lineWidth / 2), 0, Math.PI * 2);
+                            currentDrawingCtx.fill();
+
+                            // 연속선 패스 시작
+                            currentDrawingCtx.beginPath();
+                            currentDrawingCtx.moveTo(startPx, startPy);
+
+                            e.preventDefault();
+                        });
+                    }
+
+                    syncAnnotationCanvas(canvas, page, pageNum);
+                    canvas.style.display = 'block';
+                    canvas.style.pointerEvents = 'auto';
+                    canvas.style.cursor = (annotMode === 'note') ? 'cell' : (annotMode === 'eraser' ? 'pointer' : 'crosshair');
+                });
+            }
+
+            // 전역 마우스 이벤트로 드로잉 및 지우개 드래그 처리
+            window.addEventListener('mousemove', (e) => {
+                if (isEraserDragging && currentDrawingCanvas) {
+                    const pageNum = parseInt(currentDrawingCanvas.closest('.page-wrapper')?.id.replace('page-', '')) || 1;
+                    eraseStrokeAtPoint(currentDrawingCanvas, pageNum, e.clientX, e.clientY);
+                    return;
+                }
+
+                if (!isAnnotDrawing || !currentDrawingCanvas || !currentDrawingCtx || !currentActiveStroke) return;
+                const rect = currentDrawingCanvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                const normX = Math.max(0, Math.min(1, x / rect.width));
+                const normY = Math.max(0, Math.min(1, y / rect.height));
+
+                currentActiveStroke.points.push({ x: normX, y: normY });
+
+                const drawPx = normX * currentDrawingCanvas.width;
+                const drawPy = normY * currentDrawingCanvas.height;
+
+                currentDrawingCtx.lineTo(drawPx, drawPy);
+                currentDrawingCtx.stroke();
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isEraserDragging) {
+                    isEraserDragging = false;
+                    currentDrawingCanvas = null;
+                }
+
+                if (isAnnotDrawing && currentActiveStroke) {
+                    if (currentDrawingCtx) {
+                        currentDrawingCtx.closePath();
+                    }
+                    // 스트로크 등록 및 Undo 스택 추가
+                    annotStrokes.push(currentActiveStroke);
+                    pushUndoAction({ type: 'add_stroke', stroke: currentActiveStroke });
+                    redrawPageAnnotationCanvas(currentActiveStroke.pageNum);
+                }
+
+                isAnnotDrawing = false;
+                currentDrawingCanvas = null;
+                currentDrawingCtx = null;
+                currentActiveStroke = null;
+            });
+
+            function removePageAnnotationLayer() {
+                document.querySelectorAll('.annot-canvas').forEach(c => {
+                    c.style.display = 'none';
+                    c.style.pointerEvents = 'none';
+                });
+            }
+
+            // 스티커 노트 드래그 상태 관리
+            let activeDraggingNote = null;
+            let noteDragStartX = 0, noteDragStartY = 0;
+            let noteInitLeft = 0, noteInitTop = 0;
+
+            window.addEventListener('mousemove', (e) => {
+                if (!activeDraggingNote) return;
+                const dx = e.clientX - noteDragStartX;
+                const dy = e.clientY - noteDragStartY;
+                activeDraggingNote.style.left = `${Math.max(0, noteInitLeft + dx)}px`;
+                activeDraggingNote.style.top = `${Math.max(0, noteInitTop + dy)}px`;
+            });
+
+            window.addEventListener('mouseup', () => {
+                activeDraggingNote = null;
+            });
+
+            function createStickyNote(pageEl, x, y) {
+                const note = document.createElement('div');
+                note.className = 'annot-sticky-note';
+                note.style.position = 'absolute';
+                note.style.left = `${Math.max(10, x - 20)}px`;
+                note.style.top = `${Math.max(10, y - 20)}px`;
+                note.style.width = '190px';
+                note.style.minHeight = '120px';
+                note.style.background = '#fef08a';
+                note.style.border = '1px solid #facc15';
+                note.style.borderRadius = '6px';
+                note.style.boxShadow = '0 8px 20px rgba(0,0,0,0.35)';
+                note.style.zIndex = '50';
+                note.style.display = 'flex';
+                note.style.flexDirection = 'column';
+                note.style.overflow = 'hidden';
+
+                // 노트 본체 클릭 시 이벤트 차단
+                note.addEventListener('mousedown', (e) => e.stopPropagation());
+
+                // 상단 헤더 바
+                const header = document.createElement('div');
+                header.style.padding = '4px 8px';
+                header.style.background = '#fde047';
+                header.style.cursor = 'move';
+                header.style.userSelect = 'none';
+                header.style.display = 'flex';
+                header.style.justifyContent = 'space-between';
+                header.style.alignItems = 'center';
+                header.style.fontSize = '11px';
+                header.style.fontWeight = '600';
+                header.style.color = '#854d0e';
+                header.innerHTML = '<span>💬 Note</span>';
+
+                const del = document.createElement('button');
+                del.textContent = '✕';
+                del.style.background = 'transparent';
+                del.style.border = 'none';
+                del.style.color = '#b91c1c';
+                del.style.fontSize = '12px';
+                del.style.cursor = 'pointer';
+                del.style.padding = '0 4px';
+                del.onclick = (e) => {
+                    e.stopPropagation();
+                    note.remove();
+                };
+                header.appendChild(del);
+
+                // 메모 텍스트에어리어
+                const textarea = document.createElement('textarea');
+                textarea.placeholder = 'Type your note here...';
+                textarea.style.flex = '1';
+                textarea.style.width = '100%';
+                textarea.style.minHeight = '80px';
+                textarea.style.background = 'transparent';
+                textarea.style.border = 'none';
+                textarea.style.outline = 'none';
+                textarea.style.resize = 'vertical';
+                textarea.style.fontFamily = 'sans-serif';
+                textarea.style.fontSize = '12.5px';
+                textarea.style.color = '#713f12';
+                textarea.style.padding = '6px 8px';
+                textarea.style.boxSizing = 'border-box';
+
+                // 텍스트 입력 방해 차단
+                textarea.addEventListener('mousedown', (e) => e.stopPropagation());
+                textarea.addEventListener('click', (e) => e.stopPropagation());
+
+                // 헤더 드래그로 노트 이동
+                header.addEventListener('mousedown', (e) => {
+                    if (e.target === del) return;
+                    activeDraggingNote = note;
+                    noteDragStartX = e.clientX;
+                    noteDragStartY = e.clientY;
+                    noteInitLeft = note.offsetLeft;
+                    noteInitTop = note.offsetTop;
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+
+                note.appendChild(header);
+                note.appendChild(textarea);
+                pageEl.appendChild(note);
+
+                setTimeout(() => textarea.focus(), 60);
+            }
+
+            // ====================================================
+            // Feature 4: Edit Text & Image (화이트아웃, 텍스트/이미지 추가)
+            // ====================================================
+            const btnEditPdf = document.getElementById('btn-edit-pdf');
+            const toolbarEdit = document.getElementById('toolbar-edit');
+            let editMode = 'whiteout';
+            let isEditActive = false;
+
+            window.turnOffEdit = () => {
+                isEditActive = false;
+                toolbarEdit?.classList.remove('active');
+            };
+
+            let hasSetupEditListeners = false;
+
+            if (btnEditPdf && toolbarEdit) {
+                btnEditPdf.onclick = () => {
+                    isEditActive = !isEditActive;
+                    if (isEditActive) {
+                        // Hand tool / Pan Mode 켜져 있다면 해제
+                        if (isPanMode && typeof modeToggleBtn !== 'undefined') {
+                            modeToggleBtn.click();
+                        }
+                        // Capture Region 및 다른 모드 해제
+                        if (typeof window.turnOffRegionCapture === 'function') window.turnOffRegionCapture();
+                        if (typeof window.turnOffAnnotate === 'function') window.turnOffAnnotate();
+                        if (typeof window.turnOffSignPlacement === 'function') window.turnOffSignPlacement();
+
+                        toolbarEdit.classList.add('active');
+                        setupPageEditListeners();
+                    } else {
+                        window.turnOffEdit();
+                    }
+                };
+
+                document.getElementById('btn-edit-close')?.addEventListener('click', () => {
+                    window.turnOffEdit();
+                });
+
+                document.getElementById('btn-edit-whiteout')?.addEventListener('click', () => {
+                    editMode = 'whiteout';
+                    document.querySelectorAll('#toolbar-edit .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-edit-whiteout').classList.add('active');
+                    showToast('Drag on the page to cover areas in white.', '◻️', 2500);
+                });
+
+                document.getElementById('btn-edit-text')?.addEventListener('click', () => {
+                    editMode = 'text';
+                    document.querySelectorAll('#toolbar-edit .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    document.getElementById('btn-edit-text').classList.add('active');
+                    showToast('Click anywhere on the page to insert text.', '🔤', 2500);
+                });
+
+                const editImgInput = document.getElementById('edit-img-file-input');
+                document.getElementById('btn-edit-image')?.addEventListener('click', () => {
+                    editImgInput.click();
+                });
+
+                editImgInput?.addEventListener('change', async (e) => {
+                    const files = Array.from(e.target.files || []);
+                    if (files.length === 0) return;
+
+                    showToast(`Adding ${files.length} image(s)...`, '🖼️', 1800);
+
+                    for (let idx = 0; idx < files.length; idx++) {
+                        const file = files[idx];
+                        const dataUrl = await new Promise((resolve) => {
+                            const r = new FileReader();
+                            r.onload = (ev) => resolve(ev.target.result);
+                            r.readAsDataURL(file);
+                        });
+                        placeOverlayItemOnCurrentPage(dataUrl, 'image', 180, 120, idx);
+                    }
+                    editImgInput.value = '';
+                });
+
+                document.getElementById('btn-edit-save')?.addEventListener('click', async () => {
+                    try {
+                        showToast('Saving edits to PDF...', '⏳', 2000);
+                        const pdfBytes = await getCurrentPdfBytes();
+                        const pdfDocLib = await PDFLib.PDFDocument.load(pdfBytes);
+                        const pages = pdfDocLib.getPages();
+
+                        // 화이트아웃 박스들 반영
+                        document.querySelectorAll('.edit-whiteout-box').forEach(box => {
+                            const pageNum = parseInt(box.dataset.pageNum) || 1;
+                            const page = pages[pageNum - 1];
+                            const pageEl = document.getElementById(`page-${pageNum}`);
+                            if (!page || !pageEl) return;
+                            const pRect = pageEl.getBoundingClientRect();
+                            const bRect = box.getBoundingClientRect();
+                            const { width: pW, height: pH } = page.getSize();
+
+                            const rx = (bRect.left - pRect.left) / pRect.width;
+                            const ry = (bRect.top - pRect.top) / pRect.height;
+                            const rw = bRect.width / pRect.width;
+                            const rh = bRect.height / pRect.height;
+
+                            page.drawRectangle({
+                                x: rx * pW,
+                                y: pH - (ry * pH) - (rh * pH),
+                                width: rw * pW,
+                                height: rh * pH,
+                                color: PDFLib.rgb(1, 1, 1)
+                            });
+                        });
+
+                        // 텍스트 박스들 반영
+                        for (const tb of document.querySelectorAll('.edit-text-box')) {
+                            const pageNum = parseInt(tb.dataset.pageNum) || 1;
+                            const page = pages[pageNum - 1];
+                            const pageEl = document.getElementById(`page-${pageNum}`);
+                            if (!page || !pageEl) return;
+                            const pRect = pageEl.getBoundingClientRect();
+                            const bRect = tb.getBoundingClientRect();
+                            const { width: pW, height: pH } = page.getSize();
+
+                            const textVal = tb.querySelector('input')?.value || '';
+                            if (!textVal.trim()) continue;
+
+                            const rx = (bRect.left - pRect.left) / pRect.width;
+                            const ry = (bRect.top - pRect.top) / pRect.height;
+
+                            page.drawText(textVal, {
+                                x: rx * pW,
+                                y: pH - (ry * pH) - 14,
+                                size: 14,
+                                color: PDFLib.rgb(0, 0, 0)
+                            });
+                        }
+
+                        // 이미지 박스들 반영 (.placed-overlay-item 내 이미지)
+                        const overlayItems = document.querySelectorAll('.placed-overlay-item');
+                        for (const item of overlayItems) {
+                            const imgEl = item.querySelector('img');
+                            if (!imgEl || !imgEl.src) continue;
+
+                            const pageNum = parseInt(item.dataset.pageNum) || 1;
+                            const page = pages[pageNum - 1];
+                            const pageEl = document.getElementById(`page-${pageNum}`);
+                            if (!page || !pageEl) return;
+
+                            const pRect = pageEl.getBoundingClientRect();
+                            const iRect = item.getBoundingClientRect();
+                            const { width: pW, height: pH } = page.getSize();
+
+                            const rx = (iRect.left - pRect.left) / pRect.width;
+                            const ry = (iRect.top - pRect.top) / pRect.height;
+                            const rw = iRect.width / pRect.width;
+                            const rh = iRect.height / pRect.height;
+
+                            const targetX = rx * pW;
+                            const targetW = rw * pW;
+                            const targetH = rh * pH;
+                            const targetY = pH - (ry * pH) - targetH;
+
+                            const pngDataUrl = await ensurePngDataUrl(imgEl.src);
+                            const pngImage = await pdfDocLib.embedPng(pngDataUrl);
+                            page.drawImage(pngImage, {
+                                x: targetX,
+                                y: targetY,
+                                width: targetW,
+                                height: targetH
+                            });
+                        }
+
+                        const savedBytes = await pdfDocLib.save();
+                        const ok = await savePdfBytesToFile(savedBytes, '_modified');
+                        if (ok) {
+                            // 편집 완료 후 배치된 임시 DOM 아이템 정리
+                            document.querySelectorAll('.edit-whiteout-box, .edit-text-box, .placed-overlay-item').forEach(el => el.remove());
+                        }
+                    } catch (err) {
+                        showMessageDialog('Save Failed', `Failed to save edits: ${err.message}`);
+                    }
+                });
+            }
+
+            function setupPageEditListeners() {
+                if (hasSetupEditListeners) return;
+                hasSetupEditListeners = true;
+
+                const viewerEl = document.getElementById('viewer-scroll-container');
+                let startX, startY, isDraggingBox = false, tempBox = null, curPageWrapper = null;
+
+                viewerEl.addEventListener('mousedown', (e) => {
+                    if (!isEditActive) return;
+                    if (e.target.closest('.placed-overlay-item') || e.target.closest('.pdf-floating-toolbar') || e.target.closest('.annot-sticky-note')) return;
+
+                    const pageWrapper = e.target.closest('.page-wrapper');
+                    if (!pageWrapper) return;
+                    curPageWrapper = pageWrapper;
+                    const pageRect = pageWrapper.getBoundingClientRect();
+
+                    if (editMode === 'text') {
+                        const x = e.clientX - pageRect.left;
+                        const y = e.clientY - pageRect.top;
+                        createEditableTextBox(pageWrapper, x, y);
+                        return;
+                    }
+
+                    if (editMode === 'whiteout') {
+                        isDraggingBox = true;
+                        startX = e.clientX - pageRect.left;
+                        startY = e.clientY - pageRect.top;
+
+                        tempBox = document.createElement('div');
+                        tempBox.className = 'placed-overlay-item edit-whiteout-box';
+                        tempBox.style.background = '#ffffff';
+                        tempBox.style.border = '1px solid #94a3b8';
+                        tempBox.style.left = `${startX}px`;
+                        tempBox.style.top = `${startY}px`;
+                        tempBox.style.width = '0px';
+                        tempBox.style.height = '0px';
+                        tempBox.dataset.pageNum = pageWrapper.id.replace('page-', '');
+
+                        const del = document.createElement('div');
+                        del.className = 'item-del-btn';
+                        del.textContent = '✕';
+                        del.onclick = (ev) => {
+                            ev.stopPropagation();
+                            del.closest('.placed-overlay-item')?.remove();
+                        };
+                        tempBox.appendChild(del);
+
+                        pageWrapper.appendChild(tempBox);
+                        e.preventDefault();
+                    }
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!isDraggingBox || !tempBox || !curPageWrapper) return;
+                    const pageRect = curPageWrapper.getBoundingClientRect();
+                    const curX = e.clientX - pageRect.left;
+                    const curY = e.clientY - pageRect.top;
+
+                    const x = Math.min(startX, curX);
+                    const y = Math.min(startY, curY);
+                    const w = Math.abs(curX - startX);
+                    const h = Math.abs(curY - startY);
+
+                    tempBox.style.left = `${x}px`;
+                    tempBox.style.top = `${y}px`;
+                    tempBox.style.width = `${w}px`;
+                    tempBox.style.height = `${h}px`;
+                });
+
+                window.addEventListener('mouseup', () => {
+                    if (isDraggingBox) {
+                        isDraggingBox = false;
+                        if (tempBox && (parseInt(tempBox.style.width) < 8 || parseInt(tempBox.style.height) < 8)) {
+                            tempBox.remove();
+                        }
+                        tempBox = null;
+                    }
+                });
+            }
+
+            function createEditableTextBox(pageWrapper, x, y) {
+                const box = document.createElement('div');
+                box.className = 'placed-overlay-item edit-text-box';
+                box.style.left = `${x}px`;
+                box.style.top = `${y}px`;
+                box.style.background = 'rgba(255, 255, 255, 0.95)';
+                box.style.padding = '2px 6px';
+                box.dataset.pageNum = pageWrapper.id.replace('page-', '');
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.placeholder = 'Type text here...';
+                input.style.border = 'none';
+                input.style.background = 'transparent';
+                input.style.outline = 'none';
+                input.style.fontSize = '14px';
+                input.style.color = '#000';
+                input.style.fontFamily = 'sans-serif';
+
+                const del = document.createElement('div');
+                del.className = 'item-del-btn';
+                del.textContent = '✕';
+                del.onclick = (e) => {
+                    e.stopPropagation();
+                    del.closest('.placed-overlay-item')?.remove();
+                };
+
+                box.appendChild(input);
+                box.appendChild(del);
+                pageWrapper.appendChild(box);
+                setTimeout(() => input.focus(), 60);
+            }
+
+            // === Header Buttons: Capture ===
+            document.getElementById('btn-header-capture')?.addEventListener('click', () => {
+                const regionBtn = document.getElementById('capture-region');
+                if (regionBtn) regionBtn.click();
+            });
         };
 
         initPdfWindowControls();

@@ -1,5 +1,35 @@
 [
   {
+    "version": "1.0.2",
+    "date": "2026-10-26",
+    "notes": {
+      "ko": [
+        "PDF Viewer 기능 강화"
+      ],
+      "en": [
+        "Enhanced PDF Viewer functionality"
+      ],
+      "ja": [
+        "PDF Viewerの機能強化"
+      ]
+    }
+  },
+  {
+    "version": "1.0.1",
+    "date": "2026-10-24",
+    "notes": {
+      "ko": [
+        "MHZipy Version 1.0.1 Released!"
+      ],
+      "en": [
+        "MHZipy Version 1.0.1 Released!"
+      ],
+      "ja": [
+        "MHZipy バージョン 1.0.1 がリリースされました!"
+      ]
+    }
+  },
+  {
     "version": "1.0.1",
     "date": "2026-10-23",
     "notes": {

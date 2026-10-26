@@ -62,6 +62,7 @@ office2pdf = "0.2"
 lopdf = "0.32"
 tauri-plugin-single-instance = "2"
 png = "0.17"
+pdf-encrypt = "0.3.1"
 
 # Native drag & drop with Windows File Explorer (must match the versions used by tauri/wry)
 [target.'cfg(windows)'.dependencies]

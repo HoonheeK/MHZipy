@@ -41,8 +41,10 @@ export const openPdfInWindow = async (file: PdfFile) => {
     const webview = new WebviewWindow(windowLabel, {
       url: `viewer.html?pdfPath=${encodeURIComponent(file.path)}&title=${encodeURIComponent(file.name)}`,
       title: file.name,
-      width: 1000,
-      height: 800,
+      width: 1100,
+      height: 850,
+      minWidth: 500,
+      minHeight: 400,
       decorations: false,
       ...(posX !== undefined && posY !== undefined ? { x: posX, y: posY } : {})
     });
