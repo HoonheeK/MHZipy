@@ -701,110 +701,292 @@
             top: 48px;
             left: 50%;
             transform: translateX(-50%);
-            background: #1e293b;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 8px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 10px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
             display: none;
             align-items: center;
             gap: 6px;
-            padding: 6px 12px;
+            padding: 6px 8px;
             z-index: 2500;
             color: #f1f5f9;
-            font-size: 13px;
+            font-size: 12px;
             user-select: none;
+            white-space: nowrap;
         }
         .pdf-floating-toolbar.active {
             display: flex;
         }
-        .float-tool-btn {
-            background: rgba(255, 255, 255, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            color: #cbd5e1;
-            padding: 5px 10px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12.5px;
+        .toolbar-mode-badge {
             display: inline-flex;
             align-items: center;
             gap: 5px;
+            height: 30px;
+            padding: 0 8px 0 4px;
+            font-weight: 600;
+            font-size: 12px;
+            color: #94a3b8;
+            letter-spacing: -0.01em;
+            white-space: nowrap;
+        }
+        .float-tool-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 2px;
+            box-sizing: border-box;
+        }
+        .float-tool-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            height: 30px;
+            padding: 0 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            white-space: nowrap;
+            box-sizing: border-box;
             transition: all 0.15s ease;
         }
+        .float-tool-group .float-tool-btn {
+            height: 26px;
+            border-color: transparent;
+            background: transparent;
+            border-radius: 6px;
+        }
+        .float-tool-btn.icon-only {
+            width: 30px;
+            min-width: 30px;
+            padding: 0;
+        }
+        .float-tool-group .float-tool-btn.icon-only {
+            width: 26px;
+            min-width: 26px;
+            height: 26px;
+        }
         .float-tool-btn:hover {
-            background: rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.14);
             color: #fff;
         }
         .float-tool-btn.active {
-            background: #2563eb;
-            border-color: #3b82f6;
-            color: #fff;
+            background: #2563eb !important;
+            border-color: #3b82f6 !important;
+            color: #fff !important;
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.4);
         }
         .float-tool-btn.primary {
             background: #059669;
             border-color: #10b981;
             color: #fff;
+            font-weight: 600;
         }
         .float-tool-btn.primary:hover {
             background: #047857;
         }
         .float-tool-btn.danger {
-            background: rgba(239, 68, 68, 0.2);
-            border-color: rgba(239, 68, 68, 0.4);
+            background: rgba(239, 68, 68, 0.16);
+            border-color: rgba(239, 68, 68, 0.35);
             color: #fca5a5;
         }
         .float-tool-btn.danger:hover {
             background: #ef4444;
+            border-color: #ef4444;
             color: #fff;
+        }
+        .float-select {
+            height: 30px;
+            padding: 0 8px;
+            background: rgba(255, 255, 255, 0.06);
+            color: #e2e8f0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            outline: none;
+            box-sizing: border-box;
+            transition: all 0.15s ease;
+        }
+        .float-select:hover, .float-select:focus {
+            border-color: rgba(56, 189, 248, 0.5);
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .float-select option {
+            background: #0f172a;
+            color: #f8fafc;
         }
         .float-sep {
             width: 1px;
             height: 18px;
-            background: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.12);
             margin: 0 2px;
+            flex-shrink: 0;
+        }
+        /* Smart Color Picker Button & Popover */
+        .smart-color-wrap {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+        }
+        .smart-color-btn {
+            height: 30px;
+            padding: 0 9px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 6px;
+            color: #e2e8f0;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-sizing: border-box;
+            transition: all 0.15s ease;
+        }
+        .smart-color-btn:hover, .smart-color-btn.open {
+            background: rgba(255, 255, 255, 0.14);
+            border-color: rgba(56, 189, 248, 0.5);
+            color: #fff;
+        }
+        .smart-color-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255, 255, 255, 0.65);
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+            flex-shrink: 0;
+            box-sizing: border-box;
+        }
+        .smart-color-caret {
+            font-size: 9px;
+            color: #94a3b8;
+            margin-left: 1px;
+        }
+        .smart-color-popover {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 23, 42, 0.98);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 10px;
+            box-shadow: 0 14px 32px rgba(0, 0, 0, 0.65);
+            padding: 10px;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 2600;
+            min-width: 168px;
+        }
+        .smart-color-popover.open {
+            display: flex;
+        }
+        .smart-color-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 22px);
+            gap: 6px;
+            justify-content: center;
+        }
+        .color-swatch-item {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 1.5px solid rgba(255, 255, 255, 0.3);
+            cursor: pointer;
+            padding: 0;
+            box-sizing: border-box;
+            transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+        }
+        .color-swatch-item:hover {
+            transform: scale(1.15);
+            border-color: #fff;
+        }
+        .color-swatch-item.active {
+            border: 2px solid #38bdf8 !important;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+            transform: scale(1.08);
+        }
+        .smart-color-custom-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .smart-color-custom-label {
+            font-size: 11px;
+            color: #94a3b8;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            width: 100%;
+            justify-content: space-between;
+            padding: 3px 6px;
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: all 0.15s ease;
+        }
+        .smart-color-custom-label:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+        .smart-color-hex {
+            font-family: monospace;
+            font-size: 11px;
+            color: #cbd5e1;
+            text-transform: uppercase;
         }
 
-        /* Movable Overlay Items (Signature, Whiteout, Text, Image) */
+        /* Movable Overlay Items (Signature, Whiteout, Text, Image) - WYSIWYG Saved State */
         .placed-overlay-item {
             position: absolute;
             cursor: move;
             user-select: none;
             z-index: 50;
             box-sizing: border-box;
-            border: 1.5px dashed #38bdf8;
-            border-radius: 4px;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
         }
         .placed-overlay-item:hover, .placed-overlay-item.selected {
-            border-color: #2563eb;
-            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
+            box-shadow: none;
         }
         .placed-overlay-item .item-del-btn {
-            position: absolute;
-            top: -10px;
-            right: -10px;
-            width: 20px;
-            height: 20px;
-            background: #ef4444;
-            color: #fff;
-            border: 1.5px solid #fff;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            cursor: pointer;
-            z-index: 60;
+            display: none !important;
         }
         .placed-overlay-item .resize-handle {
             position: absolute;
             right: -4px;
             bottom: -4px;
-            width: 10px;
-            height: 10px;
+            width: 9px;
+            height: 9px;
             background: #38bdf8;
             border: 1.5px solid #fff;
             cursor: se-resize;
             border-radius: 2px;
             z-index: 60;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+        .placed-overlay-item[data-type]:hover .resize-handle {
+            opacity: 1;
         }
 
         /* Signature Canvas Pad */
@@ -1096,47 +1278,108 @@
 
     <!-- Floating Toolbar 1: Annotations (Highlight, Sticky Note, Pen Draw, Eraser, Undo/Redo) -->
     <div id="toolbar-annotate" class="pdf-floating-toolbar">
-        <span style="font-weight: 600; font-size: 12px; color: #94a3b8; margin-right: 4px;">📝 Annotate:</span>
-        <button type="button" class="float-tool-btn active" id="btn-annot-pen" title="Freehand Pen Tool">🖊️ Pen</button>
-        <button type="button" class="float-tool-btn" id="btn-annot-highlighter" title="Highlighter (Semi-transparent)">🖍️ Highlight</button>
-        <button type="button" class="float-tool-btn" id="btn-annot-eraser" title="Object Eraser (Click stroke to delete entire object)">🧹 Eraser</button>
-        <button type="button" class="float-tool-btn" id="btn-annot-note" title="Sticky Note (Click on page to add memo)">💬 Note</button>
-        <div class="float-sep"></div>
-        <!-- Color Presets -->
-        <div id="annot-color-palette" style="display: flex; gap: 5px; align-items: center;">
-            <button type="button" class="annot-preset-color active" data-color="#f59e0b" style="width: 18px; height: 18px; background: #f59e0b; border-radius: 50%; border: 2px solid #fff; cursor: pointer; padding: 0;" title="Amber / Yellow"></button>
-            <button type="button" class="annot-preset-color" data-color="#ef4444" style="width: 18px; height: 18px; background: #ef4444; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Red"></button>
-            <button type="button" class="annot-preset-color" data-color="#22c55e" style="width: 18px; height: 18px; background: #22c55e; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Green"></button>
-            <button type="button" class="annot-preset-color" data-color="#3b82f6" style="width: 18px; height: 18px; background: #3b82f6; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Blue"></button>
-            <button type="button" class="annot-preset-color" data-color="#a855f7" style="width: 18px; height: 18px; background: #a855f7; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Purple"></button>
-            <button type="button" class="annot-preset-color" data-color="#0f172a" style="width: 18px; height: 18px; background: #0f172a; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); cursor: pointer; padding: 0;" title="Black"></button>
-            <input type="color" id="annot-color-picker" value="#f59e0b" style="width: 22px; height: 22px; border: none; background: transparent; cursor: pointer; padding: 0;" title="Custom Color">
+        <span class="toolbar-mode-badge">📝 Annotate</span>
+        <div class="float-tool-group">
+            <button type="button" class="float-tool-btn active" id="btn-annot-pen" title="Freehand Pen Tool">🖊️ Pen</button>
+            <button type="button" class="float-tool-btn" id="btn-annot-highlighter" title="Highlighter (Semi-transparent)">🖍️ Highlight</button>
+            <button type="button" class="float-tool-btn" id="btn-annot-eraser" title="Object Eraser (Click stroke to delete entire object)">🧹 Eraser</button>
+            <button type="button" class="float-tool-btn" id="btn-annot-note" title="Sticky Note (Click on page to add memo)">💬 Note</button>
         </div>
-        <select id="annot-size-select" style="background: #0f172a; color: #fff; border: 1px solid #334155; border-radius: 4px; padding: 2px 4px; font-size: 12px;" title="Thickness">
+        <div class="float-sep"></div>
+        <!-- Smart Color Selector -->
+        <div class="smart-color-wrap" id="annot-color-wrap">
+            <button type="button" class="smart-color-btn" id="btn-annot-color-trigger" title="Select Color">
+                <span class="smart-color-dot" id="annot-color-dot" style="background: #f59e0b;"></span>
+                <span>Color</span>
+                <span class="smart-color-caret">▾</span>
+            </button>
+            <div class="smart-color-popover" id="annot-color-popover">
+                <div id="annot-color-palette" class="smart-color-grid">
+                    <button type="button" class="annot-preset-color color-swatch-item active" data-color="#f59e0b" style="background: #f59e0b;" title="Amber / Yellow"></button>
+                    <button type="button" class="annot-preset-color color-swatch-item" data-color="#ef4444" style="background: #ef4444;" title="Red"></button>
+                    <button type="button" class="annot-preset-color color-swatch-item" data-color="#22c55e" style="background: #22c55e;" title="Green"></button>
+                    <button type="button" class="annot-preset-color color-swatch-item" data-color="#3b82f6" style="background: #3b82f6;" title="Blue"></button>
+                    <button type="button" class="annot-preset-color color-swatch-item" data-color="#a855f7" style="background: #a855f7;" title="Purple"></button>
+                    <button type="button" class="annot-preset-color color-swatch-item" data-color="#0f172a" style="background: #0f172a;" title="Black"></button>
+                </div>
+                <div class="smart-color-custom-row">
+                    <label class="smart-color-custom-label" for="annot-color-picker" title="Pick Custom Color">
+                        <span>🎨 Custom</span>
+                        <span class="smart-color-hex" id="annot-color-hex">#F59E0B</span>
+                    </label>
+                    <input type="color" id="annot-color-picker" value="#f59e0b" style="position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;">
+                </div>
+            </div>
+        </div>
+        <select id="annot-size-select" class="float-select" title="Stroke Thickness">
             <option value="2">Thin (2px)</option>
             <option value="4" selected>Medium (4px)</option>
             <option value="8">Thick (8px)</option>
             <option value="16">Broad (16px)</option>
         </select>
         <div class="float-sep"></div>
-        <button type="button" class="float-tool-btn" id="btn-annot-undo" title="Undo (Ctrl+Z)">↩️</button>
-        <button type="button" class="float-tool-btn" id="btn-annot-redo" title="Redo (Ctrl+Y)">↪️</button>
+        <div class="float-tool-group">
+            <button type="button" class="float-tool-btn icon-only" id="btn-annot-undo" title="Undo (Ctrl+Z)">↩️</button>
+            <button type="button" class="float-tool-btn icon-only" id="btn-annot-redo" title="Redo (Ctrl+Y)">↪️</button>
+        </div>
         <div class="float-sep"></div>
         <button type="button" class="float-tool-btn danger" id="btn-annot-clear" title="Clear all drawings on current page">🗑️ Clear</button>
-        <button type="button" class="float-tool-btn primary" id="btn-annot-save" title="Burn annotations into PDF file">💾 Save to PDF</button>
-        <button type="button" class="float-tool-btn" id="btn-annot-close" style="padding: 5px 8px;">✕</button>
+        <button type="button" class="float-tool-btn primary" id="btn-annot-save" title="Burn annotations into PDF file">💾 Save</button>
+        <button type="button" class="float-tool-btn icon-only" id="btn-annot-close" title="Close">✕</button>
     </div>
 
-    <!-- Floating Toolbar 2: Edit Text & Image (Whiteout, Add Text, Insert Image) -->
+    <!-- Floating Toolbar 2: Edit Text & Image (Whiteout/Box, Add Text, Insert Image) -->
     <div id="toolbar-edit" class="pdf-floating-toolbar">
-        <span style="font-weight: 600; font-size: 12px; color: #94a3b8; margin-right: 4px;">✏️ Edit:</span>
-        <button type="button" class="float-tool-btn active" id="btn-edit-whiteout" title="Drag rectangle on page to cover content with white">◻️ Whiteout</button>
-        <button type="button" class="float-tool-btn" id="btn-edit-text" title="Click on page to add custom text">🔤 Add Text</button>
-        <button type="button" class="float-tool-btn" id="btn-edit-image" title="Insert image stamp/logo on page">🖼️ Add Image</button>
+        <span class="toolbar-mode-badge">✏️ Edit</span>
+        <div class="float-tool-group">
+            <button type="button" class="float-tool-btn active" id="btn-edit-whiteout" title="Drag rectangle on page (Solid Fill or Border Outline)">◻️ Box</button>
+            <button type="button" class="float-tool-btn" id="btn-edit-text" title="Click on page to add custom text">🔤 Text</button>
+            <button type="button" class="float-tool-btn" id="btn-edit-image" title="Insert image stamp/logo on page">🖼️ Image</button>
+        </div>
         <input type="file" id="edit-img-file-input" accept="image/*" multiple style="display: none;">
         <div class="float-sep"></div>
-        <button type="button" class="float-tool-btn primary" id="btn-edit-save" title="Save changes into PDF file">💾 Save to PDF</button>
-        <button type="button" class="float-tool-btn" id="btn-edit-close" style="padding: 5px 8px;">✕</button>
+        <div id="edit-rect-options" style="display: inline-flex; align-items: center; gap: 6px;">
+            <div class="float-tool-group">
+                <button type="button" class="float-tool-btn active" id="btn-rect-mode-fill" title="Filled Rectangle (Solid color fill)">⬛ Fill</button>
+                <button type="button" class="float-tool-btn" id="btn-rect-mode-outline" title="Outline Only (No fill color, border only)">⬜ Outline</button>
+            </div>
+            <div class="smart-color-wrap" id="edit-rect-color-wrap">
+                <button type="button" class="smart-color-btn" id="btn-edit-color-trigger" title="Select Rectangle Color">
+                    <span class="smart-color-dot" id="edit-rect-color-dot" style="background: #ffffff;"></span>
+                    <span>Color</span>
+                    <span class="smart-color-caret">▾</span>
+                </button>
+                <div class="smart-color-popover" id="edit-rect-color-popover">
+                    <div id="edit-rect-color-palette" class="smart-color-grid">
+                        <button type="button" class="edit-rect-preset-color color-swatch-item active" data-color="#ffffff" style="background: #ffffff;" title="White (Whiteout)"></button>
+                        <button type="button" class="edit-rect-preset-color color-swatch-item" data-color="#0f172a" style="background: #0f172a;" title="Black"></button>
+                        <button type="button" class="edit-rect-preset-color color-swatch-item" data-color="#ef4444" style="background: #ef4444;" title="Red"></button>
+                        <button type="button" class="edit-rect-preset-color color-swatch-item" data-color="#f59e0b" style="background: #f59e0b;" title="Amber / Yellow"></button>
+                        <button type="button" class="edit-rect-preset-color color-swatch-item" data-color="#22c55e" style="background: #22c55e;" title="Green"></button>
+                        <button type="button" class="edit-rect-preset-color color-swatch-item" data-color="#3b82f6" style="background: #3b82f6;" title="Blue"></button>
+                    </div>
+                    <div class="smart-color-custom-row">
+                        <label class="smart-color-custom-label" for="edit-rect-color-picker" title="Pick Custom Color">
+                            <span>🎨 Custom</span>
+                            <span class="smart-color-hex" id="edit-rect-color-hex">#FFFFFF</span>
+                        </label>
+                        <input type="color" id="edit-rect-color-picker" value="#ffffff" style="position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;">
+                    </div>
+                </div>
+            </div>
+            <select id="edit-rect-border-width" class="float-select" title="Border Line Thickness">
+                <option value="1">Line 1px</option>
+                <option value="2" selected>Line 2px</option>
+                <option value="3">Line 3px</option>
+                <option value="4">Line 4px</option>
+                <option value="6">Line 6px</option>
+                <option value="8">Line 8px</option>
+                <option value="12">Line 12px</option>
+            </select>
+        </div>
+        <div class="float-sep"></div>
+        <button type="button" class="float-tool-btn primary" id="btn-edit-save" title="Save changes into PDF file">💾 Save</button>
+        <button type="button" class="float-tool-btn icon-only" id="btn-edit-close" title="Close">✕</button>
     </div>
 
     <!-- Floating Toolbar 3: Placement guide for Signature / Image -->
@@ -1869,7 +2112,7 @@
                 if (version === _renderVersion) {
                     pageTextContents.sort((a, b) => a.pageNum - b.pageNum);
                     const searchInput = document.getElementById('search-input');
-                    if (searchInput.value) performSearch(searchInput.value);
+                    if (searchInput.value) performSearch(searchInput.value, false);
                 }
             } finally {
                 _isLazyRendering = false;
@@ -2113,7 +2356,9 @@
         }
 
         // --- 검색 기능 ---
-        function performSearch(query) {
+        function performSearch(query, shouldScroll = false) {
+            const prevIndex = currentSearchIndex;
+
             // 기존 하이라이트 제거
             document.querySelectorAll('.highlight').forEach(el => el.remove());
             searchResults = [];
@@ -2138,28 +2383,17 @@
 
                     if (text.toLowerCase().includes(normalizedQuery)) {
                         // 매칭된 텍스트의 좌표 계산 (단순화된 방식: 전체 아이템 하이라이트)
-                        // 정확한 부분 문자열 하이라이트는 복잡하므로 아이템 단위로 처리
                         const tx = item.transform;
                         if (!tx) return;
 
-                        // PDF 좌표계 변환: [x, y, w, h] -> Viewport Rect
-                        // item.height가 0인 경우가 많아 transform3를 높이로 사용
                         const x = tx[4];
                         const y = tx[5];
                         const w = item.width;
                         const h = item.height || tx[3]; // 높이 근사값
 
-                        // PDF 좌표계(y는 아래에서 위로)를 Viewport 좌표계로 변환
-                        // viewport.convertToViewportRectangle는 [x1, y1, x2, y2]를 받음
-                        // y는 baseline이므로, top은 y + h (PDF상 위쪽)
-                        // 하지만 pdf.js 텍스트 렌더링에서 y는 baseline.
-                        // 간단히 rect를 구성해서 변환
                         const rect = [x, y, x + w, y + h]; 
                         const viewRect = viewport.convertToViewportRectangle(rect);
                         
-                        // viewRect: [x1, y1, x2, y2] (Canvas 좌표계)
-                        // y1이 top인지 y2가 top인지 확인 필요 (보통 y1 < y2 in canvas)
-                        // pdf.js 변환 결과는 [minX, minY, maxX, maxY] 형태일 수 있음
                         const minX = Math.min(viewRect[0], viewRect[2]);
                         const maxX = Math.max(viewRect[0], viewRect[2]);
                         const minY = Math.min(viewRect[1], viewRect[3]);
@@ -2168,9 +2402,6 @@
                         const div = document.createElement('div');
                         div.className = 'highlight';
                         div.style.left = `${minX}px`;
-                        div.style.top = `${minY - (maxY-minY)}px`; // baseline 보정 필요할 수 있음. 일단 단순 배치
-                        // 텍스트 아이템의 y는 baseline이므로, 실제 박스는 그 위로 그려져야 함.
-                        // 하지만 convertToViewportRectangle이 올바른 박스를 준다고 가정하고 조정
                         div.style.top = `${minY}px`;
                         div.style.width = `${maxX - minX}px`;
                         div.style.height = `${maxY - minY}px`;
@@ -2187,7 +2418,7 @@
                             const idx = searchResults.indexOf(div);
                             if (idx !== -1) {
                                 currentSearchIndex = idx;
-                                updateSearchFocus();
+                                updateSearchFocus(true);
                             }
                         };
                         resultsContainer.appendChild(listItem);
@@ -2197,14 +2428,18 @@
 
             if (searchResults.length > 0) {
                 resultsContainer.classList.add('has-results');
-                currentSearchIndex = 0;
-                updateSearchFocus();
+                if (prevIndex >= 0 && prevIndex < searchResults.length) {
+                    currentSearchIndex = prevIndex;
+                } else {
+                    currentSearchIndex = 0;
+                }
+                updateSearchFocus(shouldScroll);
             } else {
                 document.getElementById('search-status').textContent = '0/0';
             }
         }
 
-        function updateSearchFocus() {
+        function updateSearchFocus(shouldScroll = true) {
             if (currentSearchIndex < 0 || searchResults.length === 0) return;
             
             // 이전 포커스 해제
@@ -2212,15 +2447,21 @@
             document.querySelectorAll('.search-result-item.active').forEach(el => el.classList.remove('active'));
             
             const el = searchResults[currentSearchIndex];
-            el.classList.add('selected');
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (el) {
+                el.classList.add('selected');
+                if (shouldScroll) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
 
             // 리스트 아이템 포커스
             const resultsContainer = document.getElementById('search-results');
             const listItems = resultsContainer.children;
             if (listItems[currentSearchIndex]) {
                 listItems[currentSearchIndex].classList.add('active');
-                listItems[currentSearchIndex].scrollIntoView({ behavior: 'auto', block: 'nearest' });
+                if (shouldScroll) {
+                    listItems[currentSearchIndex].scrollIntoView({ behavior: 'auto', block: 'nearest' });
+                }
             }
             
             document.getElementById('search-status').textContent = `${currentSearchIndex + 1}/${searchResults.length}`;
@@ -2343,7 +2584,8 @@
             if (newScale > 30.0) newScale = 30.0;
 
             // 1페이지 높이에 맞춰지는 스케일(Fit Height) 자동 스냅
-            if (pdfDoc && pdfDoc.numPages > 0) {
+            // (대형 PDF 등에서 fitHeightScale이 작을 때 고정 0.15 절대값 비교 시 줌 트랩이 발생하므로 상대 비율로 체크)
+            if (pdfDoc && pdfDoc.numPages > 0 && !isDirectValue) {
                 const currentPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
                 const page = await pdfDoc.getPage(Math.min(pdfDoc.numPages, Math.max(1, currentPage)));
                 const viewport = page.getViewport({ scale: 1.0, rotation: currentRotation });
@@ -2351,8 +2593,12 @@
                 const containerHeight = scrollContainer.clientHeight - 48;
                 const fitHeightScale = containerHeight / viewport.height;
                 
-                // 확대/축소 중 페이지 높이에 딱 맞는 스케일 근처면 알아서 스냅(맞춤)
-                if (Math.abs(newScale - fitHeightScale) < 0.15) {
+                // 현재 스케일이 이미 fitHeightScale에 매우 근접해있으면 줌 조작 시 트랩에서 벗어나도록 허용
+                const isCurrentlyAtFit = Math.abs(currentScale - fitHeightScale) / fitHeightScale < 0.02;
+                const relativeDiff = Math.abs(newScale - fitHeightScale) / fitHeightScale;
+                
+                // 확대/축소 중 페이지 높이에 딱 맞는 스케일 근처면 스냅 (2.5% 오차 이내일 때만 부드럽게 스냅)
+                if (!isCurrentlyAtFit && relativeDiff < 0.025) {
                     newScale = fitHeightScale;
                 }
             }
@@ -2479,14 +2725,24 @@
             }
         };
 
+        let isMiddleClickPanning = false;
+
         viewerContainer.addEventListener('mousedown', (e) => {
-            if (!isPanMode) return;
-            if (e.button !== 0) return; // 좌클릭만 처리
             // 플로팅 컨트롤러나 툴바 클릭 시 패닝 무시
-            if (e.target.closest('#zoom-controls') || e.target.closest('#page-indicator') || e.target.closest('#sidebar-toggle-btn') || e.target.closest('#search-bar')) return;
+            if (e.target.closest('#zoom-controls') || e.target.closest('#page-indicator') || e.target.closest('#sidebar-toggle-btn') || e.target.closest('#search-bar') || e.target.closest('#context-menu')) return;
+
+            const isLeftPan = (isPanMode && e.button === 0);
+            const isMiddlePan = (e.button === 1);
+
+            if (!isLeftPan && !isMiddlePan) return;
 
             isPanning = true;
+            isMiddleClickPanning = isMiddlePan;
             viewerContainer.classList.add('grabbing');
+            if (isMiddlePan) {
+                viewerContainer.classList.add('pan-mode');
+                document.body.style.userSelect = 'none';
+            }
             startX = e.clientX;
             startY = e.clientY;
             scrollLeft = viewerContainer.scrollLeft;
@@ -2508,12 +2764,23 @@
         const onPanEnd = () => {
             if (isPanning) {
                 isPanning = false;
+                if (isMiddleClickPanning) {
+                    isMiddleClickPanning = false;
+                    if (!isPanMode) {
+                        viewerContainer.classList.remove('pan-mode');
+                    }
+                    document.body.style.userSelect = '';
+                }
                 viewerContainer.classList.remove('grabbing');
             }
         };
 
         window.addEventListener('mousemove', onPanMove);
         window.addEventListener('mouseup', onPanEnd);
+        // 브라우저 기본 가운데 클릭 자동 스크롤(autoscroll) 방지
+        viewerContainer.addEventListener('auxclick', (e) => {
+            if (e.button === 1) e.preventDefault();
+        });
 
         // --- 캡쳐 기능 ---
         function playFlashEffect() {
@@ -2596,7 +2863,7 @@
         };
 
         viewerContainer.addEventListener('click', (e) => {
-            if (!isPageCaptureMode) return;
+            if (!isPageCaptureMode || e.button !== 0 || isPanMode || isPanning) return;
             
             const pageWrapper = e.target.closest('.page-wrapper');
             if (pageWrapper) {
@@ -2673,7 +2940,7 @@
         };
 
         viewerContainer.addEventListener('mousedown', (e) => {
-            if (!isRegionCaptureMode) return;
+            if (!isRegionCaptureMode || e.button !== 0 || isPanMode || isPanning) return;
             e.preventDefault(); // 텍스트 선택(Text Selection Mode) 방지
             
             const pageWrapper = e.target.closest('.page-wrapper');
@@ -2988,20 +3255,20 @@
         searchInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                performSearch(searchInput.value);
+                performSearch(searchInput.value, true);
             }
         });
 
         document.getElementById('search-next').onclick = () => {
             if (searchResults.length === 0) return;
             currentSearchIndex = (currentSearchIndex + 1) % searchResults.length;
-            updateSearchFocus();
+            updateSearchFocus(true);
         };
 
         document.getElementById('search-prev').onclick = () => {
             if (searchResults.length === 0) return;
             currentSearchIndex = (currentSearchIndex - 1 + searchResults.length) % searchResults.length;
-            updateSearchFocus();
+            updateSearchFocus(true);
         };
 
         document.getElementById('rotate-ccw').onclick = async () => {
@@ -3991,7 +4258,7 @@
                 let isDragging = false;
                 let dragStartX, dragStartY, itemStartX, itemStartY;
                 item.addEventListener('mousedown', (e) => {
-                    if (e.target === delBtn || e.target === resizeHandle) return;
+                    if (e.button !== 0 || isPanMode || isPanning || e.target === delBtn || e.target === resizeHandle) return;
                     isDragging = true;
                     dragStartX = e.clientX;
                     dragStartY = e.clientY;
@@ -4003,6 +4270,7 @@
                 let isResizingItem = false;
                 let resizeStartX, resizeStartY, startW, startH;
                 resizeHandle.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0 || isPanMode || isPanning) return;
                     isResizingItem = true;
                     resizeStartX = e.clientX;
                     resizeStartY = e.clientY;
@@ -4354,28 +4622,43 @@
                     window.executeAnnotRedo();
                 });
 
-                // 색상 팔레트 프리셋 바인딩
+                // 스마트 컬러 팝오버 토글 및 프리셋 바인딩
+                const annotColorTrigger = document.getElementById('btn-annot-color-trigger');
+                const annotColorPopover = document.getElementById('annot-color-popover');
+                const annotColorDot = document.getElementById('annot-color-dot');
+                const annotColorHex = document.getElementById('annot-color-hex');
+
+                function syncAnnotColorUI() {
+                    if (annotColorDot) annotColorDot.style.background = annotColor;
+                    if (annotColorHex) annotColorHex.textContent = annotColor.toUpperCase();
+                    const colorPicker = document.getElementById('annot-color-picker');
+                    if (colorPicker) colorPicker.value = annotColor;
+                    document.querySelectorAll('.annot-preset-color').forEach(b => {
+                        const isMatch = (b.dataset.color || '').toLowerCase() === annotColor.toLowerCase();
+                        b.classList.toggle('active', isMatch);
+                    });
+                }
+
+                annotColorTrigger?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const isOpen = annotColorPopover?.classList.toggle('open');
+                    annotColorTrigger.classList.toggle('open', Boolean(isOpen));
+                });
+
                 document.querySelectorAll('.annot-preset-color').forEach(btn => {
-                    btn.addEventListener('click', () => {
-                        document.querySelectorAll('.annot-preset-color').forEach(b => {
-                            b.classList.remove('active');
-                            b.style.border = '1px solid rgba(255,255,255,0.3)';
-                        });
-                        btn.classList.add('active');
-                        btn.style.border = '2px solid #fff';
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
                         annotColor = btn.dataset.color || '#f59e0b';
-                        const colorPicker = document.getElementById('annot-color-picker');
-                        if (colorPicker) colorPicker.value = annotColor;
+                        syncAnnotColorUI();
+                        annotColorPopover?.classList.remove('open');
+                        annotColorTrigger?.classList.remove('open');
                     });
                 });
 
                 const colorPicker = document.getElementById('annot-color-picker');
                 colorPicker?.addEventListener('input', (e) => {
                     annotColor = e.target.value;
-                    document.querySelectorAll('.annot-preset-color').forEach(b => {
-                        b.classList.remove('active');
-                        b.style.border = '1px solid rgba(255,255,255,0.3)';
-                    });
+                    syncAnnotColorUI();
                 });
 
                 document.getElementById('btn-annot-clear')?.addEventListener('click', () => {
@@ -4544,7 +4827,7 @@
                         page.appendChild(canvas);
 
                         canvas.addEventListener('mousedown', (e) => {
-                            if (e.button !== 0) return; // 좌클릭만
+                            if (e.button !== 0 || isPanMode || isPanning) return; // 좌클릭만
                             e.stopPropagation();
 
                             const rect = canvas.getBoundingClientRect();
@@ -4667,7 +4950,7 @@
 
             function removePageAnnotationLayer() {
                 document.querySelectorAll('.annot-canvas').forEach(c => {
-                    c.style.display = 'none';
+                    c.style.display = 'block';
                     c.style.pointerEvents = 'none';
                 });
             }
@@ -4695,81 +4978,65 @@
                 note.style.position = 'absolute';
                 note.style.left = `${Math.max(10, x - 20)}px`;
                 note.style.top = `${Math.max(10, y - 20)}px`;
-                note.style.width = '190px';
-                note.style.minHeight = '120px';
+                note.style.width = '180px';
+                note.style.minHeight = '100px';
                 note.style.background = '#fef08a';
-                note.style.border = '1px solid #facc15';
-                note.style.borderRadius = '6px';
-                note.style.boxShadow = '0 8px 20px rgba(0,0,0,0.35)';
+                note.style.border = 'none';
+                note.style.borderRadius = '0px';
+                note.style.boxShadow = 'none';
                 note.style.zIndex = '50';
                 note.style.display = 'flex';
                 note.style.flexDirection = 'column';
                 note.style.overflow = 'hidden';
 
-                // 노트 본체 클릭 시 이벤트 차단
-                note.addEventListener('mousedown', (e) => e.stopPropagation());
-
-                // 상단 헤더 바
-                const header = document.createElement('div');
-                header.style.padding = '4px 8px';
-                header.style.background = '#fde047';
-                header.style.cursor = 'move';
-                header.style.userSelect = 'none';
-                header.style.display = 'flex';
-                header.style.justifyContent = 'space-between';
-                header.style.alignItems = 'center';
-                header.style.fontSize = '11px';
-                header.style.fontWeight = '600';
-                header.style.color = '#854d0e';
-                header.innerHTML = '<span>💬 Note</span>';
-
-                const del = document.createElement('button');
-                del.textContent = '✕';
-                del.style.background = 'transparent';
-                del.style.border = 'none';
-                del.style.color = '#b91c1c';
-                del.style.fontSize = '12px';
-                del.style.cursor = 'pointer';
-                del.style.padding = '0 4px';
-                del.onclick = (e) => {
-                    e.stopPropagation();
-                    note.remove();
-                };
-                header.appendChild(del);
-
-                // 메모 텍스트에어리어
+                // 메모 텍스트에어리어 (저장 시 PDF에 그려지는 실제 모양과 동일하게 구성)
                 const textarea = document.createElement('textarea');
-                textarea.placeholder = 'Type your note here...';
+                textarea.placeholder = 'Type note...';
                 textarea.style.flex = '1';
                 textarea.style.width = '100%';
-                textarea.style.minHeight = '80px';
+                textarea.style.minHeight = '100px';
                 textarea.style.background = 'transparent';
                 textarea.style.border = 'none';
                 textarea.style.outline = 'none';
-                textarea.style.resize = 'vertical';
+                textarea.style.resize = 'none';
                 textarea.style.fontFamily = 'sans-serif';
                 textarea.style.fontSize = '12.5px';
+                textarea.style.lineHeight = '1.35';
                 textarea.style.color = '#713f12';
                 textarea.style.padding = '6px 8px';
                 textarea.style.boxSizing = 'border-box';
+                textarea.style.cursor = 'text';
 
-                // 텍스트 입력 방해 차단
-                textarea.addEventListener('mousedown', (e) => e.stopPropagation());
-                textarea.addEventListener('click', (e) => e.stopPropagation());
-
-                // 헤더 드래그로 노트 이동
-                header.addEventListener('mousedown', (e) => {
-                    if (e.target === del) return;
-                    activeDraggingNote = note;
-                    noteDragStartX = e.clientX;
-                    noteDragStartY = e.clientY;
-                    noteInitLeft = note.offsetLeft;
-                    noteInitTop = note.offsetTop;
-                    e.preventDefault();
-                    e.stopPropagation();
+                // 빈 메모일 경우 포커스 해제 시 자동 제거
+                textarea.addEventListener('blur', () => {
+                    if (!textarea.value.trim()) {
+                        note.remove();
+                    }
                 });
 
-                note.appendChild(header);
+                // 지우개 모드에서는 클릭 시 메모 삭제, 그 외에는 드래그 이동 지원
+                note.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0 || isPanMode || isPanning) return;
+                    e.stopPropagation();
+                    if (isAnnotActive && annotMode === 'eraser') {
+                        note.remove();
+                        e.preventDefault();
+                        return;
+                    }
+                    // Alt 키 또는 테두리 가장자리 드래그 시 위치 이동
+                    const r = note.getBoundingClientRect();
+                    const isEdge = (e.clientY - r.top < 10 || r.bottom - e.clientY < 8 || e.clientX - r.left < 8 || r.right - e.clientX < 8);
+                    if (isEdge || e.altKey || document.activeElement !== textarea) {
+                        activeDraggingNote = note;
+                        noteDragStartX = e.clientX;
+                        noteDragStartY = e.clientY;
+                        noteInitLeft = note.offsetLeft;
+                        noteInitTop = note.offsetTop;
+                    }
+                });
+
+                textarea.addEventListener('click', (e) => e.stopPropagation());
+
                 note.appendChild(textarea);
                 pageEl.appendChild(note);
 
@@ -4790,6 +5057,74 @@
             };
 
             let hasSetupEditListeners = false;
+            let editRectFillMode = 'fill'; // 'fill' | 'outline'
+            let editRectColor = '#ffffff';
+            let editRectBorderWidth = 2;
+            let selectedRectBox = null;
+
+            function hexToPdfRgb(hex) {
+                let c = (hex || '#ffffff').replace('#', '');
+                if (c.length === 3) c = c.split('').map(x => x + x).join('');
+                const r = (parseInt(c.substring(0, 2), 16) || 0) / 255;
+                const g = (parseInt(c.substring(2, 4), 16) || 0) / 255;
+                const b = (parseInt(c.substring(4, 6), 16) || 0) / 255;
+                return PDFLib.rgb(r, g, b);
+            }
+
+            function applyRectBoxStyle(box, fillMode, color, borderWidth) {
+                if (!box) return;
+                box.dataset.fillMode = fillMode;
+                box.dataset.color = color;
+                box.dataset.borderWidth = String(borderWidth);
+                box.style.borderRadius = '0px';
+                if (fillMode === 'outline') {
+                    box.style.background = 'transparent';
+                    box.style.border = `${borderWidth}px solid ${color}`;
+                } else {
+                    box.style.background = color;
+                    box.style.border = 'none';
+                }
+            }
+
+            function syncEditRectToolbarUI() {
+                document.getElementById('btn-rect-mode-fill')?.classList.toggle('active', editRectFillMode === 'fill');
+                document.getElementById('btn-rect-mode-outline')?.classList.toggle('active', editRectFillMode === 'outline');
+
+                const colorPicker = document.getElementById('edit-rect-color-picker');
+                if (colorPicker) colorPicker.value = editRectColor;
+
+                const colorDot = document.getElementById('edit-rect-color-dot');
+                if (colorDot) colorDot.style.background = editRectColor;
+
+                const colorHex = document.getElementById('edit-rect-color-hex');
+                if (colorHex) colorHex.textContent = editRectColor.toUpperCase();
+
+                document.querySelectorAll('.edit-rect-preset-color').forEach(btn => {
+                    const isMatch = (btn.dataset.color || '').toLowerCase() === editRectColor.toLowerCase();
+                    btn.classList.toggle('active', isMatch);
+                });
+
+                const bwSelect = document.getElementById('edit-rect-border-width');
+                if (bwSelect) bwSelect.value = String(editRectBorderWidth);
+            }
+
+            function selectRectBox(box) {
+                document.querySelectorAll('.edit-whiteout-box.selected').forEach(el => el.classList.remove('selected'));
+                selectedRectBox = box || null;
+                if (selectedRectBox) {
+                    selectedRectBox.classList.add('selected');
+                }
+            }
+
+            window.addEventListener('keydown', (e) => {
+                if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRectBox && document.body.contains(selectedRectBox)) {
+                    const activeTag = document.activeElement?.tagName;
+                    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+                    selectedRectBox.remove();
+                    selectedRectBox = null;
+                    e.preventDefault();
+                }
+            });
 
             if (btnEditPdf && toolbarEdit) {
                 btnEditPdf.onclick = () => {
@@ -4817,15 +5152,108 @@
 
                 document.getElementById('btn-edit-whiteout')?.addEventListener('click', () => {
                     editMode = 'whiteout';
-                    document.querySelectorAll('#toolbar-edit .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    syncEditRectToolbarUI();
                     document.getElementById('btn-edit-whiteout').classList.add('active');
-                    showToast('Drag on the page to cover areas in white.', '◻️', 2500);
+                    document.getElementById('btn-edit-text')?.classList.remove('active');
+                    document.getElementById('btn-edit-whiteout')?.classList.add('active');
+                    syncEditRectToolbarUI();
+                    showToast('Drag on the page to draw a rectangle (Fill or Outline).', '◻️', 2500);
+
+                    // 사각형 스타일 컨트롤 이벤트 바인딩 (최초 1회)
+                });
+
+                document.getElementById('btn-rect-mode-fill')?.addEventListener('click', () => {
+                    editMode = 'whiteout';
+                    editRectFillMode = 'fill';
+                    document.getElementById('btn-edit-text')?.classList.remove('active');
+                    document.getElementById('btn-edit-whiteout')?.classList.add('active');
+                    syncEditRectToolbarUI();
+                    if (selectedRectBox && document.body.contains(selectedRectBox)) {
+                        applyRectBoxStyle(selectedRectBox, editRectFillMode, editRectColor, editRectBorderWidth);
+                    }
+                });
+
+                document.getElementById('btn-rect-mode-outline')?.addEventListener('click', () => {
+                    editMode = 'whiteout';
+                    editRectFillMode = 'outline';
+                    if (editRectColor.toLowerCase() === '#ffffff') {
+                        editRectColor = '#ef4444';
+                    }
+                    document.getElementById('btn-edit-text')?.classList.remove('active');
+                    document.getElementById('btn-edit-whiteout')?.classList.add('active');
+                    syncEditRectToolbarUI();
+                    if (selectedRectBox && document.body.contains(selectedRectBox)) {
+                        applyRectBoxStyle(selectedRectBox, editRectFillMode, editRectColor, editRectBorderWidth);
+                    }
+                });
+
+                const editColorTrigger = document.getElementById('btn-edit-color-trigger');
+                const editColorPopover = document.getElementById('edit-rect-color-popover');
+
+                editColorTrigger?.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const isOpen = editColorPopover?.classList.toggle('open');
+                    editColorTrigger.classList.toggle('open', Boolean(isOpen));
+                });
+
+                document.addEventListener('mousedown', (e) => {
+                    if (!e.target.closest('.smart-color-wrap')) {
+                        document.querySelectorAll('.smart-color-popover.open').forEach(el => el.classList.remove('open'));
+                        document.querySelectorAll('.smart-color-btn.open').forEach(el => el.classList.remove('open'));
+                    }
+                });
+
+                document.querySelectorAll('.edit-rect-preset-color').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        editMode = 'whiteout';
+                        editRectColor = btn.dataset.color || '#ffffff';
+                        document.getElementById('btn-edit-text')?.classList.remove('active');
+                        document.getElementById('btn-edit-whiteout')?.classList.add('active');
+                        syncEditRectToolbarUI();
+                        editColorPopover?.classList.remove('open');
+                        editColorTrigger?.classList.remove('open');
+                        if (selectedRectBox && document.body.contains(selectedRectBox)) {
+                            applyRectBoxStyle(selectedRectBox, editRectFillMode, editRectColor, editRectBorderWidth);
+                        }
+                    });
+                });
+
+                document.getElementById('edit-rect-color-picker')?.addEventListener('input', (e) => {
+                    editMode = 'whiteout';
+                    editRectColor = e.target.value || '#ffffff';
+                    document.getElementById('btn-edit-text')?.classList.remove('active');
+                    document.getElementById('btn-edit-whiteout')?.classList.add('active');
+                    syncEditRectToolbarUI();
+                    if (selectedRectBox && document.body.contains(selectedRectBox)) {
+                        applyRectBoxStyle(selectedRectBox, editRectFillMode, editRectColor, editRectBorderWidth);
+                    }
+                });
+
+                document.getElementById('edit-rect-border-width')?.addEventListener('change', (e) => {
+                    editMode = 'whiteout';
+                    editRectBorderWidth = parseInt(e.target.value) || 2;
+                    if (editRectFillMode !== 'outline') {
+                        editRectFillMode = 'outline';
+                        if (editRectColor.toLowerCase() === '#ffffff') {
+                            editRectColor = '#ef4444';
+                        }
+                    }
+                    document.getElementById('btn-edit-text')?.classList.remove('active');
+                    document.getElementById('btn-edit-whiteout')?.classList.add('active');
+                    syncEditRectToolbarUI();
+                    if (selectedRectBox && document.body.contains(selectedRectBox)) {
+                        applyRectBoxStyle(selectedRectBox, editRectFillMode, editRectColor, editRectBorderWidth);
+                    }
                 });
 
                 document.getElementById('btn-edit-text')?.addEventListener('click', () => {
                     editMode = 'text';
-                    document.querySelectorAll('#toolbar-edit .float-tool-btn').forEach(b => b.classList.remove('active'));
+                    syncEditRectToolbarUI();
                     document.getElementById('btn-edit-text').classList.add('active');
+                    document.getElementById('btn-edit-whiteout')?.classList.remove('active');
+                    document.getElementById('btn-edit-text')?.classList.add('active');
+                    selectRectBox(null);
                     showToast('Click anywhere on the page to insert text.', '🔤', 2500);
                 });
 
@@ -4874,13 +5302,36 @@
                             const rw = bRect.width / pRect.width;
                             const rh = bRect.height / pRect.height;
 
-                            page.drawRectangle({
-                                x: rx * pW,
-                                y: pH - (ry * pH) - (rh * pH),
-                                width: rw * pW,
-                                height: rh * pH,
-                                color: PDFLib.rgb(1, 1, 1)
-                            });
+                            const fillMode = box.dataset.fillMode || 'fill';
+                            const hexColor = box.dataset.color || '#ffffff';
+                            const rgbColor = hexToPdfRgb(hexColor);
+                            const borderPx = parseFloat(box.dataset.borderWidth) || 2;
+
+                            if (fillMode === 'outline') {
+                                const scaleRatio = pW / pRect.width;
+                                const scaledBw = Math.max(0.5, borderPx * scaleRatio);
+                                const rectW = Math.max(1, rw * pW - scaledBw);
+                                const rectH = Math.max(1, rh * pH - scaledBw);
+                                const rectX = rx * pW + scaledBw / 2;
+                                const rectY = pH - (ry * pH) - (rh * pH) + scaledBw / 2;
+
+                                page.drawRectangle({
+                                    x: rectX,
+                                    y: rectY,
+                                    width: rectW,
+                                    height: rectH,
+                                    borderColor: rgbColor,
+                                    borderWidth: scaledBw
+                                });
+                            } else {
+                                page.drawRectangle({
+                                    x: rx * pW,
+                                    y: pH - (ry * pH) - (rh * pH),
+                                    width: rw * pW,
+                                    height: rh * pH,
+                                    color: rgbColor
+                                });
+                            }
                         });
 
                         // 텍스트 박스들 반영
@@ -4962,8 +5413,23 @@
                 let startX, startY, isDraggingBox = false, tempBox = null, curPageWrapper = null;
 
                 viewerEl.addEventListener('mousedown', (e) => {
-                    if (!isEditActive) return;
-                    if (e.target.closest('.placed-overlay-item') || e.target.closest('.pdf-floating-toolbar') || e.target.closest('.annot-sticky-note')) return;
+                    if (!isEditActive || e.button !== 0 || isPanMode || isPanning) return;
+                    if (e.target.closest('.pdf-floating-toolbar') || e.target.closest('.annot-sticky-note') || e.target.closest('.item-del-btn') || e.target.closest('.resize-handle')) return;
+                    const hitOverlay = e.target.closest('.placed-overlay-item');
+                    if (hitOverlay) {
+                        // Add Text 모드일 때는 기존 사각형(Whiteout/Outline) 위에도 텍스트를 입력할 수 있도록 허용
+                        if (editMode === 'text' && hitOverlay.classList.contains('edit-whiteout-box')) {
+                            // 통과하여 텍스트 박스 생성
+                        } else if (editMode === 'whiteout' && hitOverlay.classList.contains('edit-whiteout-box') && hitOverlay.dataset.fillMode === 'outline') {
+                            // 테두리 전용 사각형의 내부 빈 공간 클릭 시 새 사각형을 그릴 수 있도록 허용
+                            const r = hitOverlay.getBoundingClientRect();
+                            const bw = Math.max(10, (parseFloat(hitOverlay.dataset.borderWidth) || 2) + 6);
+                            const isInsideHollow = (e.clientX > r.left + bw && e.clientX < r.right - bw && e.clientY > r.top + bw && e.clientY < r.bottom - bw);
+                            if (!isInsideHollow) return;
+                        } else {
+                            return;
+                        }
+                    }
 
                     const pageWrapper = e.target.closest('.page-wrapper');
                     if (!pageWrapper) return;
@@ -4984,8 +5450,8 @@
 
                         tempBox = document.createElement('div');
                         tempBox.className = 'placed-overlay-item edit-whiteout-box';
-                        tempBox.style.background = '#ffffff';
-                        tempBox.style.border = '1px solid #94a3b8';
+                        applyRectBoxStyle(tempBox, editRectFillMode, editRectColor, editRectBorderWidth);
+                        tempBox.style.zIndex = '48';
                         tempBox.style.left = `${startX}px`;
                         tempBox.style.top = `${startY}px`;
                         tempBox.style.width = '0px';
@@ -5028,9 +5494,85 @@
                         isDraggingBox = false;
                         if (tempBox && (parseInt(tempBox.style.width) < 8 || parseInt(tempBox.style.height) < 8)) {
                             tempBox.remove();
+                        } else if (tempBox) {
+                            setupRectBoxInteractions(tempBox);
+                            selectRectBox(tempBox);
                         }
                         tempBox = null;
                     }
+                });
+            }
+
+            function setupRectBoxInteractions(box) {
+                const delBtn = box.querySelector('.item-del-btn');
+                const resizeHandle = document.createElement('div');
+                resizeHandle.className = 'resize-handle';
+                resizeHandle.title = 'Drag to resize rectangle';
+                box.appendChild(resizeHandle);
+
+                let isMoving = false;
+                let moveStartX = 0, moveStartY = 0, boxStartX = 0, boxStartY = 0;
+
+                box.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0 || isPanMode || isPanning) return;
+                    if (e.target === delBtn || e.target === resizeHandle) return;
+                    if (editMode === 'text') return; // Add Text 모드에서는 박스 위 클릭으로 텍스트 추가 허용
+
+                    // 테두리 전용(outline) 사각형의 내부 빈 공간을 클릭한 경우 새 사각형 그리기를 위해 통과
+                    if (box.dataset.fillMode === 'outline') {
+                        const r = box.getBoundingClientRect();
+                        const bw = Math.max(10, (parseFloat(box.dataset.borderWidth) || 2) + 6);
+                        const isInsideHollow = (e.clientX > r.left + bw && e.clientX < r.right - bw && e.clientY > r.top + bw && e.clientY < r.bottom - bw);
+                        if (isInsideHollow) return;
+                    }
+
+                    selectRectBox(box);
+                    // 선택한 사각형의 속성을 툴바 UI와 동기화
+                    editRectFillMode = box.dataset.fillMode || 'fill';
+                    editRectColor = box.dataset.color || '#ffffff';
+                    editRectBorderWidth = parseInt(box.dataset.borderWidth) || 2;
+                    syncEditRectToolbarUI();
+
+                    isMoving = true;
+                    moveStartX = e.clientX;
+                    moveStartY = e.clientY;
+                    boxStartX = box.offsetLeft;
+                    boxStartY = box.offsetTop;
+                    e.stopPropagation();
+                    e.preventDefault();
+                });
+
+                let isResizingRect = false;
+                let rStartX = 0, rStartY = 0, startW = 0, startH = 0;
+                resizeHandle.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0 || isPanMode || isPanning) return;
+                    selectRectBox(box);
+                    isResizingRect = true;
+                    rStartX = e.clientX;
+                    rStartY = e.clientY;
+                    startW = box.offsetWidth;
+                    startH = box.offsetHeight;
+                    e.stopPropagation();
+                    e.preventDefault();
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (isMoving) {
+                        const dx = e.clientX - moveStartX;
+                        const dy = e.clientY - moveStartY;
+                        box.style.left = `${Math.max(0, boxStartX + dx)}px`;
+                        box.style.top = `${Math.max(0, boxStartY + dy)}px`;
+                    } else if (isResizingRect) {
+                        const dw = e.clientX - rStartX;
+                        const dh = e.clientY - rStartY;
+                        box.style.width = `${Math.max(12, startW + dw)}px`;
+                        box.style.height = `${Math.max(12, startH + dh)}px`;
+                    }
+                });
+
+                window.addEventListener('mouseup', () => {
+                    isMoving = false;
+                    isResizingRect = false;
                 });
             }
 
@@ -5038,33 +5580,78 @@
                 const box = document.createElement('div');
                 box.className = 'placed-overlay-item edit-text-box';
                 box.style.left = `${x}px`;
-                box.style.top = `${y}px`;
-                box.style.background = 'rgba(255, 255, 255, 0.95)';
-                box.style.padding = '2px 6px';
+                box.style.top = `${y - 10}px`;
+                box.style.background = 'transparent';
+                box.style.border = 'none';
+                box.style.padding = '0';
+                box.style.zIndex = '52';
                 box.dataset.pageNum = pageWrapper.id.replace('page-', '');
 
                 const input = document.createElement('input');
                 input.type = 'text';
-                input.placeholder = 'Type text here...';
+                input.placeholder = 'Type text...';
                 input.style.border = 'none';
                 input.style.background = 'transparent';
                 input.style.outline = 'none';
                 input.style.fontSize = '14px';
+                input.style.lineHeight = '1';
                 input.style.color = '#000';
                 input.style.fontFamily = 'sans-serif';
+                input.style.padding = '0';
+                input.style.margin = '0';
+                input.style.minWidth = '40px';
 
-                const del = document.createElement('div');
-                del.className = 'item-del-btn';
-                del.textContent = '✕';
-                del.onclick = (e) => {
-                    e.stopPropagation();
-                    del.closest('.placed-overlay-item')?.remove();
+                const syncInputWidth = () => {
+                    const val = input.value || input.placeholder || '';
+                    input.style.width = `${Math.max(40, val.length * 9 + 12)}px`;
                 };
+                input.addEventListener('input', syncInputWidth);
+                syncInputWidth();
+
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === 'Escape') {
+                        input.blur();
+                    }
+                });
+
+                input.addEventListener('blur', () => {
+                    if (!input.value.trim()) {
+                        box.remove();
+                    } else {
+                        syncInputWidth();
+                    }
+                });
+
+                // 드래그로 텍스트 위치 미세 조정 가능
+                let isDraggingText = false;
+                let tStartX = 0, tStartY = 0, boxInitX = 0, boxInitY = 0;
+                box.addEventListener('mousedown', (e) => {
+                    if (e.button !== 0 || isPanMode || isPanning) return;
+                    isDraggingText = true;
+                    tStartX = e.clientX;
+                    tStartY = e.clientY;
+                    boxInitX = box.offsetLeft;
+                    boxInitY = box.offsetTop;
+                    e.stopPropagation();
+                });
+
+                window.addEventListener('mousemove', (e) => {
+                    if (!isDraggingText) return;
+                    const dx = e.clientX - tStartX;
+                    const dy = e.clientY - tStartY;
+                    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) {
+                        box.style.left = `${Math.max(0, boxInitX + dx)}px`;
+                        box.style.top = `${Math.max(0, boxInitY + dy)}px`;
+                    }
+                });
+
+                window.addEventListener('mouseup', () => {
+                    isDraggingText = false;
+                });
 
                 box.appendChild(input);
-                box.appendChild(del);
                 pageWrapper.appendChild(box);
-                setTimeout(() => input.focus(), 60);
+                setTimeout(() => input.focus(), 40);
             }
 
             // === Header Buttons: Capture ===
