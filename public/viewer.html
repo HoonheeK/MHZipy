@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <title>PDF Viewer</title>
     <style>
         body { margin: 0; background-color: #525659; font-family: sans-serif; overflow: hidden; }
@@ -246,14 +247,66 @@
         }
         .sidebar-tab:hover { color: #333; background: #e8e8e8; }
         .sidebar-tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
-        .sidebar-panel { display: none; flex: 1; overflow-y: auto; }
-        .sidebar-panel.active { display: block; }
-        #outline-container { padding: 10px; flex: 1; overflow-y: auto; }
-        .outline-item { cursor: pointer; padding: 4px 0; font-size: 13px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .outline-item:hover { color: #000; background-color: #e2e2e2; }
+        .sidebar-panel { display: none; flex-direction: column; flex: 1; height: 100%; overflow: hidden; }
+        .sidebar-panel.active { display: flex; }
+        #outline-container, #bookmark-container, #pages-panel { padding: 8px 6px; flex: 1; overflow-y: auto; outline: none; }
+        #pages-panel { padding: 0; }
+        .outline-item {
+            cursor: pointer; padding: 5px 8px; font-size: 13px; color: #334155;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            border-radius: 5px; margin: 1px 0; display: flex; align-items: center; gap: 4px;
+            transition: background 0.12s, color 0.12s; user-select: none;
+        }
+        .outline-item:hover { color: #0f172a; background-color: #e2e8f0; }
+        .outline-item.selected {
+            background-color: #dbeafe !important; color: #1d4ed8 !important;
+            font-weight: 600; box-shadow: inset 0 0 0 1px #93c5fd;
+        }
+        .outline-item-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
         .outline-children { margin-left: 16px; display: none; }
         .outline-children.expanded { display: block; }
-        .outline-toggle { display: inline-block; width: 16px; text-align: center; cursor: pointer; color: #666; user-select: none; }
+        .outline-toggle {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 16px; height: 16px; font-size: 10px; cursor: pointer;
+            color: #64748b; user-select: none; flex-shrink: 0; border-radius: 3px;
+        }
+        .outline-toggle:hover { background-color: rgba(0,0,0,0.08); color: #0f172a; }
+
+        /* Bookmark Tab Styling */
+        #bookmark-action-bar {
+            padding: 8px 10px; display: flex; align-items: center; gap: 6px;
+            border-bottom: 1px solid #e2e8f0; background: #f8fafc; flex-shrink: 0;
+        }
+        .bookmark-empty-hint {
+            padding: 24px 12px; text-align: center; color: #94a3b8;
+            font-size: 12.5px; line-height: 1.5;
+        }
+        .bookmark-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 8px; margin: 2px 0; border-radius: 6px; font-size: 13px;
+            color: #334155; cursor: pointer; border: 1px solid transparent;
+            transition: all 0.12s ease; user-select: none;
+        }
+        .bookmark-item:hover { background: #f1f5f9; border-color: #e2e8f0; }
+        .bookmark-item.selected {
+            background: #eff6ff !important; border-color: #bfdbfe !important;
+            color: #1d4ed8 !important; font-weight: 500;
+        }
+        .bookmark-item-main { display: flex; align-items: center; gap: 6px; overflow: hidden; flex: 1; }
+        .bookmark-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+        .bookmark-page-badge {
+            font-size: 11px; padding: 1px 5px; background: #e2e8f0; color: #475569;
+            border-radius: 4px; font-weight: 600; flex-shrink: 0;
+        }
+        .bookmark-item.selected .bookmark-page-badge { background: #dbeafe; color: #1d4ed8; }
+        .bookmark-actions { display: flex; align-items: center; gap: 2px; margin-left: 6px; opacity: 0.2; transition: opacity 0.15s ease; }
+        .bookmark-item:hover .bookmark-actions, .bookmark-item.selected .bookmark-actions { opacity: 1; }
+        .bookmark-btn {
+            background: transparent; border: none; padding: 2px 5px; cursor: pointer;
+            font-size: 11px; color: #64748b; border-radius: 3px; line-height: 1.2;
+        }
+        .bookmark-btn:hover { background: #e2e8f0; color: #0f172a; }
+        .bookmark-btn.del:hover { background: #fee2e2; color: #ef4444; }
 
         /* Page Thumbnails */
         #pages-container { padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
@@ -290,13 +343,24 @@
         }
         #viewer-content {
             display: flex;
-            flex-direction: column;
-            align-items: center;
             min-width: 100%;
-            width: max-content;
             gap: 24px;
             margin: 0 auto;
             box-sizing: border-box;
+        }
+        #viewer-content.multi-grid {
+            flex-flow: row wrap;
+            justify-content: safe center;
+            align-content: flex-start;
+            align-items: flex-start;
+            width: 100%;
+        }
+        #viewer-content.single-column {
+            flex-direction: column;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: flex-start;
+            width: max-content;
         }
         
         /* Page & Canvas */
@@ -309,9 +373,11 @@
             transition: outline 0.15s, box-shadow 0.15s;
             outline: 3px solid transparent;
             outline-offset: 3px;
+            box-sizing: border-box;
+        }
+        #viewer-content.single-column .page-wrapper {
             margin-left: auto;
             margin-right: auto;
-            box-sizing: border-box;
         }
         .page-wrapper.selected { outline: 3px solid #1a73e8; box-shadow: 0 0 18px rgba(26, 115, 232, 0.5); }
         canvas { display: block; }
@@ -399,34 +465,77 @@
         }
         #page-number-input::-webkit-inner-spin-button, #page-number-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
-        /* Zoom Controls */
+        /* Zoom Controls - Compact Floating Toolbar */
         #zoom-controls {
-            position: absolute; bottom: 20px; right: 20px;
-            background: rgba(0,0,0,0.6); color: white;
-            padding: 4px; border-radius: 4px;
-            display: flex; align-items: center; gap: 8px;
-            z-index: 50; user-select: none;
+            position: absolute; bottom: 16px; right: 16px;
+            background: rgba(15, 23, 42, 0.90);
+            backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+            color: #f1f5f9;
+            padding: 3px 5px; border-radius: 8px;
+            display: flex; align-items: center; gap: 2px;
+            z-index: 100; user-select: none;
+            transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.2s;
+        }
+        #zoom-controls.hidden-bar {
+            opacity: 0;
+            transform: translateY(12px) scale(0.96);
+            pointer-events: none;
+            visibility: hidden;
         }
         .zoom-btn {
-            background: transparent; border: none; color: white;
-            font-size: 18px; cursor: pointer; width: 24px; height: 24px;
+            background: transparent; border: none; color: #cbd5e1;
+            font-size: 13px; cursor: pointer; width: 25px; height: 25px;
+            border-radius: 5px;
             display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s, color 0.15s, transform 0.1s;
+            padding: 0; line-height: 1; flex-shrink: 0;
         }
-        .zoom-btn:hover { background: rgba(255,255,255,0.2); border-radius: 2px; }
-        #zoom-level { font-size: 14px; width: 50px; text-align: center; background: transparent; border: 1px solid transparent; color: white; border-radius: 2px; outline: none; }
-        #zoom-level:focus { border: 1px solid #888; background: #333; }
+        .zoom-btn:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+        .zoom-btn:active { transform: scale(0.94); }
+        .zoom-btn.active { background: #2563eb; color: #ffffff; box-shadow: 0 1px 4px rgba(37, 99, 235, 0.4); }
+        .zoom-divider {
+            width: 1px; height: 14px; background: rgba(255, 255, 255, 0.16); margin: 0 3px; flex-shrink: 0;
+        }
+        #zoom-level {
+            font-size: 11.5px; width: 44px; height: 22px; text-align: center;
+            background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14);
+            color: #f8fafc; border-radius: 4px; outline: none; padding: 0; font-family: inherit;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+        #zoom-level:focus { border-color: #3b82f6; background: rgba(15, 23, 42, 0.95); }
+        #zoom-controls-restore-btn {
+            position: absolute; bottom: 16px; right: 16px;
+            background: rgba(15, 23, 42, 0.90);
+            backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+            color: #cbd5e1; font-size: 14px;
+            width: 32px; height: 32px; border-radius: 8px;
+            cursor: pointer; display: none; align-items: center; justify-content: center;
+            z-index: 100; transition: all 0.15s ease;
+        }
+        #zoom-controls-restore-btn:hover {
+            background: #1e293b; color: #ffffff; transform: scale(1.06);
+        }
+        #zoom-controls-restore-btn.visible {
+            display: flex;
+        }
 
         /* Context Menu */
-        #context-menu {
-            display: none; position: absolute; z-index: 1000;
-            background: white; border: 1px solid #ccc; border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15); padding: 4px 0;
+        #context-menu, #bookmark-context-menu {
+            display: none; position: absolute; z-index: 3000;
+            background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1); padding: 5px; min-width: 170px; user-select: none;
         }
         .context-menu-item {
-            display: block; width: 100%; text-align: left; padding: 6px 16px;
-            background: none; border: none; cursor: pointer; font-size: 14px; color: #333;
+            display: flex; align-items: center; gap: 8px; width: 100%;
+            text-align: left; padding: 7px 12px; background: none; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 500; color: #334155; transition: background-color 0.12s, color 0.12s; box-sizing: border-box;
         }
-        .context-menu-item:hover { background-color: #f0f0f0; }
+        .context-menu-item:hover { background-color: #f1f5f9; color: #0f172a; }
+        .context-menu-item.danger:hover { background-color: #fee2e2; color: #dc2626; }
+        .context-menu-sep { height: 1px; background-color: #e2e8f0; margin: 4px 0; }
 
         /* Pan Mode & Hand Tool Cursors */
         #viewer-scroll-container.pan-mode,
@@ -1090,20 +1199,20 @@
             <div id="sidebar-header">
                 <div id="sidebar-tabs">
                     <button class="sidebar-tab active" data-tab="outline">Outline</button>
+                    <button class="sidebar-tab" data-tab="bookmark">Bookmark</button>
                     <button class="sidebar-tab" data-tab="pages">Pages</button>
                 </div>
                 <button class="search-btn" id="sidebar-close-btn" style="margin-right: 8px;">✕</button>
             </div>
             <div id="outline-panel" class="sidebar-panel active">
-                <div id="outline-action-bar">
-                    <button type="button" class="outline-action-btn" id="btn-add-bookmark" title="Add bookmark for current page">
-                        <span>➕ Add Bookmark</span>
-                    </button>
-                    <button type="button" class="outline-action-btn" id="btn-save-bookmarks" title="Save bookmarks into PDF">
-                        <span>💾 Save</span>
-                    </button>
+                <div id="outline-container" tabindex="0"></div>
+            </div>
+            <div id="bookmark-panel" class="sidebar-panel">
+                <div id="bookmark-action-bar">
+                    <button type="button" class="outline-action-btn" id="btn-add-bookmark" title="Add bookmark for current page"><span>➕ Add</span></button>
+                    <button type="button" class="outline-action-btn" id="btn-save-bookmarks" title="Save bookmarks into PDF"><span>💾 Save to PDF</span></button>
                 </div>
-                <div id="outline-container"></div>
+                <div id="bookmark-container" tabindex="0"></div>
             </div>
             <div id="pages-panel" class="sidebar-panel">
                 <div id="pages-container"></div>
@@ -1144,20 +1253,38 @@
                 <button class="zoom-btn" id="mode-toggle" title="Text Selection Mode (Click to switch to Hand Tool)">👆</button>
                 <button class="zoom-btn" id="capture-full" title="Capture Page (Click page to copy)">📷</button>
                 <button class="zoom-btn" id="capture-region" title="Capture Region (Drag box to copy)">🔲</button>
-                <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
+                <span class="zoom-divider"></span>
+                <button class="zoom-btn active" id="btn-layout-grid" title="Multi Grid Mode (다중 그리드 보기)">⊞</button>
+                <button class="zoom-btn" id="btn-layout-single" title="Single Column Mode (세로 1열 보기)">📄</button>
+                <span class="zoom-divider"></span>
                 <button class="zoom-btn" id="rotate-ccw" title="Rotate Counter-Clockwise">↺</button>
                 <button class="zoom-btn" id="rotate-cw" title="Rotate Clockwise">↻</button>
-                <span style="border-left: 1px solid rgba(255,255,255,0.3); height: 16px; margin: 0 4px;"></span>
+                <span class="zoom-divider"></span>
                 <button class="zoom-btn" id="zoom-out" title="Zoom Out">−</button>
-                <input type="text" id="zoom-level" value="150%">
+                <input type="text" id="zoom-level" value="150%" title="Zoom Level">
                 <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
                 <button class="zoom-btn" id="fit-width" title="Fit to Width">↔</button>
+                <span class="zoom-divider"></span>
+                <button class="zoom-btn" id="zoom-controls-hide-btn" title="Hide Menu Bar (메뉴 바 숨기기)" style="font-size: 11px; opacity: 0.75;">✕</button>
             </div>
+            <button id="zoom-controls-restore-btn" title="Show Menu Bar (메뉴 바 표시)">🛠️</button>
         </div>
 
         <div id="context-menu">
-            <button class="context-menu-item" id="ctx-copy">Copy</button>
-            <button class="context-menu-item" id="ctx-highlight">Highlight</button>
+            <button class="context-menu-item" id="ctx-copy"><span>📋</span>Copy</button>
+            <button class="context-menu-item" id="ctx-highlight"><span>🖍️</span>Highlight</button>
+            <div class="context-menu-sep" id="ctx-sep"></div>
+            <button class="context-menu-item" id="ctx-add-bookmark"><span>🔖</span>Add Bookmark</button>
+        </div>
+
+        <div id="bookmark-context-menu">
+            <button class="context-menu-item" id="bm-ctx-goto"><span>📄</span>Go to Page</button>
+            <button class="context-menu-item" id="bm-ctx-rename"><span>✏️</span>Rename Bookmark</button>
+            <div class="context-menu-sep"></div>
+            <button class="context-menu-item" id="bm-ctx-up"><span>⬆️</span>Move Up (Ctrl+▲)</button>
+            <button class="context-menu-item" id="bm-ctx-down"><span>⬇️</span>Move Down (Ctrl+▼)</button>
+            <div class="context-menu-sep"></div>
+            <button class="context-menu-item danger" id="bm-ctx-delete"><span>🗑️</span>Delete Bookmark</button>
         </div>
     </div>
 
@@ -1477,9 +1604,21 @@
     <!-- pdf.js 라이브러리를 로드합니다. 프로젝트의 버전에 맞게 수정할 수 있습니다. -->
     <script type="module">
         import * as pdfjsLib from '/lib/pdfjs/pdf.min.mjs';
-        
-        // 워커 경로 설정
+        import * as pdfjsWorker from '/lib/pdfjs/pdf.worker.min.mjs';
+
+        // Fake worker fallback 및 브라우저 환경 완벽 호환을 위해 전역 등록
+        window.pdfjsWorker = pdfjsWorker;
+        globalThis.pdfjsWorker = pdfjsWorker;
+
+        // 워커 경로 및 인스턴스 설정
         pdfjsLib.GlobalWorkerOptions.workerSrc = `/lib/pdfjs/pdf.worker.min.mjs`;
+        try {
+            const workerUrl = new URL('/lib/pdfjs/pdf.worker.min.mjs', window.location.href).href;
+            const worker = new Worker(workerUrl, { type: 'module' });
+            pdfjsLib.GlobalWorkerOptions.workerPort = worker;
+        } catch (e) {
+            console.warn('Dedicated Worker creation failed, using preloaded worker module:', e);
+        }
 
         let pdfDoc = null;
         let pageTextContents = []; // 검색을 위해 각 페이지의 텍스트와 뷰포트 정보를 저장
@@ -1488,6 +1627,7 @@
         let currentScale = 1.5; // 기본 스케일
         let currentRotation = 0; // 기본 회전 각도
         let selectedPageNum = null; // 선택된 페이지 번호 (줌 앵커용)
+        let currentLayoutMode = localStorage.getItem('mhzipy_pdf_layout_mode') || 'grid'; // 'grid' | 'single'
         let isFitWidthMode = true; // 기본 모드: 화면 폭 맞춤 (Fit to Width)
         let isPdfEncrypted = false; // 암호화 문서 여부
         let pdfSessionPassword = ''; // 문서 열람에 사용된 비밀번호
@@ -1562,6 +1702,72 @@
         }
 
         // Custom Message Dialog matching src/common/MessageDialog.tsx
+        function showConfirmDialog(title, message, okText = 'Delete', cancelText = 'Cancel', isDanger = true) {
+            return new Promise((resolve) => {
+                document.querySelectorAll('.message-dialog-overlay').forEach(el => el.remove());
+
+                const overlay = document.createElement('div');
+                overlay.className = 'message-dialog-overlay';
+
+                const dialog = document.createElement('div');
+                dialog.className = 'message-dialog';
+                dialog.onclick = (e) => e.stopPropagation();
+
+                const header = document.createElement('div');
+                header.className = 'message-dialog-header';
+                header.textContent = title || 'Confirm';
+
+                const body = document.createElement('div');
+                body.className = 'message-dialog-body';
+                body.textContent = message || '';
+
+                const footer = document.createElement('div');
+                footer.className = 'message-dialog-footer';
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'message-dialog-button cancel';
+                cancelBtn.textContent = cancelText;
+
+                const okBtn = document.createElement('button');
+                okBtn.className = 'message-dialog-button ok';
+                if (isDanger) {
+                    okBtn.style.background = '#ef4444';
+                    okBtn.style.color = '#ffffff';
+                }
+                okBtn.textContent = okText;
+
+                const finish = (result) => {
+                    window.removeEventListener('keydown', handleKey);
+                    overlay.remove();
+                    resolve(result);
+                };
+
+                const handleKey = (e) => {
+                    if (e.key === 'Enter') finish(true);
+                    if (e.key === 'Escape') finish(false);
+                };
+
+                okBtn.onclick = () => finish(true);
+                cancelBtn.onclick = () => finish(false);
+                overlay.onmousedown = (e) => {
+                    if (e.target === overlay) finish(false);
+                };
+
+                window.addEventListener('keydown', handleKey);
+
+                footer.appendChild(cancelBtn);
+                footer.appendChild(okBtn);
+                dialog.appendChild(header);
+                dialog.appendChild(body);
+                dialog.appendChild(footer);
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+
+                setTimeout(() => okBtn.focus(), 50);
+            });
+        }
+        window.showConfirmDialog = showConfirmDialog;
+
         function showMessageDialog(title, message) {
             return new Promise((resolve) => {
                 document.querySelectorAll('.message-dialog-overlay').forEach(el => el.remove());
@@ -1894,6 +2100,8 @@
 
                 // 목차 로드
                 loadOutline();
+                // 북마크 로드
+                loadCustomBookmarks();
 
                 // 썸네일 렌더링
                 renderThumbnails();
@@ -2076,28 +2284,32 @@
             try {
                 const scrollContainer = document.getElementById('viewer-scroll-container');
                 const containerRect = scrollContainer.getBoundingClientRect();
-                // 버퍼: 뷰포트 높이의 1배만큼 위아래 여유
+                // 버퍼: 뷰포트 크기만큼 상하좌우 여유 확보 (다중 그리드 지원)
                 const bufferHeight = containerRect.height;
+                const bufferWidth = containerRect.width;
 
-                // 보이는 페이지 + 버퍼 영역의 페이지 찾기
+                // 보이는 페이지 + 버퍼 영역(상하좌우)의 페이지 찾기
                 const toRender = [];
                 for (let i = 0; i < _pageDataList.length; i++) {
                     if (_renderedPages.has(i)) continue;
                     const wr = _pageDataList[i].pageWrapper.getBoundingClientRect();
-                    // 뷰포트 + 버퍼 영역에 겹치는지 확인
+                    // 뷰포트 + 버퍼 영역에 겹치는지 확인 (가로/세로 그리드 교차 판정)
                     if (wr.bottom >= containerRect.top - bufferHeight &&
-                        wr.top <= containerRect.bottom + bufferHeight) {
+                        wr.top <= containerRect.bottom + bufferHeight &&
+                        wr.right >= containerRect.left - bufferWidth &&
+                        wr.left <= containerRect.right + bufferWidth) {
                         toRender.push(i);
                     }
                 }
 
-                // 보이는 영역 중심에서 가까운 순으로 정렬
-                const viewCenter = (containerRect.top + containerRect.bottom) / 2;
+                // 보이는 영역 중심에서 가까운 순으로 정렬 (2D 유클리드 거리)
+                const viewCenterX = (containerRect.left + containerRect.right) / 2;
+                const viewCenterY = (containerRect.top + containerRect.bottom) / 2;
                 toRender.sort((a, b) => {
                     const aRect = _pageDataList[a].pageWrapper.getBoundingClientRect();
                     const bRect = _pageDataList[b].pageWrapper.getBoundingClientRect();
-                    const aDist = Math.abs((aRect.top + aRect.bottom) / 2 - viewCenter);
-                    const bDist = Math.abs((bRect.top + bRect.bottom) / 2 - viewCenter);
+                    const aDist = Math.hypot((aRect.left + aRect.right) / 2 - viewCenterX, (aRect.top + aRect.bottom) / 2 - viewCenterY);
+                    const bDist = Math.hypot((bRect.left + bRect.right) / 2 - viewCenterX, (bRect.top + bRect.bottom) / 2 - viewCenterY);
                     return aDist - bDist;
                 });
 
@@ -2180,6 +2392,22 @@
 
             if (version !== _renderVersion) return;
 
+            // 컨테이너 너비 및 레이아웃 동적 조정:
+            const availableWidth = scrollContainer ? (scrollContainer.clientWidth - 48) : 800;
+            let maxPageWidth = 0;
+            for (const p of _pageDataList) {
+                if (p.targetViewport.width > maxPageWidth) maxPageWidth = p.targetViewport.width;
+            }
+            if (currentLayoutMode === 'single') {
+                container.classList.remove('multi-grid');
+                container.classList.add('single-column');
+                container.style.width = 'max-content';
+            } else {
+                container.classList.remove('single-column');
+                container.classList.add('multi-grid');
+                container.style.width = (maxPageWidth > availableWidth) ? 'max-content' : '100%';
+            }
+
             // === 스크롤 위치 복원 (플레이스홀더가 모두 배치된 직후) ===
             if (_zoomScrollRestore) {
                 const restoreData = _zoomScrollRestore;
@@ -2216,22 +2444,155 @@
             }
         }
 
-        // --- 목차 (Outline) 기능 ---
+        // --- 목차 (Outline) & 북마크 (Bookmark) 전역 상태 및 키보드 컨트롤 ---
+        let currentFocusArea = 'viewer'; // 'outline' | 'bookmark' | 'viewer'
+        let currentSelectedOutlineItem = null;
+
+        function isOutlinePanelActive() {
+            const p = document.getElementById('outline-panel');
+            return p && p.classList.contains('active');
+        }
+
+        function isBookmarkPanelActive() {
+            const p = document.getElementById('bookmark-panel');
+            return p && p.classList.contains('active');
+        }
+
+        async function navigateOutlineItem(titleDiv) {
+            if (!titleDiv || !titleDiv.__dest) return;
+            try {
+                let dest = titleDiv.__dest;
+                if (typeof dest === 'string') {
+                    dest = await pdfDoc.getDestination(dest);
+                }
+                if (dest) {
+                    const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                    const pageNum = pageIndex + 1;
+                    goToPage(pageNum, false);
+                }
+            } catch (err) {
+                console.warn('Outline navigation failed:', err);
+            }
+        }
+
+        function selectOutlineItem(titleDiv, navigate = true) {
+            if (!titleDiv) return;
+            document.querySelectorAll('.outline-item.selected').forEach(el => el.classList.remove('selected'));
+            titleDiv.classList.add('selected');
+            currentSelectedOutlineItem = titleDiv;
+            currentFocusArea = 'outline';
+            titleDiv.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            if (navigate) {
+                navigateOutlineItem(titleDiv);
+            }
+        }
+
+        function getVisibleOutlineItems() {
+            const container = document.getElementById('outline-container');
+            if (!container) return [];
+            const allItems = Array.from(container.querySelectorAll('.outline-item'));
+            return allItems.filter(el => {
+                let p = el.parentElement;
+                while (p && p !== container) {
+                    if (p.classList.contains('outline-children') && !p.classList.contains('expanded')) {
+                        return false;
+                    }
+                    p = p.parentElement;
+                }
+                return el.offsetParent !== null;
+            });
+        }
+
+        function handleOutlineKeydown(e) {
+            const visibleItems = getVisibleOutlineItems();
+            if (visibleItems.length === 0) return;
+
+            if (!currentSelectedOutlineItem || !visibleItems.includes(currentSelectedOutlineItem)) {
+                selectOutlineItem(visibleItems[0], false);
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            const currentIndex = visibleItems.indexOf(currentSelectedOutlineItem);
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (currentIndex < visibleItems.length - 1) {
+                    selectOutlineItem(visibleItems[currentIndex + 1], false);
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (currentIndex > 0) {
+                    selectOutlineItem(visibleItems[currentIndex - 1], false);
+                }
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                e.stopPropagation();
+                const wrapper = currentSelectedOutlineItem.parentElement;
+                const childrenDiv = wrapper?.querySelector(':scope > .outline-children');
+                const toggleSpan = currentSelectedOutlineItem.querySelector('.outline-toggle');
+                if (childrenDiv && childrenDiv.children.length > 0) {
+                    if (!childrenDiv.classList.contains('expanded')) {
+                        childrenDiv.classList.add('expanded');
+                        if (toggleSpan) toggleSpan.textContent = '▼';
+                    } else {
+                        const firstChild = childrenDiv.querySelector('.outline-item');
+                        if (firstChild) {
+                            selectOutlineItem(firstChild, false);
+                        }
+                    }
+                }
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                e.stopPropagation();
+                const wrapper = currentSelectedOutlineItem.parentElement;
+                const childrenDiv = wrapper?.querySelector(':scope > .outline-children');
+                const toggleSpan = currentSelectedOutlineItem.querySelector('.outline-toggle');
+                if (childrenDiv && childrenDiv.classList.contains('expanded')) {
+                    childrenDiv.classList.remove('expanded');
+                    if (toggleSpan) toggleSpan.textContent = '▶';
+                } else {
+                    const parentChildrenDiv = wrapper?.closest('.outline-children');
+                    if (parentChildrenDiv) {
+                        const parentWrapper = parentChildrenDiv.parentElement;
+                        const parentItem = parentWrapper?.querySelector(':scope > .outline-item');
+                        if (parentItem) {
+                            selectOutlineItem(parentItem, false);
+                        }
+                    }
+                }
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (currentSelectedOutlineItem) {
+                    navigateOutlineItem(currentSelectedOutlineItem);
+                }
+            }
+        }
+
+        // --- 목차 (Outline) 로드 ---
         async function loadOutline() {
             const outline = await pdfDoc.getOutline();
             const outlineContainer = document.getElementById('outline-container');
             outlineContainer.innerHTML = '';
+            currentSelectedOutlineItem = null;
 
             if (!outline || outline.length === 0) {
-                outlineContainer.textContent = 'No outline available.';
+                outlineContainer.innerHTML = '<div style="color: #94a3b8; font-size: 13px; padding: 16px 8px; text-align: center;">No outline available.</div>';
                 return;
             }
 
             function createOutlineItem(item) {
                 const div = document.createElement('div');
+                div.className = 'outline-item-wrapper';
                 
                 const titleDiv = document.createElement('div');
                 titleDiv.className = 'outline-item';
+                titleDiv.__dest = item.dest;
+                titleDiv.tabIndex = -1;
                 
                 // 하위 항목이 있으면 토글 버튼 추가
                 if (item.items && item.items.length > 0) {
@@ -2240,7 +2601,7 @@
                     toggle.textContent = '▶'; // 기본 접힘 상태
                     toggle.onclick = (e) => {
                         e.stopPropagation();
-                        const childrenDiv = div.querySelector('.outline-children');
+                        const childrenDiv = div.querySelector(':scope > .outline-children');
                         if (childrenDiv) {
                             const isExpanded = childrenDiv.classList.toggle('expanded');
                             toggle.textContent = isExpanded ? '▼' : '▶';
@@ -2254,22 +2615,37 @@
                 }
 
                 const textSpan = document.createElement('span');
+                textSpan.className = 'outline-item-text';
                 textSpan.textContent = item.title;
+                textSpan.title = item.title;
                 titleDiv.appendChild(textSpan);
 
-                titleDiv.onclick = async () => {
-                    if (item.dest) {
-                        let dest = item.dest;
-                        if (typeof dest === 'string') {
-                            dest = await pdfDoc.getDestination(dest);
-                        }
-                        if (dest) {
-                            const pageIndex = await pdfDoc.getPageIndex(dest[0]);
-                            const pageNum = pageIndex + 1;
-                            goToPage(pageNum, true);
-                        }
-                    }
+                titleDiv.onclick = (e) => {
+                    e.stopPropagation();
+                    selectOutlineItem(titleDiv, true);
                 };
+
+                // Outline 항목 우클릭 시 Add Bookmark 지원
+                titleDiv.oncontextmenu = async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectOutlineItem(titleDiv, false);
+                    let targetPage = 1;
+                    if (item.dest) {
+                        try {
+                            let dest = item.dest;
+                            if (typeof dest === 'string') {
+                                dest = await pdfDoc.getDestination(dest);
+                            }
+                            if (dest) {
+                                const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+                                targetPage = pageIndex + 1;
+                            }
+                        } catch (err) {}
+                    }
+                    showViewerContextMenu(e.pageX, e.pageY, false, targetPage, item.title);
+                };
+
                 div.appendChild(titleDiv);
 
                 if (item.items && item.items.length > 0) {
@@ -2323,7 +2699,14 @@
                 item.appendChild(label);
 
                 item.onclick = () => {
-                    goToPage(pageNum, true);
+                    goToPage(pageNum, false);
+                };
+
+                // Pages 썸네일 우클릭 시 Add Bookmark 지원
+                item.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showViewerContextMenu(e.pageX, e.pageY, false, pageNum, `Page ${pageNum} Bookmark`);
                 };
 
                 container.appendChild(item);
@@ -2353,6 +2736,16 @@
                     item.classList.remove('active');
                 }
             });
+        }
+
+        // Pages 패널 마우스 휠 스크롤 지원
+        const pagesPanelEl = document.getElementById('pages-panel');
+        if (pagesPanelEl) {
+            pagesPanelEl.addEventListener('wheel', (e) => {
+                if (!e.ctrlKey) {
+                    pagesPanelEl.scrollTop += e.deltaY;
+                }
+            }, { passive: true });
         }
 
         // --- 검색 기능 ---
@@ -2507,13 +2900,17 @@
                     const page = pages[i];
                     const pageRect = page.getBoundingClientRect();
 
-                    // 뷰포트 내에서 보이는 영역의 높이를 계산
+                    // 뷰포트 내에서 보이는 영역의 면적(가로 x 세로)을 계산하여 가장 많이 보이는 페이지 선정
                     const visibleTop = Math.max(pageRect.top, containerRect.top);
                     const visibleBottom = Math.min(pageRect.bottom, containerRect.bottom);
+                    const visibleLeft = Math.max(pageRect.left, containerRect.left);
+                    const visibleRight = Math.min(pageRect.right, containerRect.right);
                     const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+                    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+                    const visibleArea = visibleHeight * visibleWidth;
 
-                    if (visibleHeight > maxVisibility) {
-                        maxVisibility = visibleHeight;
+                    if (visibleArea > maxVisibility) {
+                        maxVisibility = visibleArea;
                         mostVisiblePageNum = i + 1;
                     }
                 }
@@ -2525,10 +2922,14 @@
 
         async function goToPage(pageNum, smooth = false) {
             if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= pdfDoc.numPages) {
+                const currentPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
                 selectPage(pageNum);
                 const pageEl = document.getElementById(`page-${pageNum}`);
                 if (pageEl) {
-                    pageEl.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
+                    // 다수 페이지 점프 시 즉시 이동하여 딜레이 방지
+                    const isFar = Math.abs(currentPage - pageNum) > 1;
+                    const useSmooth = smooth && !isFar;
+                    pageEl.scrollIntoView({ behavior: useSmooth ? 'smooth' : 'auto', block: 'start', inline: 'nearest' });
                     updatePageIndicator(pageNum); // 즉시 페이지 번호 업데이트
                 }
             }
@@ -2729,7 +3130,7 @@
 
         viewerContainer.addEventListener('mousedown', (e) => {
             // 플로팅 컨트롤러나 툴바 클릭 시 패닝 무시
-            if (e.target.closest('#zoom-controls') || e.target.closest('#page-indicator') || e.target.closest('#sidebar-toggle-btn') || e.target.closest('#search-bar') || e.target.closest('#context-menu')) return;
+            if (e.target.closest('#zoom-controls') || e.target.closest('#zoom-controls-restore-btn') || e.target.closest('#page-indicator') || e.target.closest('#sidebar-toggle-btn') || e.target.closest('#search-bar') || e.target.closest('#context-menu')) return;
 
             const isLeftPan = (isPanMode && e.button === 0);
             const isMiddlePan = (e.button === 1);
@@ -3028,7 +3429,7 @@
         const searchInput = document.getElementById('search-input');
         const pageInputContainer = document.getElementById('page-input-container');
 
-        // 사이드바 탭 전환
+        // 사이드바 탭 전환 및 포커스 영역 설정
         document.querySelectorAll('.sidebar-tab').forEach(tab => {
             tab.onclick = () => {
                 document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
@@ -3037,6 +3438,20 @@
                 const panelId = tab.dataset.tab + '-panel';
                 const panel = document.getElementById(panelId);
                 if (panel) panel.classList.add('active');
+                if (tab.dataset.tab === 'outline') {
+                    currentFocusArea = 'outline';
+                    if (!currentSelectedOutlineItem) {
+                        const items = getVisibleOutlineItems();
+                        if (items.length > 0) selectOutlineItem(items[0], false);
+                    }
+                } else if (tab.dataset.tab === 'bookmark') {
+                    currentFocusArea = 'bookmark';
+                    if (selectedBookmarkIndex === null && customBookmarks.length > 0) {
+                        selectBookmark(0, false);
+                    }
+                } else {
+                    currentFocusArea = 'viewer';
+                }
             };
         });
 
@@ -3064,6 +3479,22 @@
             const isCtrl = e.ctrlKey || e.metaKey;
             const key = e.key;
             const keyLower = key.toLowerCase();
+
+            // 1. Outline 활성화 시 키보드 컨트롤 (PDF 화면 제어 차단)
+            if (currentFocusArea === 'outline' && sidebar.classList.contains('open') && isOutlinePanelActive()) {
+                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '].includes(key)) {
+                    handleOutlineKeydown(e);
+                    return;
+                }
+            }
+
+            // 2. Bookmark 활성화 시 키보드 컨트롤 (Ctrl+위/아래 위치 변경 포함)
+            if (currentFocusArea === 'bookmark' && sidebar.classList.contains('open') && isBookmarkPanelActive()) {
+                if ((isCtrl && (key === 'ArrowUp' || key === 'ArrowDown')) || key === 'ArrowUp' || key === 'ArrowDown' || key === 'Delete' || key === 'Enter') {
+                    handleBookmarkKeydown(e);
+                    return;
+                }
+            }
 
             // 검색 입력 중일 때는 화살표 단축키 무시
             if (document.activeElement === searchInput && (key === 'ArrowLeft' || key === 'ArrowRight')) {
@@ -3160,32 +3591,114 @@
             }
         });
 
-        // 컨텍스트 메뉴 (복사/하이라이트)
+        // 컨텍스트 메뉴 (복사/하이라이트/북마크 추가)
         const contextMenu = document.getElementById('context-menu');
-        
+        const bookmarkContextMenu = document.getElementById('bookmark-context-menu');
+        let contextMenuTargetPage = 1;
+        let contextMenuSelectedText = '';
+
+        function showViewerContextMenu(x, y, hasSelection, targetPage, selText) {
+            if (bookmarkContextMenu) bookmarkContextMenu.style.display = 'none';
+            if (!contextMenu) return;
+
+            const copyBtn = document.getElementById('ctx-copy');
+            const hlBtn = document.getElementById('ctx-highlight');
+            const sep = document.getElementById('ctx-sep');
+
+            if (copyBtn) copyBtn.style.display = hasSelection ? 'flex' : 'none';
+            if (hlBtn) hlBtn.style.display = hasSelection ? 'flex' : 'none';
+            if (sep) sep.style.display = hasSelection ? 'block' : 'none';
+
+            contextMenuTargetPage = targetPage;
+            contextMenuSelectedText = selText;
+
+            contextMenu.style.left = `${Math.min(x + 2, window.innerWidth - 180)}px`;
+            contextMenu.style.top = `${Math.min(y + 2, window.innerHeight - 150)}px`;
+            contextMenu.style.display = 'block';
+        }
+
+        function showBookmarkContextMenu(x, y) {
+            if (contextMenu) contextMenu.style.display = 'none';
+            if (!bookmarkContextMenu) return;
+
+            const delBtn = document.getElementById('bm-ctx-delete');
+            if (delBtn) {
+                const count = (window.selectedBookmarkIndices && window.selectedBookmarkIndices.size) || 1;
+                if (count > 1) {
+                    delBtn.innerHTML = `<span>🗑️</span>Delete Bookmarks (${count})`;
+                } else {
+                    delBtn.innerHTML = `<span>🗑️</span>Delete Bookmark`;
+                }
+            }
+
+            bookmarkContextMenu.style.left = `${Math.min(x + 2, window.innerWidth - 180)}px`;
+            bookmarkContextMenu.style.top = `${Math.min(y + 2, window.innerHeight - 220)}px`;
+            bookmarkContextMenu.style.display = 'block';
+        }
+
+        // 텍스트 선택 시 마우스업 툴팁 메뉴
         document.addEventListener('mouseup', (e) => {
-            if (isResizing) return; // 리사이징 중이면 무시
-            if (isPanMode) return; // 패닝 모드일 때는 무시
+            if (isResizing || isPanMode) return;
 
             const selection = window.getSelection();
-            if (selection.isCollapsed) {
-                contextMenu.style.display = 'none';
+            if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+                // 선택 해제 시 일반 컨텍스트 메뉴는 닫지 않음(우클릭 시 유지)
                 return;
             }
 
-            // 선택 영역이 뷰어 내부에 있는지 확인
             const viewerContainer = document.getElementById('viewer-scroll-container');
             if (!viewerContainer.contains(selection.anchorNode)) return;
 
-            // 메뉴 위치 계산
-            contextMenu.style.left = `${e.pageX + 5}px`;
-            contextMenu.style.top = `${e.pageY + 5}px`;
-            contextMenu.style.display = 'block';
+            const selText = selection.toString().trim();
+            const pageWrapper = e.target.closest('.page-wrapper');
+            const targetPage = pageWrapper ? parseInt(pageWrapper.id.replace('page-', '')) : (selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1);
+
+            showViewerContextMenu(e.pageX + 5, e.pageY + 5, true, targetPage, selText);
         });
 
+        // 우클릭 컨텍스트 메뉴 (문서 및 페이지 어디서든 Add Bookmark 가능)
+        const viewerScrollEl = document.getElementById('viewer-scroll-container');
+        if (viewerScrollEl) {
+            viewerScrollEl.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const selection = window.getSelection();
+                const hasSelection = Boolean(selection && !selection.isCollapsed && selection.toString().trim());
+                const selText = hasSelection ? selection.toString().trim() : '';
+
+                const pageWrapper = e.target.closest('.page-wrapper');
+                let targetPage = 1;
+                if (pageWrapper) {
+                    targetPage = parseInt(pageWrapper.id.replace('page-', '')) || 1;
+                } else {
+                    targetPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
+                }
+
+                showViewerContextMenu(e.pageX, e.pageY, hasSelection, targetPage, selText);
+            });
+        }
+
         document.addEventListener('mousedown', (e) => {
-            if (!contextMenu.contains(e.target)) {
+            if (contextMenu && !contextMenu.contains(e.target)) {
                 contextMenu.style.display = 'none';
+            }
+            if (bookmarkContextMenu && !bookmarkContextMenu.contains(e.target)) {
+                bookmarkContextMenu.style.display = 'none';
+            }
+
+            // 영역별 포커스 추적 (키보드 화살표 라우팅용)
+            if (e.target.closest('#outline-panel')) {
+                currentFocusArea = 'outline';
+                if (!currentSelectedOutlineItem) {
+                    const items = getVisibleOutlineItems();
+                    if (items.length > 0) selectOutlineItem(items[0], false);
+                }
+            } else if (e.target.closest('#bookmark-panel')) {
+                currentFocusArea = 'bookmark';
+                if (selectedBookmarkIndex === null && customBookmarks.length > 0) {
+                    selectBookmark(0, false);
+                }
+            } else if (e.target.closest('#viewer-scroll-container')) {
+                currentFocusArea = 'viewer';
             }
 
             // 페이지 선택 (줌 앵커용)
@@ -3194,19 +3707,18 @@
                 const pageNum = parseInt(pageWrapper.id.replace('page-', ''));
                 selectPage(pageNum);
             } else if (!e.target.closest('#sidebar') && !e.target.closest('#zoom-controls') && !e.target.closest('#page-indicator')) {
-                // 페이지 바깥 클릭 시 선택 해제
                 selectPage(null);
             }
         });
 
         document.getElementById('ctx-copy').onclick = () => {
             document.execCommand('copy');
-            contextMenu.style.display = 'none';
+            if (contextMenu) contextMenu.style.display = 'none';
         };
 
         document.getElementById('ctx-highlight').onclick = () => {
             const selection = window.getSelection();
-            if (selection.isCollapsed) return;
+            if (!selection || selection.isCollapsed) return;
 
             const range = selection.getRangeAt(0);
             const rects = range.getClientRects();
@@ -3215,10 +3727,8 @@
             for (const rect of rects) {
                 for (const page of pages) {
                     const pageRect = page.getBoundingClientRect();
-                    // 겹치는 페이지 찾기 (간단한 포함 확인)
                     if (rect.top >= pageRect.top && rect.bottom <= pageRect.bottom &&
                         rect.left >= pageRect.left && rect.right <= pageRect.right) {
-                        
                         const div = document.createElement('div');
                         div.className = 'user-highlight';
                         div.style.left = `${rect.left - pageRect.left}px`;
@@ -3229,10 +3739,60 @@
                     }
                 }
             }
-            
             selection.removeAllRanges();
-            contextMenu.style.display = 'none';
+            if (contextMenu) contextMenu.style.display = 'none';
         };
+
+        document.getElementById('ctx-add-bookmark').onclick = async () => {
+            if (contextMenu) contextMenu.style.display = 'none';
+            const defaultTitle = contextMenuSelectedText ? contextMenuSelectedText.slice(0, 40) : `Page ${contextMenuTargetPage} Bookmark`;
+            const title = await showPromptDialog('Add Bookmark', `Enter title for page ${contextMenuTargetPage} bookmark:`, defaultTitle);
+            if (title && title.trim()) {
+                addCustomBookmark(title, contextMenuTargetPage);
+            }
+        };
+
+        // Bookmark 컨텍스트 메뉴 핸들러
+        document.getElementById('bm-ctx-goto')?.addEventListener('click', () => {
+            if (bookmarkContextMenu) bookmarkContextMenu.style.display = 'none';
+            if (activeContextBookmarkIndex !== null && customBookmarks[activeContextBookmarkIndex]) {
+                goToPage(customBookmarks[activeContextBookmarkIndex].pageNum, false);
+            }
+        });
+
+        document.getElementById('bm-ctx-rename')?.addEventListener('click', async () => {
+            if (bookmarkContextMenu) bookmarkContextMenu.style.display = 'none';
+            if (activeContextBookmarkIndex !== null && customBookmarks[activeContextBookmarkIndex]) {
+                const cur = customBookmarks[activeContextBookmarkIndex];
+                const newTitle = await showPromptDialog('Rename Bookmark', 'Enter new title:', cur.title);
+                if (newTitle && newTitle.trim()) {
+                    renameCustomBookmark(activeContextBookmarkIndex, newTitle);
+                }
+            }
+        });
+
+        document.getElementById('bm-ctx-up')?.addEventListener('click', () => {
+            if (bookmarkContextMenu) bookmarkContextMenu.style.display = 'none';
+            if (activeContextBookmarkIndex !== null) {
+                moveCustomBookmark(activeContextBookmarkIndex, -1);
+            }
+        });
+
+        document.getElementById('bm-ctx-down')?.addEventListener('click', () => {
+            if (bookmarkContextMenu) bookmarkContextMenu.style.display = 'none';
+            if (activeContextBookmarkIndex !== null) {
+                moveCustomBookmark(activeContextBookmarkIndex, 1);
+            }
+        });
+
+        document.getElementById('bm-ctx-delete')?.addEventListener('click', () => {
+            if (bookmarkContextMenu) bookmarkContextMenu.style.display = 'none';
+            if (typeof window.deleteCustomBookmarksConfirm === 'function') {
+                window.deleteCustomBookmarksConfirm();
+            } else if (typeof window.deleteCustomBookmark === 'function' && activeContextBookmarkIndex !== null) {
+                window.deleteCustomBookmark(activeContextBookmarkIndex);
+            }
+        });
 
         // 마우스 휠 줌 (Ctrl + Wheel) - 마우스 커서 기준 앵커 줌
         window.addEventListener('wheel', (e) => {
@@ -3293,6 +3853,78 @@
             };
         }
 
+        // --- 레이아웃 모드 전환 (다중 그리드 vs 세로 1열) ---
+        function setLayoutMode(mode) {
+            currentLayoutMode = (mode === 'single') ? 'single' : 'grid';
+            try {
+                localStorage.setItem('mhzipy_pdf_layout_mode', currentLayoutMode);
+            } catch (e) {}
+
+            const container = document.getElementById('viewer-content');
+            const btnSingle = document.getElementById('btn-layout-single');
+            const btnGrid = document.getElementById('btn-layout-grid');
+
+            if (btnSingle && btnGrid) {
+                if (currentLayoutMode === 'single') {
+                    btnSingle.classList.add('active');
+                    btnGrid.classList.remove('active');
+                } else {
+                    btnGrid.classList.add('active');
+                    btnSingle.classList.remove('active');
+                }
+            }
+
+            if (container) {
+                const scrollContainer = document.getElementById('viewer-scroll-container');
+                const availableWidth = scrollContainer ? (scrollContainer.clientWidth - 48) : 800;
+                let maxPageWidth = 0;
+                for (const p of _pageDataList) {
+                    if (p.targetViewport?.width > maxPageWidth) maxPageWidth = p.targetViewport.width;
+                }
+
+                if (currentLayoutMode === 'single') {
+                    container.classList.remove('multi-grid');
+                    container.classList.add('single-column');
+                    container.style.width = 'max-content';
+                } else {
+                    container.classList.remove('single-column');
+                    container.classList.add('multi-grid');
+                    container.style.width = (maxPageWidth > availableWidth) ? 'max-content' : '100%';
+                }
+                renderVisiblePages();
+            }
+        }
+
+        document.getElementById('btn-layout-grid')?.addEventListener('click', () => setLayoutMode('grid'));
+        document.getElementById('btn-layout-single')?.addEventListener('click', () => setLayoutMode('single'));
+
+        // --- 오른쪽 아래 메뉴 바 숨기기 / 보이기 ---
+        function setControlsBarVisible(visible) {
+            const bar = document.getElementById('zoom-controls');
+            const restoreBtn = document.getElementById('zoom-controls-restore-btn');
+            if (!bar || !restoreBtn) return;
+
+            if (visible) {
+                bar.classList.remove('hidden-bar');
+                restoreBtn.classList.remove('visible');
+                try { localStorage.setItem('mhzipy_zoom_bar_visible', 'true'); } catch (e) {}
+            } else {
+                bar.classList.add('hidden-bar');
+                restoreBtn.classList.add('visible');
+                try { localStorage.setItem('mhzipy_zoom_bar_visible', 'false'); } catch (e) {}
+            }
+        }
+
+        document.getElementById('zoom-controls-hide-btn')?.addEventListener('click', () => setControlsBarVisible(false));
+        document.getElementById('zoom-controls-restore-btn')?.addEventListener('click', () => setControlsBarVisible(true));
+
+        // 초기 상태 복원
+        try {
+            const savedBarVisible = localStorage.getItem('mhzipy_zoom_bar_visible') !== 'false';
+            setControlsBarVisible(savedBarVisible);
+            setLayoutMode(currentLayoutMode);
+        } catch (e) {}
+
         // 창 크기 변경 시 폭 맞춤 모드 유지 (디바운스 처리)
         let _resizeTimer = null;
         window.addEventListener('resize', () => {
@@ -3301,6 +3933,25 @@
                 _resizeTimer = setTimeout(async () => {
                     await fitToWidth();
                     await renderPages();
+                }, 120);
+            } else if (pdfDoc) {
+                clearTimeout(_resizeTimer);
+                _resizeTimer = setTimeout(() => {
+                    const container = document.getElementById('viewer-content');
+                    const scrollContainer = document.getElementById('viewer-scroll-container');
+                    if (container && scrollContainer && _pageDataList.length > 0) {
+                        if (currentLayoutMode === 'single') {
+                            container.style.width = 'max-content';
+                        } else {
+                            const availableWidth = scrollContainer.clientWidth - 48;
+                            let maxPageWidth = 0;
+                            for (const p of _pageDataList) {
+                                if (p.targetViewport.width > maxPageWidth) maxPageWidth = p.targetViewport.width;
+                            }
+                            container.style.width = maxPageWidth > availableWidth ? 'max-content' : '100%';
+                        }
+                    }
+                    renderVisiblePages();
                 }, 120);
             }
         });
@@ -3330,6 +3981,12 @@
             const tagName = e.target.tagName.toLowerCase();
             if (tagName === 'input' || tagName === 'textarea') return;
 
+            // Outline / Bookmark 포커스 시 뷰어 화살표 스크롤 차단
+            if (sidebar.classList.contains('open')) {
+                if (currentFocusArea === 'outline' && isOutlinePanelActive()) return;
+                if (currentFocusArea === 'bookmark' && isBookmarkPanelActive()) return;
+            }
+
             const currentPageSpan = document.getElementById('current-page');
             if (!currentPageSpan) return;
             const currentPageNum = parseInt(currentPageSpan.textContent);
@@ -3355,8 +4012,8 @@
         const params = new URLSearchParams(window.location.search);
         const fileUrl = params.get('file');
         const storageId = params.get('storageId');
-        const pdfPath = params.get('pdfPath') || window.__PDF_PATH__;
-        const title = params.get('title') || document.title;
+        let pdfPath = params.get('pdfPath') || window.__PDF_PATH__;
+        let title = params.get('title') || document.title;
 
         if (window.__PDF_BASE64__) {
             renderPdf(null, title, null);
@@ -3438,7 +4095,60 @@
             const statusPathBox = document.getElementById('pdf-status-filepath');
             const openFolderBtn = document.getElementById('btn-status-open-folder');
 
-            const fullPath = pdfPath || fileUrl || '';
+            let fullPath = pdfPath || fileUrl || '';
+            const applyPdfPathToUI = (newPdfPath, newTitle) => {
+                if (newPdfPath !== undefined) {
+                    pdfPath = newPdfPath;
+                    window.__PDF_PATH__ = newPdfPath;
+                }
+                if (newTitle !== undefined) {
+                    title = newTitle;
+                }
+                fullPath = pdfPath || fileUrl || '';
+                let fileName = title || 'PDF Viewer';
+                if (fullPath) {
+                    const parts = fullPath.split(/[/\\]/);
+                    if (parts.length > 0 && parts[parts.length - 1]) {
+                        fileName = parts[parts.length - 1];
+                    }
+                }
+                if (filenameEl) filenameEl.textContent = fileName;
+                if (statusPathTextEl) {
+                    statusPathTextEl.textContent = fullPath || 'Unknown Source';
+                }
+                if (statusPathBox && fullPath) {
+                    statusPathBox.title = `Click to copy full path: ${fullPath}`;
+                    statusPathBox.onclick = async () => {
+                        try {
+                            await navigator.clipboard.writeText(fullPath);
+                            showToast('File path copied to clipboard!', '📋', 2000);
+                        } catch (e) {
+                            showToast(`Path: ${fullPath}`, '📄');
+                        }
+                    };
+                }
+            };
+            applyPdfPathToUI(pdfPath, title);
+
+            window.__loadPdfInPrewarmedWindow = (newPdfPath, newTitle) => {
+                applyPdfPathToUI(newPdfPath, newTitle);
+                loadCustomBookmarks();
+                _thumbnailsRendered = false;
+                const loadingEl = document.getElementById('loading');
+                if (loadingEl) {
+                    loadingEl.style.display = 'flex';
+                    loadingEl.style.color = '';
+                    loadingEl.textContent = 'Loading PDF...';
+                }
+                const isWindows = navigator.userAgent.includes('Windows');
+                const customUrl = (isWindows ? "http://pdf-data.localhost/" : "pdf-data://localhost/") + encodeURIComponent(newPdfPath);
+                renderPdf(customUrl, newTitle || document.title, null);
+            };
+            if (window.__PENDING_PREWARM_PDF__) {
+                const pending = window.__PENDING_PREWARM_PDF__;
+                delete window.__PENDING_PREWARM_PDF__;
+                window.__loadPdfInPrewarmedWindow(pending.path, pending.title);
+            }
             let fileName = title || 'PDF Viewer';
             if (fullPath) {
                 const parts = fullPath.split(/[/\\]/);
@@ -3967,13 +4677,335 @@
             }
 
             // ====================================================
-            // Feature 1: Bookmarks & Outline (Bookmark Management)
+            // Feature 1: Bookmarks Management (별도 Bookmark 탭 & Shift 다중 선택 & 단축키 & 삭제 다이얼로그)
             // ====================================================
-            let customBookmarks = []; // [{ title, pageNum }]
+            window.customBookmarks = [];
+            window.selectedBookmarkIndices = new Set();
+            window.lastAnchorBookmarkIndex = 0;
+            window.shiftPivotIndex = null;
+            window.activeContextBookmarkIndex = null;
+
+            window.getBookmarkStorageKey = function() {
+                const p = pdfPath || fileUrl || '';
+                return 'mhzipy_pdf_bookmarks_' + (p ? encodeURIComponent(p) : 'default');
+            };
+
+            window.loadCustomBookmarks = function() {
+                try {
+                    const stored = localStorage.getItem(window.getBookmarkStorageKey());
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        if (Array.isArray(parsed)) {
+                            customBookmarks = parsed;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Failed to load bookmarks from storage:', e);
+                }
+                renderCustomBookmarks();
+            };
+
+            window.saveCustomBookmarks = function() {
+                try {
+                    localStorage.setItem(window.getBookmarkStorageKey(), JSON.stringify(customBookmarks));
+                } catch (e) {
+                    console.warn('Failed to save bookmarks to storage:', e);
+                }
+            };
+
+            window.updateBookmarkSelectionUI = function() {
+                const container = document.getElementById('bookmark-container');
+                if (!container) return;
+                const items = container.querySelectorAll('.bookmark-item');
+                items.forEach((item, idx) => {
+                    if (selectedBookmarkIndices.has(idx)) {
+                        item.classList.add('selected');
+                    } else {
+                        item.classList.remove('selected');
+                    }
+                });
+            };
+
+            window.renderCustomBookmarks = function() {
+                const container = document.getElementById('bookmark-container');
+                if (!container) return;
+                container.innerHTML = '';
+
+                if (customBookmarks.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'bookmark-empty-hint';
+                    empty.innerHTML = 'No bookmarks yet.<br>Right-click on page or click <b>[➕ Add]</b>';
+                    container.appendChild(empty);
+                    selectedBookmarkIndices.clear();
+                    return;
+                }
+
+                customBookmarks.forEach((bm, idx) => {
+                    const item = document.createElement('div');
+                    item.className = 'bookmark-item';
+                    if (selectedBookmarkIndices.has(idx)) item.classList.add('selected');
+                    item.tabIndex = -1;
+
+                    const mainSpan = document.createElement('div');
+                    mainSpan.className = 'bookmark-item-main';
+                    mainSpan.innerHTML = `<span>🔖</span><span class="bookmark-title" title="${bm.title}">${bm.title}</span><span class="bookmark-page-badge">p.${bm.pageNum}</span>`;
+
+                    item.appendChild(mainSpan);
+
+                    item.onclick = (e) => {
+                        e.stopPropagation();
+                        currentFocusArea = 'bookmark';
+                        if (e.shiftKey) {
+                            // Shift 범위 복수 선택
+                            const anchor = lastAnchorBookmarkIndex;
+                            const minIdx = Math.min(anchor, idx);
+                            const maxIdx = Math.max(anchor, idx);
+                            selectedBookmarkIndices.clear();
+                            for (let i = minIdx; i <= maxIdx; i++) {
+                                selectedBookmarkIndices.add(i);
+                            }
+                            updateBookmarkSelectionUI();
+                        } else if (e.ctrlKey || e.metaKey) {
+                            // Ctrl 개별 토글 선택
+                            if (selectedBookmarkIndices.has(idx)) {
+                                selectedBookmarkIndices.delete(idx);
+                            } else {
+                                selectedBookmarkIndices.add(idx);
+                            }
+                            lastAnchorBookmarkIndex = idx;
+                            shiftPivotIndex = idx;
+                            updateBookmarkSelectionUI();
+                        } else {
+                            // 단일 선택 및 페이지 이동
+                            selectedBookmarkIndices.clear();
+                            selectedBookmarkIndices.add(idx);
+                            lastAnchorBookmarkIndex = idx;
+                            shiftPivotIndex = idx;
+                            updateBookmarkSelectionUI();
+                            goToPage(bm.pageNum, false);
+                        }
+                    };
+
+                    item.oncontextmenu = (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        currentFocusArea = 'bookmark';
+                        if (!selectedBookmarkIndices.has(idx)) {
+                            selectedBookmarkIndices.clear();
+                            selectedBookmarkIndices.add(idx);
+                            lastAnchorBookmarkIndex = idx;
+                            shiftPivotIndex = idx;
+                            updateBookmarkSelectionUI();
+                        }
+                        activeContextBookmarkIndex = idx;
+                        showBookmarkContextMenu(e.pageX, e.pageY);
+                    };
+
+                    container.appendChild(item);
+                });
+            };
+
+            window.selectBookmark = function(idx, navigate = true) {
+                if (idx < 0 || idx >= customBookmarks.length) return;
+                selectedBookmarkIndices.clear();
+                selectedBookmarkIndices.add(idx);
+                lastAnchorBookmarkIndex = idx;
+                shiftPivotIndex = idx;
+                currentFocusArea = 'bookmark';
+
+                updateBookmarkSelectionUI();
+
+                const container = document.getElementById('bookmark-container');
+                const items = container?.querySelectorAll('.bookmark-item');
+                if (items && items[idx]) {
+                    items[idx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+
+                if (navigate && customBookmarks[idx]) {
+                    goToPage(customBookmarks[idx].pageNum, false);
+                }
+            };
+
+            window.addCustomBookmark = function(title, pageNum) {
+                const cleanTitle = (title || `Page ${pageNum} Bookmark`).trim();
+                customBookmarks.push({
+                    id: 'bm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+                    title: cleanTitle,
+                    pageNum: pageNum,
+                    createdAt: Date.now()
+                });
+                saveCustomBookmarks();
+                renderCustomBookmarks();
+                selectBookmark(customBookmarks.length - 1, true);
+
+                const sidebar = document.getElementById('sidebar');
+                if (!sidebar.classList.contains('open')) {
+                    window.toggleSidebar();
+                }
+                const bmTab = document.querySelector('.sidebar-tab[data-tab="bookmark"]');
+                if (bmTab) bmTab.click();
+
+                showToast(`🔖 Bookmark added: "${cleanTitle}" (p.${pageNum})`, '✅', 2500);
+            };
+
+            // 메시지 다이얼로그와 함께 북마크(단수 또는 복수) 삭제
+            window.deleteCustomBookmarksConfirm = async function(indices) {
+                const toDelete = Array.isArray(indices) && indices.length > 0 
+                    ? Array.from(new Set(indices)) 
+                    : Array.from(selectedBookmarkIndices);
+
+                if (toDelete.length === 0) return;
+
+                let confirmed = false;
+                if (toDelete.length === 1) {
+                    const bm = customBookmarks[toDelete[0]];
+                    if (!bm) return;
+                    confirmed = await showConfirmDialog(
+                        'Delete Bookmark',
+                        `Are you sure you want to delete bookmark "${bm.title}"?`,
+                        'Delete',
+                        'Cancel',
+                        true
+                    );
+                } else {
+                    confirmed = await showConfirmDialog(
+                        'Delete Bookmarks',
+                        `Are you sure you want to delete all ${toDelete.length} selected bookmarks?`,
+                        'Delete All',
+                        'Cancel',
+                        true
+                    );
+                }
+
+                if (!confirmed) return;
+
+                // 인덱스 내림차순 정렬 후 순차 제거
+                toDelete.sort((a, b) => b - a);
+                for (const idx of toDelete) {
+                    if (idx >= 0 && idx < customBookmarks.length) {
+                        customBookmarks.splice(idx, 1);
+                    }
+                }
+
+                saveCustomBookmarks();
+                selectedBookmarkIndices.clear();
+                lastAnchorBookmarkIndex = 0;
+                shiftPivotIndex = null;
+                renderCustomBookmarks();
+
+                if (toDelete.length === 1) {
+                    showToast('🗑️ Bookmark deleted.', 'ℹ️', 2000);
+                } else {
+                    showToast(`🗑️ ${toDelete.length} bookmarks deleted.`, 'ℹ️', 2000);
+                }
+            };
+
+            window.renameCustomBookmark = function(idx, newTitle) {
+                if (idx < 0 || idx >= customBookmarks.length) return;
+                customBookmarks[idx].title = newTitle.trim();
+                saveCustomBookmarks();
+                renderCustomBookmarks();
+                showToast(`✏️ Bookmark renamed: "${customBookmarks[idx].title}"`, '✅', 2000);
+            };
+
+            window.moveCustomBookmark = function(fromIdx, delta) {
+                const toIdx = fromIdx + delta;
+                if (toIdx < 0 || toIdx >= customBookmarks.length) return;
+                const item = customBookmarks.splice(fromIdx, 1)[0];
+                customBookmarks.splice(toIdx, 0, item);
+                saveCustomBookmarks();
+                selectedBookmarkIndices.clear();
+                selectedBookmarkIndices.add(toIdx);
+                lastAnchorBookmarkIndex = toIdx;
+                shiftPivotIndex = toIdx;
+                renderCustomBookmarks();
+                selectBookmark(toIdx, false);
+            };
+
+            window.handleBookmarkKeydown = function(e) {
+                if (customBookmarks.length === 0) return;
+
+                const curIdx = lastAnchorBookmarkIndex;
+
+                if (e.ctrlKey && e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    moveCustomBookmark(curIdx, -1);
+                } else if (e.ctrlKey && e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    moveCustomBookmark(curIdx, 1);
+                } else if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    // Shift+위/아래 방향키로 복수 선택!
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    if (shiftPivotIndex === null) {
+                        shiftPivotIndex = curIdx;
+                    }
+
+                    const nextIdx = e.key === 'ArrowUp' 
+                        ? Math.max(0, curIdx - 1) 
+                        : Math.min(customBookmarks.length - 1, curIdx + 1);
+
+                    lastAnchorBookmarkIndex = nextIdx;
+
+                    const minIdx = Math.min(shiftPivotIndex, nextIdx);
+                    const maxIdx = Math.max(shiftPivotIndex, nextIdx);
+                    selectedBookmarkIndices.clear();
+                    for (let i = minIdx; i <= maxIdx; i++) {
+                        selectedBookmarkIndices.add(i);
+                    }
+                    updateBookmarkSelectionUI();
+
+                    const container = document.getElementById('bookmark-container');
+                    const items = container?.querySelectorAll('.bookmark-item');
+                    if (items && items[nextIdx]) {
+                        items[nextIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                    }
+                } else if (!e.ctrlKey && !e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    // 단일 커서 이동
+                    e.preventDefault();
+                    e.stopPropagation();
+                    shiftPivotIndex = null;
+                    if (e.key === 'ArrowUp' && curIdx > 0) {
+                        selectBookmark(curIdx - 1, true);
+                    } else if (e.key === 'ArrowDown' && curIdx < customBookmarks.length - 1) {
+                        selectBookmark(curIdx + 1, true);
+                    }
+                } else if (e.key === 'Delete') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    deleteCustomBookmarksConfirm();
+                } else if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (customBookmarks[curIdx]) {
+                        goToPage(customBookmarks[curIdx].pageNum, false);
+                    }
+                }
+            };
+
+            // deleteCustomBookmark 별칭 정의
+            window.deleteCustomBookmark = function(indices) {
+                return window.deleteCustomBookmarksConfirm(indices);
+            };
+
+            // 전역 스코프 함수 노출 및 선언 (Strict Mode ReferenceError 방지)
+            var addCustomBookmark = window.addCustomBookmark;
+            var deleteCustomBookmark = window.deleteCustomBookmark;
+            var deleteCustomBookmarksConfirm = window.deleteCustomBookmarksConfirm;
+            var renameCustomBookmark = window.renameCustomBookmark;
+            var moveCustomBookmark = window.moveCustomBookmark;
+            var selectBookmark = window.selectBookmark;
+            var handleBookmarkKeydown = window.handleBookmarkKeydown;
+            var loadCustomBookmarks = window.loadCustomBookmarks;
+            var saveCustomBookmarks = window.saveCustomBookmarks;
+            var renderCustomBookmarks = window.renderCustomBookmarks;
+
             const btnBookmarkPdf = document.getElementById('btn-bookmark-pdf');
             const btnAddBookmark = document.getElementById('btn-add-bookmark');
             const btnSaveBookmarks = document.getElementById('btn-save-bookmarks');
-            const outlineContainer = document.getElementById('outline-container');
 
             if (btnBookmarkPdf) {
                 btnBookmarkPdf.onclick = () => {
@@ -3981,8 +5013,8 @@
                     if (!sidebar.classList.contains('open')) {
                         window.toggleSidebar();
                     }
-                    const outlineTab = document.querySelector('.sidebar-tab[data-tab="outline"]');
-                    if (outlineTab) outlineTab.click();
+                    const bmTab = document.querySelector('.sidebar-tab[data-tab="bookmark"]');
+                    if (bmTab) bmTab.click();
                 };
             }
 
@@ -3992,47 +5024,14 @@
                     const pageNum = parseInt(currentPageEl?.textContent) || 1;
                     const title = await showPromptDialog('Add Bookmark', `Enter title for page ${pageNum} bookmark:`, `Page ${pageNum} Bookmark`);
                     if (!title || !title.trim()) return;
-
-                    customBookmarks.push({ title: title.trim(), pageNum });
-
-                    const item = document.createElement('div');
-                    item.className = 'outline-item';
-                    item.style.display = 'flex';
-                    item.style.alignItems = 'center';
-                    item.style.justifyContent = 'space-between';
-                    item.style.padding = '6px 8px';
-                    item.style.cursor = 'pointer';
-
-                    const labelSpan = document.createElement('span');
-                    labelSpan.textContent = `🔖 ${title.trim()} (p.${pageNum})`;
-                    labelSpan.onclick = () => goToPage(pageNum);
-
-                    const delBtn = document.createElement('button');
-                    delBtn.textContent = '✕';
-                    delBtn.style.background = 'transparent';
-                    delBtn.style.border = 'none';
-                    delBtn.style.color = '#ef4444';
-                    delBtn.style.cursor = 'pointer';
-                    delBtn.title = 'Delete Bookmark';
-                    delBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        item.remove();
-                        customBookmarks = customBookmarks.filter(b => b !== item.__bm);
-                    };
-
-                    item.__bm = { title: title.trim(), pageNum };
-                    item.appendChild(labelSpan);
-                    item.appendChild(delBtn);
-                    outlineContainer.appendChild(item);
-
-                    showToast(`🔖 Bookmark added for page ${pageNum}: "${title.trim()}"`, '✅', 2500);
+                    addCustomBookmark(title, pageNum);
                 };
             }
 
             if (btnSaveBookmarks) {
                 btnSaveBookmarks.onclick = async () => {
                     if (customBookmarks.length === 0) {
-                        showMessageDialog('No Bookmarks', 'No bookmarks added yet. Click [➕ Add Bookmark] first.');
+                        showMessageDialog('No Bookmarks', 'No bookmarks added yet. Click [➕ Add] first.');
                         return;
                     }
                     try {
@@ -4050,6 +5049,9 @@
                     }
                 };
             }
+
+            // 최초 로드 시 북마크 복원
+            loadCustomBookmarks();
 
             // ====================================================
             // Feature 2: Digital Signature & Stamp (전자 서명 & 도장)

@@ -1557,44 +1557,306 @@ fn set_auto_start(enable: bool) {
     }
 }
 
-/// PDF 뷰어 윈도우를 생성하는 헬퍼 함수.
+static PDF_VIEWER_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn open_pdf_windows_map() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        std::sync::OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn standby_pdf_window_slot() -> &'static std::sync::Mutex<Option<String>> {
+    static SLOT: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+    SLOT.get_or_init(|| std::sync::Mutex::new(None))
+}
+
+fn normalize_pdf_key(pdf_path: &str) -> String {
+    let trimmed = pdf_path.trim().trim_matches('"');
+    std::fs::canonicalize(trimmed)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| trimmed.replace('/', "\\"))
+        .to_lowercase()
+}
+
+/// 윈도우를 최상단 포그라운드로 활성화합니다 (Tray 상주 상태에서 탐색기 더블클릭 시 포커스 보장).
+fn focus_webview_window(win: &tauri::WebviewWindow) {
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_always_on_top(true);
+    let _ = win.set_always_on_top(false);
+    let _ = win.set_focus();
+
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = win.hwnd() {
+        unsafe {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                BringWindowToTop, SetForegroundWindow, ShowWindow, SW_RESTORE,
+            };
+            let h = HWND(hwnd.0 as isize);
+            let _ = ShowWindow(h, SW_RESTORE);
+            let _ = BringWindowToTop(h);
+            let _ = SetForegroundWindow(h);
+        }
+    }
+}
+
+/// Tray 상주 중 PDF를 즉시 열 수 있도록 백그라운드에서 숨겨진 PDF 뷰어 윈도우 1개를 미리 예열(Pre-warm)합니다.
+fn prewarm_pdf_viewer(app: AppHandle) {
+    std::thread::spawn(move || {
+        // 기존 창 생성/렌더링과 경합하지 않도록 짧게 대기
+        std::thread::sleep(std::time::Duration::from_millis(250));
+
+        if let Ok(guard) = standby_pdf_window_slot().lock() {
+            if let Some(ref existing_label) = *guard {
+                if app.get_webview_window(existing_label).is_some() {
+                    return;
+                }
+            }
+        }
+
+        let count = PDF_VIEWER_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let window_label = format!("pdf-viewer-{}", count);
+
+        if tauri::WebviewWindowBuilder::new(
+            &app,
+            &window_label,
+            tauri::WebviewUrl::App(std::path::PathBuf::from("viewer.html")),
+        )
+        .title("PDF Viewer")
+        .inner_size(1100.0, 850.0)
+        .min_inner_size(500.0, 400.0)
+        .decorations(false)
+        .visible(false)
+        .build()
+        .is_ok()
+        {
+            if let Ok(mut guard) = standby_pdf_window_slot().lock() {
+                *guard = Some(window_label);
+            }
+        }
+    });
+}
+
+/// CLI 인자 배열에서 PDF 경로 목록, 제목 옵션, autostart 플래그를 추출합니다.
+fn parse_cli_args(args: &[String], cwd: Option<&str>) -> (Vec<String>, Option<String>, bool) {
+    let mut pdf_paths = Vec::new();
+    let mut pdf_title: Option<String> = None;
+    let mut is_autostart = false;
+
+    let resolve_path = |raw: &str| -> String {
+        let cleaned = raw.trim().trim_matches('"').to_string();
+        if cleaned.is_empty() {
+            return cleaned;
+        }
+        let p = Path::new(&cleaned);
+        if p.is_relative() {
+            if let Some(base) = cwd {
+                let base_trimmed = base.trim().trim_matches('"');
+                if !base_trimmed.is_empty() {
+                    return Path::new(base_trimmed)
+                        .join(p)
+                        .to_string_lossy()
+                        .into_owned();
+                }
+            }
+        }
+        cleaned
+    };
+
+    let mut i = 1;
+    while i < args.len() {
+        let arg_trimmed = args[i].trim().trim_matches('"');
+        if arg_trimmed == "--pdf-viewer" && i + 1 < args.len() {
+            let resolved = resolve_path(&args[i + 1]);
+            if !resolved.is_empty() {
+                pdf_paths.push(resolved);
+            }
+            i += 1;
+        } else if arg_trimmed == "--pdf-title" && i + 1 < args.len() {
+            let t = args[i + 1].trim().trim_matches('"').to_string();
+            if !t.is_empty() {
+                pdf_title = Some(t);
+            }
+            i += 1;
+        } else if arg_trimmed.eq_ignore_ascii_case("--autostart") {
+            is_autostart = true;
+        } else if arg_trimmed.to_lowercase().ends_with(".pdf") {
+            let resolved = resolve_path(arg_trimmed);
+            if !resolved.is_empty() {
+                pdf_paths.push(resolved);
+            }
+        }
+        i += 1;
+    }
+
+    (pdf_paths, pdf_title, is_autostart)
+}
+
+/// 이미 Tray에 상주 중인 MHZipy 인스턴스가 있으면 Tauri/WebView2를 초기화하기 전에
+/// 즉시 WM_COPYDATA로 인자를 전달하고 현재 프로세스를 종료합니다.
+#[cfg(target_os = "windows")]
+fn try_forward_to_running_instance() -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::System::DataExchange::COPYDATASTRUCT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        AllowSetForegroundWindow, FindWindowW, GetWindowThreadProcessId, SendMessageW, WM_COPYDATA,
+    };
+
+    let encode_wide = |s: &str| -> Vec<u16> {
+        std::ffi::OsStr::new(s)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+
+    let class_name = encode_wide("com.marho-soft.mhzipy-sic");
+    let window_name = encode_wide("com.marho-soft.mhzipy-siw");
+
+    unsafe {
+        let hwnd = FindWindowW(PCWSTR(class_name.as_ptr()), PCWSTR(window_name.as_ptr()));
+        if hwnd.0 == 0 {
+            return false;
+        }
+
+        // Tray 상주 중인 MHZipy 프로세스가 포그라운드 포커스를 가져갈 수 있도록 권한 부여
+        let mut target_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut target_pid));
+        if target_pid != 0 {
+            let _ = AllowSetForegroundWindow(target_pid);
+        }
+
+        let cwd = std::env::current_dir().unwrap_or_default();
+        let cwd_str = cwd.to_str().unwrap_or_default();
+        let args = std::env::args().collect::<Vec<String>>().join("|");
+        let data = format!("{cwd_str}|{args}\0");
+        let bytes = data.as_bytes();
+
+        let cds = COPYDATASTRUCT {
+            dwData: 1542, // WMCOPYDATA_SINGLE_INSTANCE_DATA
+            cbData: bytes.len() as u32,
+            lpData: bytes.as_ptr() as *mut _,
+        };
+
+        let _ = SendMessageW(
+            hwnd,
+            WM_COPYDATA,
+            WPARAM(0),
+            LPARAM(&cds as *const _ as isize),
+        );
+        true
+    }
+}
+
+/// 관리자 권한으로 Tray에 상주 중일 때도 일반 권한 탐색기(Explorer)에서 보낸 WM_COPYDATA를 수신할 수 있도록 허용합니다.
+#[cfg(target_os = "windows")]
+fn allow_single_instance_uipi() {
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            ChangeWindowMessageFilter, MSGFLT_ADD, WM_COPYDATA,
+        };
+        let _ = ChangeWindowMessageFilter(WM_COPYDATA, MSGFLT_ADD);
+    }
+}
+
+/// PDF 뷰어 윈도우를 생성하거나 예열된(Pre-warmed) 윈도우를 즉시 활성화하는 헬퍼 함수.
 /// 초기 실행 시와 single-instance 콜백 양쪽에서 재사용됩니다.
 fn open_pdf_viewer(app: &AppHandle, pdf_path: &str, pdf_title: Option<&str>) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let clean_path = pdf_path.trim().trim_matches('"').to_string();
+    if clean_path.is_empty() {
+        return;
+    }
 
     let title = match pdf_title {
         Some(t) if !t.is_empty() => t.to_string(),
-        _ => std::path::Path::new(pdf_path)
+        _ => std::path::Path::new(&clean_path)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned(),
     };
 
-    let init_script = format!(
-        "window.__PDF_PATH__ = '{}';",
-        pdf_path.replace("\\", "\\\\").replace("'", "\\'")
-    );
+    let norm_key = normalize_pdf_key(&clean_path);
 
-    // 고유한 윈도우 라벨 생성 (동시에 여러 PDF를 열 수 있도록)
-    let count = COUNTER.fetch_add(1, Ordering::SeqCst);
-    let window_label = format!("pdf-viewer-{}", count);
-
-    match tauri::WebviewWindowBuilder::new(
-        app,
-        &window_label,
-        tauri::WebviewUrl::App(std::path::PathBuf::from("viewer.html")),
-    )
-    .initialization_script(&init_script)
-    .title(&title)
-    .inner_size(1000.0, 800.0)
-    .decorations(false)
-    .build()
-    {
-        Ok(_) => println!("PDF viewer opened: {}", pdf_path),
-        Err(e) => eprintln!("Failed to open PDF viewer: {}", e),
+    // 1. 이미 동일한 PDF 파일이 열려 있는 윈도우가 있으면 즉시 포커스만 이동
+    if let Ok(mut map) = open_pdf_windows_map().lock() {
+        if let Some(existing_label) = map.get(&norm_key).cloned() {
+            if let Some(existing_win) = app.get_webview_window(&existing_label) {
+                focus_webview_window(&existing_win);
+                return;
+            } else {
+                map.remove(&norm_key);
+            }
+        }
     }
+
+    // 2. 예열된(Pre-warmed) 대기 윈도우가 있으면 WebView2 재생성 없이 즉시 표시 및 로드
+    let standby_win = standby_pdf_window_slot()
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+        .and_then(|label| app.get_webview_window(&label).map(|w| (label, w)));
+
+    if let Some((label, win)) = standby_win {
+        if let Ok(mut map) = open_pdf_windows_map().lock() {
+            map.insert(norm_key, label);
+        }
+
+        let _ = win.set_title(&title);
+        focus_webview_window(&win);
+
+        let escaped_path = clean_path.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_title = title.replace('\\', "\\\\").replace('\'', "\\'");
+        let eval_script = format!(
+            "window.__PDF_PATH__ = '{}'; if (typeof window.__loadPdfInPrewarmedWindow === 'function') {{ window.__loadPdfInPrewarmedWindow('{}', '{}'); }} else {{ window.__PENDING_PREWARM_PDF__ = {{ path: '{}', title: '{}' }}; }}",
+            escaped_path, escaped_path, escaped_title, escaped_path, escaped_title
+        );
+        let _ = win.eval(&eval_script);
+
+        // 다음 PDF 더블클릭을 위해 새 대기 윈도우를 백그라운드에서 다시 예열
+        prewarm_pdf_viewer(app.clone());
+        return;
+    }
+
+    // 3. 예열된 윈도우가 아직 없는 경우: 메인 UI 스레드 데드락 방지를 위해 별도 스레드에서 생성
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let init_script = format!(
+            "window.__PDF_PATH__ = '{}';",
+            clean_path.replace('\\', "\\\\").replace('\'', "\\'")
+        );
+
+        let count = PDF_VIEWER_COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let window_label = format!("pdf-viewer-{}", count);
+
+        match tauri::WebviewWindowBuilder::new(
+            &app_clone,
+            &window_label,
+            tauri::WebviewUrl::App(std::path::PathBuf::from("viewer.html")),
+        )
+        .initialization_script(&init_script)
+        .title(&title)
+        .inner_size(1100.0, 850.0)
+        .min_inner_size(500.0, 400.0)
+        .decorations(false)
+        .visible(true)
+        .focused(true)
+        .build()
+        {
+            Ok(win) => {
+                if let Ok(mut map) = open_pdf_windows_map().lock() {
+                    map.insert(norm_key, window_label);
+                }
+                focus_webview_window(&win);
+                println!("PDF viewer opened: {}", clean_path);
+                // 이후 PDF 실행을 빠르게 하기 위해 대기 윈도우 예열
+                prewarm_pdf_viewer(app_clone);
+            }
+            Err(e) => eprintln!("Failed to open PDF viewer: {}", e),
+        }
+    });
 }
 
 /// PDF 문서에서 특정 페이지만 추출하여 새 PDF 파일로 저장
@@ -1686,7 +1948,29 @@ fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "windows")]
+    if try_forward_to_running_instance() {
+        std::process::exit(0);
+    }
+
     tauri::Builder::default()
+        // single-instance 플러그인: 반드시 최우선으로 등록하여 두 번째 프로세스가 즉시 인자만 전달하고 종료되도록 함
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            println!("[single-instance] argv: {:?}, cwd: {}", argv, cwd);
+
+            let (pdf_paths, pdf_title, is_autostart) = parse_cli_args(&argv, Some(&cwd));
+
+            if !pdf_paths.is_empty() {
+                for path in &pdf_paths {
+                    open_pdf_viewer(app, path, pdf_title.as_deref());
+                }
+            } else if !is_autostart {
+                // PDF가 아니면 기존 메인 윈도우를 보여줌
+                if let Some(window) = app.get_webview_window("main") {
+                    focus_webview_window(&window);
+                }
+            }
+        }))
         .register_uri_scheme_protocol("pdf-data", |_app, request| {
             let uri = request.uri().to_string();
             let path_str = uri
@@ -1704,38 +1988,28 @@ pub fn run() {
                 .unwrap()
         })
         .setup(|app| {
+            #[cfg(target_os = "windows")]
+            allow_single_instance_uipi();
+
             // CLI 인자 파싱 — PDF 파일 경로가 있으면 뷰어 모드로 진입
             let args: Vec<String> = std::env::args().collect();
-            let mut pdf_path = String::new();
-            let mut pdf_title = String::new();
-            let mut is_autostart = false;
-
-            let mut i = 1;
-            while i < args.len() {
-                if args[i] == "--pdf-viewer" && i + 1 < args.len() {
-                    pdf_path = args[i + 1].clone();
-                    i += 1;
-                } else if args[i] == "--pdf-title" && i + 1 < args.len() {
-                    pdf_title = args[i + 1].clone();
-                    i += 1;
-                } else if args[i].trim().to_lowercase() == "--autostart" {
-                    is_autostart = true;
-                } else if args[i].to_lowercase().ends_with(".pdf") {
-                    pdf_path = args[i].clone();
-                }
-                i += 1;
-            }
+            let (pdf_paths, pdf_title, is_autostart) = parse_cli_args(&args, None);
 
             // PDF 경로가 있으면 뷰어 윈도우 열기
-            if !pdf_path.is_empty() {
-                let title_opt = if pdf_title.is_empty() { None } else { Some(pdf_title.as_str()) };
-                open_pdf_viewer(app.handle(), &pdf_path, title_opt);
+            if !pdf_paths.is_empty() {
+                for path in &pdf_paths {
+                    open_pdf_viewer(app.handle(), path, pdf_title.as_deref());
+                }
+            } else {
+                // Tray 상주 상태에서 탐색기로 PDF 더블클릭 시 즉시 열리도록 대기 윈도우 예열
+                prewarm_pdf_viewer(app.handle().clone());
             }
 
             // 항상 메인 윈도우와 Tray를 설정 (최초 실행 시)
             {
                 if let Some(main_window) = app.get_webview_window("main") {
-                    if !is_autostart {
+                    // PDF 파일을 직접 열어서 기동한 경우 메인 창은 띄우지 않고 Tray 상주 상태 유지
+                    if !is_autostart && pdf_paths.is_empty() {
                         let _ = main_window.show();
                     }
                 }
@@ -1844,41 +2118,6 @@ pub fn run() {
             app.manage(state);
             Ok(())
         })
-        // single-instance 플러그인: 두 번째 프로세스가 실행되면 기존 인스턴스로 인자 전달
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            println!("[single-instance] argv: {:?}", argv);
-
-            // argv에서 .pdf 파일 경로를 찾아 PDF 뷰어로 열기
-            let mut pdf_path = String::new();
-            let mut pdf_title = String::new();
-            let mut i = 1;
-            let mut is_autostart = false;
-            while i < argv.len() {
-                if argv[i] == "--pdf-viewer" && i + 1 < argv.len() {
-                    pdf_path = argv[i + 1].clone();
-                    i += 1;
-                } else if argv[i] == "--pdf-title" && i + 1 < argv.len() {
-                    pdf_title = argv[i + 1].clone();
-                    i += 1;
-                } else if argv[i].trim().to_lowercase() == "--autostart" {
-                    is_autostart = true;
-                } else if argv[i].to_lowercase().ends_with(".pdf") {
-                    pdf_path = argv[i].clone();
-                }
-                i += 1;
-            }
-
-            if !pdf_path.is_empty() {
-                let title_opt = if pdf_title.is_empty() { None } else { Some(pdf_title.as_str()) };
-                open_pdf_viewer(app, &pdf_path, title_opt);
-            } else if !is_autostart {
-                // PDF가 아니면 기존 메인 윈도우를 보여줌
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
-        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
@@ -1893,6 +2132,10 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let label = window.label();
                 if label != "main" {
+                    // 닫히는 PDF 뷰어 윈도우를 열림 목록에서 제거
+                    if let Ok(mut map) = open_pdf_windows_map().lock() {
+                        map.retain(|_, v| v != label);
+                    }
                     // Auxiliary windows (e.g., md-editor, pdf-viewer): simply close without tray animation
                     return;
                 }
