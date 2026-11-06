@@ -55,36 +55,12 @@ export default function AboutDialog({ isOpen, onClose, disableUpdateCheck, onTog
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
         </button>
         <div style={{ marginBottom: '24px' }}>
-          <div style={{ width: '80px', height: '80px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="100%" height="100%" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <defs>
-                <linearGradient id="mhz-grad-1" x1="20" y1="20" x2="80" y2="80" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#6366f1" />
-                  <stop offset="1" stopColor="#0ea5e9" />
-                </linearGradient>
-                <linearGradient id="mhz-grad-2" x1="80" y1="20" x2="20" y2="80" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#8b5cf6" />
-                  <stop offset="1" stopColor="#3b82f6" />
-                </linearGradient>
-                <filter id="mhz-glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="6" result="blur" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-              </defs>
-              <rect width="100" height="100" rx="28" fill="url(#mhz-grad-1)" filter="url(#mhz-glow)" opacity="0.15" />
-              <rect x="5" y="5" width="90" height="90" rx="24" fill="url(#mhz-grad-1)" opacity="0.9" />
-              
-              {/* Abstract Zip / M & Z Motif */}
-              <path d="M 30 35 L 45 35 L 45 45 L 30 45 Z" fill="#ffffff" opacity="0.9" />
-              <path d="M 55 35 L 70 35 L 70 45 L 55 45 Z" fill="#ffffff" opacity="0.9" />
-              <path d="M 45 45 L 60 45 L 60 55 L 45 55 Z" fill="#ffffff" opacity="0.95" />
-              <path d="M 30 55 L 45 55 L 45 65 L 30 65 Z" fill="#ffffff" opacity="0.9" />
-              <path d="M 55 55 L 70 55 L 70 65 L 55 65 Z" fill="#ffffff" opacity="0.9" />
-              
-              {/* Overlay accent */}
-              <path d="M 25 25 L 75 75" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.3" />
-              <path d="M 75 25 L 25 75" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" opacity="0.3" />
-            </svg>
+          <div style={{ width: '88px', height: '88px', margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img
+              src="/app-icon.png"
+              alt="MHZipy Icon"
+              style={{ width: '84px', height: '84px', borderRadius: '18px', boxShadow: '0 8px 24px rgba(0,0,0,0.45)', objectFit: 'contain' }}
+            />
           </div>
         </div>
         <h2 style={{ margin: '0 0 8px 0', fontSize: '1.8rem', fontWeight: 600 }}>MHZipy</h2>
