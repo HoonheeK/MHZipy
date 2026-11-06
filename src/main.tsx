@@ -16,6 +16,8 @@ const isPowerShellManager = view === 'powershell-manager';
 const filePath = params.get('filePath') || '';
 const workingDir = params.get('workingDir') || '';
 const scriptFilePath = params.get('scriptFilePath') || '';
+const runnerMode = params.get('runnerMode') === '1';
+const runId = params.get('runId') || '';
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
@@ -26,7 +28,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     ) : isVideoPlayer ? (
       <VideoPlayer initialFilePath={filePath} />
     ) : isPowerShellManager ? (
-      <PowerShellManager initialWorkingDir={workingDir} initialScriptFilePath={scriptFilePath} />
+      <PowerShellManager
+        initialWorkingDir={workingDir}
+        initialScriptFilePath={scriptFilePath}
+        runnerMode={runnerMode}
+        runId={runId}
+      />
     ) : (
       <App />
     )}

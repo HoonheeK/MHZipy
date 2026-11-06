@@ -3867,6 +3867,7 @@ async fn run_powershell_script(
 ) -> Result<PowerShellRunResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        use std::process::Command;
         use std::time::Instant;
 
         let trimmed_wd = working_dir.trim();

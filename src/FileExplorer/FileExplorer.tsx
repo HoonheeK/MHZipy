@@ -5,6 +5,7 @@ import { mkdir, rename } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import FolderTree, { WebFolderBadgeInfo } from "./FolderTree";
+import QuickAccessTree from "./QuickAccessTree";
 import FileList from "./FileList";
 import SearchView from "../SearchView/SearchView";
 import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOperations';
@@ -76,7 +77,6 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
   const [isResizing, setIsResizing] = useState(false);
   const [isResizingQuickAccess, setIsResizingQuickAccess] = useState(false);
   const [filterQuickAccess, setFilterQuickAccess] = useState(false);
-  const [draggedQAIndex, setDraggedQAIndex] = useState<number | null>(null);
   const [renamingTreePath, setRenamingTreePath] = useState<string | null>(null);
   const [renameTreeText, setRenameTreeText] = useState('');
   const [hasSystemClipboardFiles, setHasSystemClipboardFiles] = useState(false);
@@ -87,6 +87,9 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
   const [defaultPairLocalPath, setDefaultPairLocalPath] = useState<string>('');
   const [webFolderMenu, setWebFolderMenu] = useState<{ x: number; y: number; item: WebFolderItem } | null>(null);
   const [activeWebFolderId, setActiveWebFolderId] = useState<string | null>(null);
+  const [webFoldersCollapsed, setWebFoldersCollapsed] = useState<boolean>(() => {
+    return localStorage.getItem('mhz_web_folders_collapsed') === '1';
+  });
   const [webFolderStates, setWebFolderStates] = useState<Record<string, {
     isOpen: boolean;
     subpath: string[];
@@ -561,13 +564,6 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     setContextMenu({ x: e.clientX, y: e.clientY, path, source: 'tree' });
   };
 
-  const handleQuickAccessContextMenu = (e: React.MouseEvent, path: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    window.dispatchEvent(new CustomEvent('mhz-close-context-menu'));
-    setContextMenu({ x: e.clientX, y: e.clientY, path, source: 'quickAccess' });
-  };
-
   const handleCopy = async (paths: string[]) => {
     setClipboard({ paths, op: 'copy' });
     try {
@@ -891,29 +887,6 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     };
   };
 
-  const handleQADragStart = (e: React.DragEvent, index: number) => {
-    setDraggedQAIndex(index);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleQADragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  };
-
-  const handleQADrop = (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    if (draggedQAIndex === null || draggedQAIndex === dropIndex) return;
-
-    const newQuickAccess = [...config.quickAccess];
-    const [movedItem] = newQuickAccess.splice(draggedQAIndex, 1);
-    newQuickAccess.splice(dropIndex, 0, movedItem);
-
-    onSaveConfig({ quickAccess: newQuickAccess });
-    setDraggedQAIndex(null);
-  };
-
-
   useEffect(() => {
     const handleGlobalKeyDown = async (e: KeyboardEvent) => {
       if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement || contextMenu) {
@@ -1043,169 +1016,188 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
             className="quick-access-section"
             style={{ padding: '0 10px', height: quickAccessHeight, overflowY: 'auto', flexShrink: 0 }}
           >
-            {config.quickAccess.length > 0 && (
-              <>
-                <div className="quick-access-title">
-                  <span>{t('explorer.quickAccess', { defaultValue: 'Quick Access' })}</span>
-                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontWeight: 'normal', color: 'var(--mhz-text-dim)', fontSize: '0.8rem' }} title="Show only Quick Access folders in tree">
-                    <input
-                      type="checkbox"
-                      checked={filterQuickAccess}
-                      onChange={(e) => {
-                        setFilterQuickAccess(e.target.checked);
-                      }}
-                      style={{ marginRight: '4px' }}
-                      tabIndex={-1}
-                    />
-                    <span>{t('explorer.filterTree', { defaultValue: 'Filter Tree' })}</span>
-                  </label>
-                </div>
-                {config.quickAccess.map((qaPath, index) => (
-                  <div
-                    key={qaPath}
-                    onClick={() => {
-                      setSelected(qaPath);
-                      setSelectedPaths(new Set([qaPath]));
-                    }}
-                    onContextMenu={(e) => handleQuickAccessContextMenu(e, qaPath)}
-                    draggable
-                    onDragStart={(e) => handleQADragStart(e, index)}
-                    onDragOver={handleQADragOver}
-                    onDrop={(e) => handleQADrop(e, index)}
-                    className={`qa-item ${selected === qaPath ? 'selected' : ''}`}
-                    style={{ opacity: draggedQAIndex === index ? 0.5 : 1 }}
-                    title={qaPath}
-                    tabIndex={-1}
-                  >
-                    <span>📁</span>
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{qaPath.split(/[/\\]/).pop() || qaPath}</span>
-                  </div>
-                ))}
-              </>
-            )}
+            <QuickAccessTree
+              quickAccessPaths={config.quickAccess}
+              selectedPath={selected}
+              filterQuickAccess={filterQuickAccess}
+              onToggleFilterQuickAccess={(checked) => setFilterQuickAccess(checked)}
+              onSelectPath={(qaPath) => {
+                setSelected(qaPath);
+                setSelectedPaths(new Set([qaPath]));
+              }}
+              onUpdateQuickAccessPaths={(newPaths) => onSaveConfig({ quickAccess: newPaths })}
+            />
 
-            {/* 🌐 Web Folders (Box / Cloud) Section */}
-            <div className="quick-access-title" style={{ marginTop: config.quickAccess.length > 0 ? '8px' : '2px', borderTop: config.quickAccess.length > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none', paddingTop: config.quickAccess.length > 0 ? '6px' : '0' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {/* 🌐 Web Folders Section */}
+            <div
+              className="quick-access-title"
+              style={{
+                marginTop: '6px',
+                borderTop: '1px solid rgba(255,255,255,0.06)',
+                paddingTop: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '4px',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden' }}>
                 <span>🌐</span>
-                <span>Web Folders (Box)</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Web Folders
+                </span>
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingWebFolder(null);
-                  setDefaultPairLocalPath(selected || '');
-                  setWebFolderEditOpen(true);
-                }}
-                title="Add Box or Web Folder with Upload Safety Guard"
-                style={{
-                  background: 'rgba(56, 189, 248, 0.14)',
-                  border: '1px solid rgba(56, 189, 248, 0.35)',
-                  color: '#38bdf8',
-                  borderRadius: '4px',
-                  padding: '1px 6px',
-                  fontSize: '0.74rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                + Add
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (webFoldersCollapsed) {
+                      setWebFoldersCollapsed(false);
+                      try {
+                        localStorage.setItem('mhz_web_folders_collapsed', '0');
+                      } catch {}
+                    }
+                    setEditingWebFolder(null);
+                    setDefaultPairLocalPath(selected || '');
+                    setWebFolderEditOpen(true);
+                  }}
+                  title="Add Box or Web Folder with Upload Safety Guard"
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.14)',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    color: '#38bdf8',
+                    borderRadius: '4px',
+                    padding: '1px 6px',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  + Add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWebFoldersCollapsed((prev) => {
+                      const next = !prev;
+                      try {
+                        localStorage.setItem('mhz_web_folders_collapsed', next ? '1' : '0');
+                      } catch {}
+                      return next;
+                    });
+                  }}
+                  title={webFoldersCollapsed ? 'Expand Web Folders' : 'Collapse Web Folders'}
+                  style={{
+                    background: 'rgba(148, 163, 184, 0.12)',
+                    border: '1px solid rgba(148, 163, 184, 0.25)',
+                    color: '#cbd5e1',
+                    borderRadius: '4px',
+                    padding: '1px 5px',
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {webFoldersCollapsed ? '▶' : '▼'}
+                </button>
+              </div>
             </div>
 
-            {webFolders.length === 0 ? (
-              <div
-                onClick={() => {
-                  setEditingWebFolder(null);
-                  setDefaultPairLocalPath(selected || '');
-                  setWebFolderEditOpen(true);
-                }}
-                style={{
-                  padding: '6px 8px',
-                  fontSize: '0.78rem',
-                  color: 'var(--mhz-text-dim)',
-                  fontStyle: 'italic',
-                  cursor: 'pointer',
-                }}
-              >
-                + Click to add Box / Web Folder...
-              </div>
-            ) : (
-              webFolders.map((wf) => {
-                const safetyBadge =
-                  wf.safetyLevel === 'strict' ? '🔴' : wf.safetyLevel === 'download_only' ? '🟢' : '🟡';
-                const wfState = webFolderStates[wf.id];
-                const isActiveWf = activeWebFolderId === wf.id;
-                return (
-                  <div
-                    key={wf.id}
-                    onClick={() => handleSelectAndOpenWebFolder(wf)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setContextMenu(null);
-                      setWebFolderMenu({ x: e.clientX, y: e.clientY, item: wf });
-                    }}
-                    className={`qa-item ${isActiveWf ? 'selected' : ''}`}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '4px',
-                      borderLeft: wfState?.isOpen
-                        ? '3px solid #22c55e'
-                        : isActiveWf
-                          ? '3px solid #38bdf8'
-                          : '3px solid transparent',
-                    }}
-                    title={`${wf.name}\nURL: ${wf.url}${wf.linkedLocalPath ? `\nLinked Local: ${wf.linkedLocalPath}` : ''}\nSafety: ${wf.safetyLevel.toUpperCase()} (Click to show status in FolderTree & open Safe Web Folder Window)`}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', flex: 1 }}>
-                      <span style={{ fontSize: '0.75em' }}>{safetyBadge}</span>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {wf.name}
-                      </span>
-                      {wfState?.isOpen && (
-                        <span
-                          style={{
-                            fontSize: '0.68rem',
-                            padding: '0px 4px',
-                            borderRadius: '4px',
-                            background: wfState.uploadUnlocked ? 'rgba(234, 179, 8, 0.22)' : 'rgba(34, 197, 94, 0.2)',
-                            color: wfState.uploadUnlocked ? '#fde047' : '#86efac',
-                            flexShrink: 0,
-                          }}
-                        >
-                          {wfState.uploadUnlocked ? '🔓' : '🟢'}
+            {!webFoldersCollapsed && (
+              webFolders.length === 0 ? (
+                <div
+                  onClick={() => {
+                    setEditingWebFolder(null);
+                    setDefaultPairLocalPath(selected || '');
+                    setWebFolderEditOpen(true);
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    fontSize: '0.78rem',
+                    color: 'var(--mhz-text-dim)',
+                    fontStyle: 'italic',
+                    cursor: 'pointer',
+                  }}
+                >
+                  + Click to add Box / Web Folder...
+                </div>
+              ) : (
+                webFolders.map((wf) => {
+                  const safetyBadge =
+                    wf.safetyLevel === 'strict' ? '🔴' : wf.safetyLevel === 'download_only' ? '🟢' : '🟡';
+                  const wfState = webFolderStates[wf.id];
+                  const isActiveWf = activeWebFolderId === wf.id;
+                  return (
+                    <div
+                      key={wf.id}
+                      onClick={() => handleSelectAndOpenWebFolder(wf)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setContextMenu(null);
+                        setWebFolderMenu({ x: e.clientX, y: e.clientY, item: wf });
+                      }}
+                      className={`qa-item ${isActiveWf ? 'selected' : ''}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '4px',
+                        borderLeft: wfState?.isOpen
+                          ? '3px solid #22c55e'
+                          : isActiveWf
+                            ? '3px solid #38bdf8'
+                            : '3px solid transparent',
+                      }}
+                      title={`${wf.name}\nURL: ${wf.url}${wf.linkedLocalPath ? `\nLinked Local: ${wf.linkedLocalPath}` : ''}\nSafety: ${wf.safetyLevel.toUpperCase()} (Click to show status in FolderTree & open Safe Web Folder Window)`}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', flex: 1 }}>
+                        <span style={{ fontSize: '0.75em' }}>{safetyBadge}</span>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {wf.name}
                         </span>
-                      )}
+                        {wfState?.isOpen && (
+                          <span
+                            style={{
+                              fontSize: '0.68rem',
+                              padding: '0px 4px',
+                              borderRadius: '4px',
+                              background: wfState.uploadUnlocked ? 'rgba(234, 179, 8, 0.22)' : 'rgba(34, 197, 94, 0.2)',
+                              color: wfState.uploadUnlocked ? '#fde047' : '#86efac',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {wfState.uploadUnlocked ? '🔓' : '🟢'}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                        {wf.linkedLocalPath && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelected(wf.linkedLocalPath);
+                              setSelectedPaths(new Set([wf.linkedLocalPath]));
+                            }}
+                            title={`Go to Linked Local Folder: ${wf.linkedLocalPath}`}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '1px 3px',
+                              fontSize: '0.82em',
+                              opacity: 0.85,
+                            }}
+                          >
+                            📁
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
-                      {wf.linkedLocalPath && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelected(wf.linkedLocalPath);
-                            setSelectedPaths(new Set([wf.linkedLocalPath]));
-                          }}
-                          title={`Go to Linked Local Folder: ${wf.linkedLocalPath}`}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            padding: '1px 3px',
-                            fontSize: '0.82em',
-                            opacity: 0.85,
-                          }}
-                        >
-                          📁
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
+                  );
+                })
+              )
             )}
           </div>
           <div
