@@ -16,7 +16,22 @@ import { useTranslation } from 'react-i18next';
 import { checkForUpdates } from './utils/updater';
 import PdfProgressDialog from './common/PdfProgressDialog';
 import { initCrossWindowDrag } from './utils/crossWindowDrag';
+import { WebFolderItem } from './WebFolder/WebFolderModals';
 import './App.css';
+
+export interface SearchPreset {
+  id: string;
+  name: string;
+  query: string;
+  useRegex: boolean;
+  sizeQuery: string;
+  type: string;
+  dateAfter: string;
+  dateBefore: string;
+  searchMode: 'index' | 'directory';
+  directorySearchPaths: string[];
+  createdAt: number;
+}
 
 export interface SearchConfig {
   query: string;
@@ -28,6 +43,8 @@ export interface SearchConfig {
   showFilters: boolean;
   searchMode: 'index' | 'directory';
   directorySearchPaths: string[];
+  presets?: SearchPreset[];
+  recentSearches?: SearchPreset[];
 }
 
 export type LicenseStatus = { Trial: { days_left: number } } | { Activated: { expiry_date: number } } | "Expired";
@@ -58,6 +75,7 @@ interface AppConfig {
   disableUpdateCheck?: boolean;
   pdfExportPath?: string;
   zoomLevel?: number;
+  webFolders?: WebFolderItem[];
 }
 
 function App() {

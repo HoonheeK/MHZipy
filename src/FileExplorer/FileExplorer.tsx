@@ -3,13 +3,14 @@ import { useTranslation } from "react-i18next";
 import { dirname, join } from '@tauri-apps/api/path';
 import { mkdir, rename } from '@tauri-apps/plugin-fs';
 import { invoke } from '@tauri-apps/api/core';
-import { emit } from '@tauri-apps/api/event';
-import FolderTree from "./FolderTree";
+import { emit, listen } from '@tauri-apps/api/event';
+import FolderTree, { WebFolderBadgeInfo } from "./FolderTree";
 import FileList from "./FileList";
 import SearchView from "../SearchView/SearchView";
 import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOperations';
 import MessageDialog from "../common/MessageDialog";
 import ConfirmDialog from "../common/ConfirmDialog";
+import { WebFolderItem, WebFolderEditModal } from "../WebFolder/WebFolderModals";
 import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
@@ -35,8 +36,8 @@ export interface FileExplorerRef {
 }
 
 interface FileExplorerProps {
-  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; useVideoPlayer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string };
-  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; useVideoPlayer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string }>) => void;
+  config: { defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; useVideoPlayer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string; webFolders?: WebFolderItem[] };
+  onSaveConfig: (updates: Partial<{ defaultPath: string; quickAccess: string[]; sidebarWidth?: number; expandedPaths?: string[]; quickAccessHeight?: number; view?: 'folder' | 'search'; editableFolders?: string[]; readonlyFolders?: string[]; search?: SearchConfig; columnSettings?: { key: string; visible: boolean }[]; usePdfWorker?: boolean; useImageViewer?: boolean; useVideoPlayer?: boolean; recentOpenedFolders?: string[]; pdfExportPath?: string; webFolders?: WebFolderItem[] }>) => void;
   currentView: 'folder' | 'search';
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
@@ -77,6 +78,194 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
   const [renamingTreePath, setRenamingTreePath] = useState<string | null>(null);
   const [renameTreeText, setRenameTreeText] = useState('');
   const [hasSystemClipboardFiles, setHasSystemClipboardFiles] = useState(false);
+
+  // Web Folders (Box / Cloud) State
+  const [webFolderEditOpen, setWebFolderEditOpen] = useState(false);
+  const [editingWebFolder, setEditingWebFolder] = useState<WebFolderItem | null>(null);
+  const [defaultPairLocalPath, setDefaultPairLocalPath] = useState<string>('');
+  const [webFolderMenu, setWebFolderMenu] = useState<{ x: number; y: number; item: WebFolderItem } | null>(null);
+  const [activeWebFolderId, setActiveWebFolderId] = useState<string | null>(null);
+  const [webFolderStates, setWebFolderStates] = useState<Record<string, {
+    isOpen: boolean;
+    subpath: string[];
+    autoExtractZip: boolean;
+    uploadUnlocked: boolean;
+    remainingSeconds: number;
+    lastDownload?: { fileName: string; targetDir: string };
+  }>>({});
+
+  const webFolders = config.webFolders || [];
+
+  useEffect(() => {
+    let unlistenState: (() => void) | null = null;
+    let unlistenDl: (() => void) | null = null;
+    let unlistenClosed: (() => void) | null = null;
+
+    listen<{
+      id: string;
+      isOpen?: boolean;
+      subpath?: string[];
+      autoExtractZip?: boolean;
+      uploadUnlocked?: boolean;
+      remainingSeconds?: number;
+    }>('web-folder-live-state', (ev) => {
+      const p = ev.payload;
+      if (!p || !p.id) return;
+      setWebFolderStates((prev) => {
+        const cur = prev[p.id] || {
+          isOpen: true,
+          subpath: [],
+          autoExtractZip: true,
+          uploadUnlocked: false,
+          remainingSeconds: 0,
+        };
+        return {
+          ...prev,
+          [p.id]: {
+            ...cur,
+            isOpen: p.isOpen !== undefined ? p.isOpen : true,
+            subpath: Array.isArray(p.subpath) ? p.subpath : cur.subpath,
+            autoExtractZip: p.autoExtractZip !== undefined ? p.autoExtractZip : cur.autoExtractZip,
+            uploadUnlocked: p.uploadUnlocked !== undefined ? p.uploadUnlocked : cur.uploadUnlocked,
+            remainingSeconds: p.remainingSeconds !== undefined ? p.remainingSeconds : cur.remainingSeconds,
+          },
+        };
+      });
+    }).then((fn) => { unlistenState = fn; });
+
+    listen<{
+      id: string;
+      targetDir: string;
+      fileName: string;
+    }>('web-folder-download-completed', (ev) => {
+      const p = ev.payload;
+      if (!p || !p.id) return;
+      setWebFolderStates((prev) => {
+        const cur = prev[p.id] || {
+          isOpen: true,
+          subpath: [],
+          autoExtractZip: true,
+          uploadUnlocked: false,
+          remainingSeconds: 0,
+        };
+        return {
+          ...prev,
+          [p.id]: {
+            ...cur,
+            lastDownload: { fileName: p.fileName, targetDir: p.targetDir },
+          },
+        };
+      });
+      setRefreshTrigger((prev) => prev + 1);
+    }).then((fn) => { unlistenDl = fn; });
+
+    listen<{ label: string }>('web-folder-window-closed', (ev) => {
+      const label = ev.payload?.label || '';
+      if (!label.startsWith('web-folder-')) return;
+      const closedCleanId = label.slice('web-folder-'.length);
+      setWebFolderStates((prev) => {
+        const next = { ...prev };
+        for (const wf of config.webFolders || []) {
+          const clean = wf.id.replace(/[^a-zA-Z0-9_-]/g, '') || 'default';
+          if (clean === closedCleanId && next[wf.id]) {
+            next[wf.id] = {
+              ...next[wf.id],
+              isOpen: false,
+              uploadUnlocked: false,
+              remainingSeconds: 0,
+            };
+          }
+        }
+        return next;
+      });
+    }).then((fn) => { unlistenClosed = fn; });
+
+    return () => {
+      if (unlistenState) unlistenState();
+      if (unlistenDl) unlistenDl();
+      if (unlistenClosed) unlistenClosed();
+    };
+  }, [config.webFolders]);
+
+  const webFolderBadges = useMemo<Record<string, WebFolderBadgeInfo>>(() => {
+    const map: Record<string, WebFolderBadgeInfo> = {};
+    for (const wf of webFolders) {
+      const base = (wf.linkedLocalPath || '').trim().replace(/[\\/]+$/, '');
+      if (!base) continue;
+      const st = webFolderStates[wf.id];
+      const isOpen = !!st?.isOpen;
+      const uploadUnlocked = !!st?.uploadUnlocked;
+      const subpath = st?.subpath || [];
+      const baseKey = base.toLowerCase();
+
+      map[baseKey] = {
+        wfName: wf.name,
+        isOpen,
+        uploadUnlocked,
+        safetyLevel: wf.safetyLevel || 'caution',
+        isCurrentTarget: isOpen && subpath.length === 0,
+      };
+
+      if (isOpen && subpath.length > 0) {
+        const targetFull = [base, ...subpath].join('\\').toLowerCase();
+        map[targetFull] = {
+          wfName: wf.name,
+          isOpen: true,
+          uploadUnlocked,
+          safetyLevel: wf.safetyLevel || 'caution',
+          isCurrentTarget: true,
+          subpathLabel: subpath.join(' / '),
+        };
+      }
+    }
+    return map;
+  }, [webFolders, webFolderStates]);
+
+  const handleSelectAndOpenWebFolder = async (wf: WebFolderItem) => {
+    setActiveWebFolderId(wf.id);
+    if (wf.linkedLocalPath) {
+      const st = webFolderStates[wf.id];
+      const base = wf.linkedLocalPath.replace(/[\\/]+$/, '');
+      const target = st?.isOpen && st.subpath.length > 0
+        ? [base, ...st.subpath].join('\\')
+        : base;
+      setSelected(target);
+      setSelectedPaths(new Set([target]));
+    }
+    await handleOpenSafeWebFolder(wf);
+  };
+
+  const handleOpenSafeWebFolder = async (wf: WebFolderItem) => {
+    try {
+      await invoke('open_safe_web_folder_window', {
+        id: wf.id,
+        name: wf.name,
+        url: wf.url,
+        linkedLocalPath: wf.linkedLocalPath || '',
+        safetyLevel: wf.safetyLevel || 'caution',
+      });
+    } catch (e) {
+      showMessage('Web Folder Error', `Failed to open web folder: ${String(e)}`);
+    }
+  };
+
+  const handleSaveWebFolder = (item: WebFolderItem) => {
+    const existing = config.webFolders || [];
+    const idx = existing.findIndex((w) => w.id === item.id);
+    let updated: WebFolderItem[];
+    if (idx >= 0) {
+      updated = [...existing];
+      updated[idx] = item;
+    } else {
+      updated = [...existing, item];
+    }
+    onSaveConfig({ webFolders: updated });
+  };
+
+  const handleDeleteWebFolder = (id: string) => {
+    const existing = config.webFolders || [];
+    onSaveConfig({ webFolders: existing.filter((w) => w.id !== id) });
+  };
 
   const sidebarWidthRef = useRef(sidebarWidth);
   const quickAccessHeightRef = useRef(quickAccessHeight);
@@ -838,14 +1027,13 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
       {searchViewElement}
       <div className="mhz-explorer" style={{ display: currentView === 'search' ? 'none' : 'flex' }}>
         <aside className="mhz-explorer__tree" style={{ width: sidebarWidth, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          {config.quickAccess.length > 0 && (
-            <>
-              <div
-                ref={quickAccessRef}
-                className="quick-access-section"
-                // tabIndex={0}
-                style={{ padding: '0 10px', height: quickAccessHeight, overflowY: 'auto', flexShrink: 0 }}
-              >
+          <div
+            ref={quickAccessRef}
+            className="quick-access-section"
+            style={{ padding: '0 10px', height: quickAccessHeight, overflowY: 'auto', flexShrink: 0 }}
+          >
+            {config.quickAccess.length > 0 && (
+              <>
                 <div className="quick-access-title">
                   <span>{t('explorer.quickAccess', { defaultValue: 'Quick Access' })}</span>
                   <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontWeight: 'normal', color: 'var(--mhz-text-dim)', fontSize: '0.8rem' }} title="Show only Quick Access folders in tree">
@@ -882,14 +1070,370 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{qaPath.split(/[/\\]/).pop() || qaPath}</span>
                   </div>
                 ))}
-              </div>
+              </>
+            )}
+
+            {/* 🌐 Web Folders (Box / Cloud) Section */}
+            <div className="quick-access-title" style={{ marginTop: config.quickAccess.length > 0 ? '8px' : '2px', borderTop: config.quickAccess.length > 0 ? '1px solid rgba(255,255,255,0.06)' : 'none', paddingTop: config.quickAccess.length > 0 ? '6px' : '0' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span>🌐</span>
+                <span>Web Folders (Box)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingWebFolder(null);
+                  setDefaultPairLocalPath(selected || '');
+                  setWebFolderEditOpen(true);
+                }}
+                title="Add Box or Web Folder with Upload Safety Guard"
+                style={{
+                  background: 'rgba(56, 189, 248, 0.14)',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  color: '#38bdf8',
+                  borderRadius: '4px',
+                  padding: '1px 6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                + Add
+              </button>
+            </div>
+
+            {webFolders.length === 0 ? (
               <div
-                onMouseDown={(e) => { e.preventDefault(); setIsResizingQuickAccess(true); }}
-                style={{ height: '3px', cursor: 'row-resize', backgroundColor: 'var(--mhz-border)', flexShrink: 0 }}
-              />
-            </>
-          )}
+                onClick={() => {
+                  setEditingWebFolder(null);
+                  setDefaultPairLocalPath(selected || '');
+                  setWebFolderEditOpen(true);
+                }}
+                style={{
+                  padding: '6px 8px',
+                  fontSize: '0.78rem',
+                  color: 'var(--mhz-text-dim)',
+                  fontStyle: 'italic',
+                  cursor: 'pointer',
+                }}
+              >
+                + Click to add Box / Web Folder...
+              </div>
+            ) : (
+              webFolders.map((wf) => {
+                const safetyBadge =
+                  wf.safetyLevel === 'strict' ? '🔴' : wf.safetyLevel === 'download_only' ? '🟢' : '🟡';
+                const wfState = webFolderStates[wf.id];
+                const isActiveWf = activeWebFolderId === wf.id;
+                return (
+                  <div
+                    key={wf.id}
+                    onClick={() => handleSelectAndOpenWebFolder(wf)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setContextMenu(null);
+                      setWebFolderMenu({ x: e.clientX, y: e.clientY, item: wf });
+                    }}
+                    className={`qa-item ${isActiveWf ? 'selected' : ''}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '4px',
+                      borderLeft: wfState?.isOpen
+                        ? '3px solid #22c55e'
+                        : isActiveWf
+                          ? '3px solid #38bdf8'
+                          : '3px solid transparent',
+                    }}
+                    title={`${wf.name}\nURL: ${wf.url}${wf.linkedLocalPath ? `\nLinked Local: ${wf.linkedLocalPath}` : ''}\nSafety: ${wf.safetyLevel.toUpperCase()} (Click to show status in FolderTree & open Safe Web Folder Window)`}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden', flex: 1 }}>
+                      <span style={{ fontSize: '0.75em' }}>{safetyBadge}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {wf.name}
+                      </span>
+                      {wfState?.isOpen && (
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            padding: '0px 4px',
+                            borderRadius: '4px',
+                            background: wfState.uploadUnlocked ? 'rgba(234, 179, 8, 0.22)' : 'rgba(34, 197, 94, 0.2)',
+                            color: wfState.uploadUnlocked ? '#fde047' : '#86efac',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {wfState.uploadUnlocked ? '🔓' : '🟢'}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                      {wf.linkedLocalPath && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelected(wf.linkedLocalPath);
+                            setSelectedPaths(new Set([wf.linkedLocalPath]));
+                          }}
+                          title={`Go to Linked Local Folder: ${wf.linkedLocalPath}`}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '1px 3px',
+                            fontSize: '0.82em',
+                            opacity: 0.85,
+                          }}
+                        >
+                          📁
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div
+            onMouseDown={(e) => { e.preventDefault(); setIsResizingQuickAccess(true); }}
+            style={{ height: '3px', cursor: 'row-resize', backgroundColor: 'var(--mhz-border)', flexShrink: 0 }}
+          />
           <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            {(() => {
+              const activeWf =
+                webFolders.find((w) => w.id === activeWebFolderId) ||
+                webFolders.find((w) => webFolderStates[w.id]?.isOpen);
+              if (!activeWf) return null;
+              const st = webFolderStates[activeWf.id] || {
+                isOpen: false,
+                subpath: [],
+                autoExtractZip: true,
+                uploadUnlocked: false,
+                remainingSeconds: 0,
+              };
+              const baseLocal = (activeWf.linkedLocalPath || '').trim().replace(/[\\/]+$/, '');
+              const safetyColor =
+                activeWf.safetyLevel === 'strict'
+                  ? '#f87171'
+                  : activeWf.safetyLevel === 'download_only'
+                    ? '#4ade80'
+                    : '#facc15';
+              const formatRem = (sec: number) => {
+                const m = Math.floor(sec / 60);
+                const s = sec % 60;
+                return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+              };
+              return (
+                <div
+                  style={{
+                    margin: '6px 6px 8px 6px',
+                    padding: '8px 10px',
+                    borderRadius: '7px',
+                    background: 'rgba(15, 23, 42, 0.78)',
+                    border: st.isOpen
+                      ? '1px solid rgba(56, 189, 248, 0.45)'
+                      : '1px solid rgba(148, 163, 184, 0.25)',
+                    fontSize: '0.76rem',
+                    color: '#e2e8f0',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', marginBottom: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700, overflow: 'hidden' }}>
+                      <span>🌐</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {activeWf.name}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                      <span
+                        style={{
+                          padding: '1px 6px',
+                          borderRadius: '999px',
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          background: st.isOpen ? 'rgba(34, 197, 94, 0.2)' : 'rgba(148, 163, 184, 0.18)',
+                          color: st.isOpen ? '#86efac' : '#94a3b8',
+                          border: st.isOpen ? '1px solid rgba(34, 197, 94, 0.45)' : '1px solid rgba(148, 163, 184, 0.3)',
+                        }}
+                      >
+                        {st.isOpen ? '🟢 Open' : '⚪ Closed'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveWebFolderId(null)}
+                        title="Hide Web Folder Status Panel"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                          padding: '0 3px',
+                          fontSize: '0.78rem',
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Status Pills */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '7px' }}>
+                    <span
+                      style={{
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        background: 'rgba(30, 41, 59, 0.9)',
+                        border: '1px solid rgba(148, 163, 184, 0.25)',
+                        color: safetyColor,
+                        fontWeight: 600,
+                      }}
+                    >
+                      🛡️ {activeWf.safetyLevel.toUpperCase()}
+                    </span>
+                    <span
+                      style={{
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        fontSize: '0.68rem',
+                        background: st.uploadUnlocked ? 'rgba(234, 179, 8, 0.2)' : 'rgba(30, 41, 59, 0.9)',
+                        border: st.uploadUnlocked ? '1px solid rgba(250, 204, 21, 0.5)' : '1px solid rgba(148, 163, 184, 0.25)',
+                        color: st.uploadUnlocked ? '#fde047' : '#cbd5e1',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {st.uploadUnlocked
+                        ? `🔓 Upload Unlocked (${formatRem(st.remainingSeconds)})`
+                        : '🔒 Upload Locked'}
+                    </span>
+                    {baseLocal && (
+                      <span
+                        style={{
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          fontSize: '0.68rem',
+                          background: st.autoExtractZip ? 'rgba(56, 189, 248, 0.16)' : 'rgba(30, 41, 59, 0.9)',
+                          border: '1px solid rgba(56, 189, 248, 0.35)',
+                          color: st.autoExtractZip ? '#7dd3fc' : '#94a3b8',
+                        }}
+                      >
+                        📦 Auto-Unpack: {st.autoExtractZip ? 'ON' : 'OFF'}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Live Web Hierarchy Tree mapped to Local Folder */}
+                  <div
+                    style={{
+                      padding: '5px 6px',
+                      borderRadius: '5px',
+                      background: 'rgba(2, 6, 23, 0.55)',
+                      border: '1px solid rgba(148, 163, 184, 0.18)',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.68rem', color: '#94a3b8', marginBottom: '3px', fontWeight: 600 }}>
+                      Web Folder Hierarchy {baseLocal ? '(Click to open local folder)' : '(No Linked Local Folder)'}:
+                    </div>
+                    <div
+                      onClick={() => {
+                        if (baseLocal) {
+                          setSelected(baseLocal);
+                          setSelectedPaths(new Set([baseLocal]));
+                        }
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: '2px 4px',
+                        borderRadius: '4px',
+                        cursor: baseLocal ? 'pointer' : 'default',
+                        background: st.subpath.length === 0 ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+                        color: st.subpath.length === 0 ? '#7dd3fc' : '#cbd5e1',
+                        fontWeight: st.subpath.length === 0 ? 700 : 500,
+                      }}
+                      title={baseLocal || activeWf.url}
+                    >
+                      <span>📁</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {baseLocal ? baseLocal.split(/[\\/]/).pop() || baseLocal : `${activeWf.name} (Root)`}
+                      </span>
+                      {st.subpath.length === 0 && (
+                        <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#38bdf8' }}>● Current</span>
+                      )}
+                    </div>
+                    {st.subpath.map((seg, idx) => {
+                      const isLeaf = idx === st.subpath.length - 1;
+                      const subLocalPath = baseLocal
+                        ? [baseLocal, ...st.subpath.slice(0, idx + 1)].join('\\')
+                        : '';
+                      return (
+                        <div
+                          key={`${seg}-${idx}`}
+                          onClick={() => {
+                            if (subLocalPath) {
+                              setSelected(subLocalPath);
+                              setSelectedPaths(new Set([subLocalPath]));
+                            }
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: `2px 4px 2px ${(idx + 1) * 12 + 4}px`,
+                            borderRadius: '4px',
+                            cursor: subLocalPath ? 'pointer' : 'default',
+                            background: isLeaf ? 'rgba(56, 189, 248, 0.18)' : 'transparent',
+                            color: isLeaf ? '#7dd3fc' : '#cbd5e1',
+                            fontWeight: isLeaf ? 700 : 500,
+                          }}
+                          title={subLocalPath || seg}
+                        >
+                          <span style={{ color: '#64748b' }}>└</span>
+                          <span>📂</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {seg}
+                          </span>
+                          {isLeaf && (
+                            <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#38bdf8' }}>● Target</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {st.lastDownload && (
+                    <div
+                      onClick={() => {
+                        if (st.lastDownload?.targetDir) {
+                          setSelected(st.lastDownload.targetDir);
+                          setSelectedPaths(new Set([st.lastDownload.targetDir]));
+                        }
+                      }}
+                      style={{
+                        marginTop: '6px',
+                        padding: '4px 6px',
+                        borderRadius: '4px',
+                        background: 'rgba(20, 83, 45, 0.45)',
+                        border: '1px solid rgba(74, 222, 128, 0.35)',
+                        color: '#bbf7d0',
+                        fontSize: '0.69rem',
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={`Click to open downloaded folder:\n${st.lastDownload.targetDir}`}
+                    >
+                      ✅ Downloaded: {st.lastDownload.fileName}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {!filterQuickAccess ? (
               <FolderTree
                 path={treeRoot.path}
@@ -913,6 +1457,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                 onFinishRename={handleFinishTreeRename}
                 onCancelRename={handleCancelTreeRename}
                 showMessage={showMessage}
+                webFolderBadges={webFolderBadges}
                 isRoot
                 depth={0}
               />
@@ -951,6 +1496,7 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                     onFinishRename={handleFinishTreeRename}
                     onCancelRename={handleCancelTreeRename}
                     showMessage={showMessage}
+                    webFolderBadges={webFolderBadges}
                     isRoot
                   />
                 ))
@@ -1060,6 +1606,19 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                 <div className="context-menu-item" onClick={() => Array.from(selectedPaths).forEach(p => handleAddToQuickAccess(p))} style={{ padding: '2px 10px' }}>
                   {t('contextMenu.addToQuickAccess', { defaultValue: 'Add to Quick Access' })}
                 </div>
+                <div
+                  className="context-menu-item"
+                  onClick={() => {
+                    const targetPath = contextMenu.path;
+                    setContextMenu(null);
+                    setEditingWebFolder(null);
+                    setDefaultPairLocalPath(targetPath);
+                    setWebFolderEditOpen(true);
+                  }}
+                  style={{ padding: '2px 10px' }}
+                >
+                  🌐 Pair with Web Folder (Box)...
+                </div>
                 <div className="context-menu-separator"></div>
                 <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')} style={{ padding: '2px 10px' }}>{t('contextMenu.setAsEditable', { defaultValue: 'Set as Editable' })}</div>
                 <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'readonly')} style={{ padding: '2px 10px' }}>{t('contextMenu.setAsReadOnly', { defaultValue: 'Set as Read-only' })}</div>
@@ -1068,6 +1627,92 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
             )}
           </div>
         )}
+
+        {webFolderMenu && (
+          <div
+            className="context-menu"
+            style={{
+              position: 'fixed',
+              left: Math.min(webFolderMenu.x, window.innerWidth - 240),
+              top: Math.min(webFolderMenu.y, window.innerHeight - 220),
+              zIndex: 2500,
+            }}
+            onMouseLeave={() => setWebFolderMenu(null)}
+          >
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                const item = webFolderMenu.item;
+                setWebFolderMenu(null);
+                handleOpenSafeWebFolder(item);
+              }}
+              style={{ padding: '4px 10px' }}
+            >
+              <span>🛡️ Open Safe Web Folder Window</span>
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                const item = webFolderMenu.item;
+                setWebFolderMenu(null);
+                invoke('open_file', { path: item.url }).catch(() => {});
+              }}
+              style={{ padding: '4px 10px' }}
+            >
+              <span>🌍 Open in System Browser</span>
+            </div>
+            {webFolderMenu.item.linkedLocalPath && (
+              <>
+                <div className="context-menu-separator"></div>
+                <div
+                  className="context-menu-item"
+                  onClick={() => {
+                    const localPath = webFolderMenu.item.linkedLocalPath;
+                    setWebFolderMenu(null);
+                    setSelected(localPath);
+                    setSelectedPaths(new Set([localPath]));
+                  }}
+                  style={{ padding: '4px 10px' }}
+                >
+                  <span>📁 Go to Linked Local Folder</span>
+                </div>
+              </>
+            )}
+            <div className="context-menu-separator"></div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                const item = webFolderMenu.item;
+                setWebFolderMenu(null);
+                setEditingWebFolder(item);
+                setWebFolderEditOpen(true);
+              }}
+              style={{ padding: '4px 10px' }}
+            >
+              <span>✏️ Edit Web Folder &amp; Safety Level...</span>
+            </div>
+            <div
+              className="context-menu-item delete"
+              onClick={() => {
+                const item = webFolderMenu.item;
+                setWebFolderMenu(null);
+                handleDeleteWebFolder(item.id);
+              }}
+              style={{ padding: '4px 10px' }}
+            >
+              <span>🗑️ Remove Web Folder</span>
+            </div>
+          </div>
+        )}
+
+        <WebFolderEditModal
+          open={webFolderEditOpen}
+          initialItem={editingWebFolder}
+          defaultLocalPath={defaultPairLocalPath}
+          onClose={() => setWebFolderEditOpen(false)}
+          onSave={handleSaveWebFolder}
+        />
+
         <MessageDialog
           open={msgDialogOpen}
           title={msgDialogTitle}

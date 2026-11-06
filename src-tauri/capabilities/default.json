@@ -22,6 +22,7 @@
     "fs:allow-read-dir",
     "fs:allow-read-file",
     "fs:allow-stat",
+    "fs:allow-watch",
     "core:path:default",
     "dialog:default",
     "opener:default",
@@ -96,6 +97,14 @@
     },
     {
       "identifier": "fs:allow-exists",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-watch",
       "allow": [
         {
           "path": "**"

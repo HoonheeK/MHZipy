@@ -150,6 +150,18 @@ export default function FileList({
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [renameText, setRenameText] = useState('');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'file' | 'container' | 'header' } | null>(null);
+  const [builtInAppMenuOpen, setBuiltInAppMenuOpen] = useState(false);
+  const [builtInAppMenuPos, setBuiltInAppMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [inspectedContent, setInspectedContent] = useState<{
+    path: string;
+    detected_kind: string;
+    is_text: boolean;
+    is_image: boolean;
+    is_pdf: boolean;
+    is_video: boolean;
+    is_zip: boolean;
+  } | null>(null);
+  const builtInSubmenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [openingFiles, setOpeningFiles] = useState<Set<string>>(new Set());
   
   const lastCtrlATimeRef = useRef<number>(0);
@@ -363,6 +375,11 @@ export default function FileList({
     renamingFileRef.current = renamingFile;
   }, [renamingFile]);
 
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  }, [onRefresh]);
+
   // Live filesystem watcher for changes inside current directory
   useEffect(() => {
     if (!path || path === 'My PC' || path.length < 3) return;
@@ -379,7 +396,7 @@ export default function FileList({
         timer = setTimeout(() => {
           if (!isCancelled && !renamingFileRef.current) {
             setVersion((v) => v + 1);
-            if (onRefresh) onRefresh();
+            if (onRefreshRef.current) onRefreshRef.current();
           }
         }, 150);
       },
@@ -405,7 +422,7 @@ export default function FileList({
         } catch {}
       }
     };
-  }, [path, onRefresh]);
+  }, [path]);
 
   // 검색어가 변경되면 포커스 인덱스 초기화
   useEffect(() => {
@@ -1172,21 +1189,90 @@ export default function FileList({
     }
   };
 
+  const openWithBuiltInAppChecked = async (
+    appType: 'markdown' | 'image' | 'pdf' | 'video' | 'zip',
+    filePath: string,
+    fileName: string,
+    fileData?: FileData
+  ) => {
+    let info: {
+      detected_kind: string;
+      is_text: boolean;
+      is_image: boolean;
+      is_pdf: boolean;
+      is_video: boolean;
+      is_zip: boolean;
+    };
+    try {
+      info = await invoke('inspect_file_content_kind', { path: filePath });
+    } catch (err) {
+      showMessage('File Inspection Error', `Failed to inspect file content of "${fileName}":\n${String(err)}`);
+      return;
+    }
+
+    if (appType === 'markdown') {
+      if (!info.is_text) {
+        showMessage(
+          'Unsupported File Content',
+          `Cannot open "${fileName}" with Markdown / Text Editor.\n\nDetected file content: ${info.detected_kind}.\nMarkdown / Text Editor only supports plain text or Markdown content.`
+        );
+        return;
+      }
+      await openMarkdownInWindow({ path: filePath, name: fileName });
+    } else if (appType === 'image') {
+      if (!info.is_image) {
+        showMessage(
+          'Unsupported File Content',
+          `Cannot open "${fileName}" with Image Viewer.\n\nDetected file content: ${info.detected_kind}.\nImage Viewer requires valid image file content (PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, SVG, AVIF).`
+        );
+        return;
+      }
+      await openImageInWindow({ path: filePath, name: fileName });
+    } else if (appType === 'pdf') {
+      if (!info.is_pdf) {
+        showMessage(
+          'Unsupported File Content',
+          `Cannot open "${fileName}" with PDF Viewer.\n\nDetected file content: ${info.detected_kind}.\nPDF Viewer requires a valid PDF document header (%PDF-).`
+        );
+        return;
+      }
+      await openPdfInWindow({ path: filePath, name: fileName });
+    } else if (appType === 'video') {
+      if (!info.is_video) {
+        showMessage(
+          'Unsupported File Content',
+          `Cannot open "${fileName}" with Video Player.\n\nDetected file content: ${info.detected_kind}.\nVideo Player requires valid video stream content (MP4, MKV, WebM, MOV, AVI, WMV, FLV, MPEG).`
+        );
+        return;
+      }
+      await openVideoInWindow({ path: filePath, name: fileName });
+    } else if (appType === 'zip') {
+      if (!info.is_zip || !fileData) {
+        showMessage(
+          'Unsupported File Content',
+          `Cannot open "${fileName}" with ZIP Archive Inspector.\n\nDetected file content: ${info.detected_kind}.\nZIP Archive Inspector requires a valid ZIP archive header (PK).`
+        );
+        return;
+      }
+      await openZipFile(fileData);
+    }
+  };
+
   const openItem = async (file: FileData) => {
     if (file.isDirectory) {
       onNavigate(file.path);
       return;
     }
     if (file.name.toLowerCase().endsWith('.zip')) {
-      await openZipFile(file);
+      await openWithBuiltInAppChecked('zip', file.path, file.name, file);
     } else if (file.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
-      await openPdfInWindow({ path: file.path, name: file.name });
+      await openWithBuiltInAppChecked('pdf', file.path, file.name, file);
     } else if (isImageFile(file.name) && useImageViewer) {
-      await openImageInWindow({ path: file.path, name: file.name });
+      await openWithBuiltInAppChecked('image', file.path, file.name, file);
     } else if (isVideoFile(file.name) && useVideoPlayer) {
-      await openVideoInWindow({ path: file.path, name: file.name });
+      await openWithBuiltInAppChecked('video', file.path, file.name, file);
     } else if (isMarkdownOrText(file.name)) {
-      await openMarkdownInWindow({ path: file.path, name: file.name });
+      await openWithBuiltInAppChecked('markdown', file.path, file.name, file);
     } else {
       setOpeningFiles(prev => {
         const next = new Set(prev);
@@ -1219,15 +1305,15 @@ export default function FileList({
     for (const item of items) {
       if (item.isDirectory) continue;
       if (item.name.toLowerCase().endsWith('.zip')) {
-        await openZipFile(item);
+        await openWithBuiltInAppChecked('zip', item.path, item.name, item);
       } else if (item.name.toLowerCase().endsWith('.pdf') && usePdfWorker) {
-        await openPdfInWindow({ path: item.path, name: item.name });
+        await openWithBuiltInAppChecked('pdf', item.path, item.name, item);
       } else if (isImageFile(item.name) && useImageViewer) {
-        await openImageInWindow({ path: item.path, name: item.name });
+        await openWithBuiltInAppChecked('image', item.path, item.name, item);
       } else if (isVideoFile(item.name) && useVideoPlayer) {
-        await openVideoInWindow({ path: item.path, name: item.name });
+        await openWithBuiltInAppChecked('video', item.path, item.name, item);
       } else if (isMarkdownOrText(item.name)) {
-        await openMarkdownInWindow({ path: item.path, name: item.name });
+        await openWithBuiltInAppChecked('markdown', item.path, item.name, item);
       } else {
         setOpeningFiles(prev => {
           const next = new Set(prev);
@@ -2243,39 +2329,194 @@ export default function FileList({
                   <span>{t('contextMenu.extractHere')}</span> <span className="shortcut">Alt+E</span>
                 </div>
               )}
-              {selectedFiles.size === 1 && isImageFile(Array.from(selectedFiles)[0]) && (
-                <div className="context-menu-item" onClick={async () => {
-                  const firstPath = Array.from(selectedFiles)[0];
-                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
-                  const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
-                  await openImageInWindow({ path: firstPath, name: fileName });
-                  setContextMenu(null);
-                }} style={{ padding: '2px 10px' }}>
-                  <span>{t('contextMenu.openInImageViewer', { defaultValue: 'Open in Image Viewer' })}</span>
-                </div>
-              )}
-              {selectedFiles.size === 1 && isVideoFile(Array.from(selectedFiles)[0]) && (
-                <div className="context-menu-item" onClick={async () => {
-                  const firstPath = Array.from(selectedFiles)[0];
-                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
-                  const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
-                  await openVideoInWindow({ path: firstPath, name: fileName });
-                  setContextMenu(null);
-                }} style={{ padding: '2px 10px' }}>
-                  <span>{t('contextMenu.openInVideoPlayer', { defaultValue: 'Play in Video Player' })}</span>
-                </div>
-              )}
-              {selectedFiles.size === 1 && isMarkdownOrText(Array.from(selectedFiles)[0]) && (
-                <div className="context-menu-item" onClick={async () => {
-                  const firstPath = Array.from(selectedFiles)[0];
-                  const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
-                  const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
-                  await openMarkdownInWindow({ path: firstPath, name: fileName });
-                  setContextMenu(null);
-                }} style={{ padding: '2px 10px' }}>
-                  <span>{t('contextMenu.openInMarkdownEditor', { defaultValue: 'Edit with Markdown Editor' })}</span>
-                </div>
-              )}
+              {selectedFiles.size === 1 && (() => {
+                const firstPath = Array.from(selectedFiles)[0];
+                const fileData = sortedFiles.find(f => f.path === firstPath) || filesOverride?.find(f => f.path === firstPath);
+                if (fileData?.isDirectory) return null;
+                const fileName = fileData ? fileData.name : (firstPath.split(/[/\\]/).pop() || 'file');
+
+                const currentInspection = inspectedContent?.path === firstPath ? inspectedContent : null;
+                const isMdTxt = currentInspection ? currentInspection.is_text : false;
+                const isImg = currentInspection ? currentInspection.is_image : false;
+                const isVid = currentInspection ? currentInspection.is_video : false;
+                const isPdf = currentInspection ? currentInspection.is_pdf : false;
+                const isZip = currentInspection ? currentInspection.is_zip : false;
+
+                const badgeStyle: React.CSSProperties = {
+                  fontSize: '0.72em',
+                  padding: '1px 5px',
+                  borderRadius: '4px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                  color: '#38bdf8',
+                  border: '1px solid rgba(56, 189, 248, 0.35)',
+                  marginLeft: '8px',
+                  fontWeight: 600,
+                };
+
+                const openSubmenuAt = (el: HTMLElement) => {
+                  if (builtInSubmenuTimerRef.current) {
+                    clearTimeout(builtInSubmenuTimerRef.current);
+                    builtInSubmenuTimerRef.current = null;
+                  }
+                  const rect = el.getBoundingClientRect();
+                  const subWidth = 228;
+                  const subHeight = 215;
+                  const x = rect.right + subWidth + 8 > window.innerWidth
+                    ? Math.max(8, rect.left - subWidth - 2)
+                    : rect.right + 2;
+                  const y = Math.max(8, Math.min(rect.top - 4, window.innerHeight - subHeight - 8));
+                  setBuiltInAppMenuPos({ x, y });
+                  setBuiltInAppMenuOpen(true);
+
+                  if (!inspectedContent || inspectedContent.path !== firstPath) {
+                    invoke<{
+                      detected_kind: string;
+                      is_text: boolean;
+                      is_image: boolean;
+                      is_pdf: boolean;
+                      is_video: boolean;
+                      is_zip: boolean;
+                    }>('inspect_file_content_kind', { path: firstPath })
+                      .then((res) => setInspectedContent({ path: firstPath, ...res }))
+                      .catch(() => {});
+                  }
+                };
+
+                const scheduleCloseSubmenu = () => {
+                  if (builtInSubmenuTimerRef.current) {
+                    clearTimeout(builtInSubmenuTimerRef.current);
+                  }
+                  builtInSubmenuTimerRef.current = setTimeout(() => {
+                    setBuiltInAppMenuOpen(false);
+                  }, 140);
+                };
+
+                return (
+                  <div
+                    className="context-menu-item"
+                    style={{ padding: '2px 10px' }}
+                    onMouseEnter={(e) => openSubmenuAt(e.currentTarget)}
+                    onMouseLeave={scheduleCloseSubmenu}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (builtInAppMenuOpen) {
+                        setBuiltInAppMenuOpen(false);
+                      } else {
+                        openSubmenuAt(e.currentTarget);
+                      }
+                    }}
+                  >
+                    <span>Open with Built-in App</span>
+                    <span className="shortcut" style={{ marginLeft: '12px' }}>▸</span>
+
+                    {builtInAppMenuOpen && createPortal(
+                      <div
+                        className="context-menu"
+                        style={{
+                          position: 'fixed',
+                          left: `${builtInAppMenuPos.x}px`,
+                          top: `${builtInAppMenuPos.y}px`,
+                          minWidth: '225px',
+                          zIndex: 1400,
+                        }}
+                        onMouseEnter={() => {
+                          if (builtInSubmenuTimerRef.current) {
+                            clearTimeout(builtInSubmenuTimerRef.current);
+                            builtInSubmenuTimerRef.current = null;
+                          }
+                        }}
+                        onMouseLeave={scheduleCloseSubmenu}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openWithBuiltInAppChecked('markdown', firstPath, fileName, fileData);
+                          }}
+                        >
+                          <span>📝 Markdown / Text Editor</span>
+                          {isMdTxt && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openWithBuiltInAppChecked('image', firstPath, fileName, fileData);
+                          }}
+                        >
+                          <span>🖼️ Image Viewer</span>
+                          {isImg && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openWithBuiltInAppChecked('pdf', firstPath, fileName, fileData);
+                          }}
+                        >
+                          <span>📄 PDF Viewer</span>
+                          {isPdf && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openWithBuiltInAppChecked('video', firstPath, fileName, fileData);
+                          }}
+                        >
+                          <span>🎬 Video Player</span>
+                          {isVid && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openWithBuiltInAppChecked('zip', firstPath, fileName, fileData);
+                          }}
+                        >
+                          <span>📦 ZIP Archive Inspector</span>
+                          {isZip && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div className="context-menu-separator" />
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            try {
+                              await invoke('open_file', { path: firstPath });
+                            } catch (err) {
+                              console.error(err);
+                            }
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                          }}
+                        >
+                          <span>🖥️ System Default App</span>
+                        </div>
+                      </div>,
+                      document.body
+                    )}
+                  </div>
+                );
+              })()}
               {selectedFiles.size === 1 && Array.from(selectedFiles)[0].toLowerCase().endsWith('.pptx') && (
                 <div className="context-menu-item" onClick={() => {
                   const filePath = Array.from(selectedFiles)[0];

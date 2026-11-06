@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core'; // invoke 추가
 import { open } from '@tauri-apps/plugin-dialog';
 import { useTranslation } from 'react-i18next';
 import FileList from '../FileExplorer/FileList';
-import { SearchConfig } from '../App';
+import { SearchConfig, SearchPreset } from '../App';
 import MessageDialog from '../common/MessageDialog';
 
 interface SearchViewProps {
@@ -143,6 +143,105 @@ export default function SearchView({
   const [dateBefore, setDateBefore] = useState(searchConfig?.dateBefore || '');
   const [regexError, setRegexError] = useState<string | null>(null);
 
+  // Search Presets & Recent History Management
+  const [presets, setPresets] = useState<SearchPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem('mhzipy_search_presets');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return searchConfig?.presets || [];
+  });
+  const [recentSearches, setRecentSearches] = useState<SearchPreset[]>(() => {
+    try {
+      const saved = localStorage.getItem('mhzipy_search_recent');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return searchConfig?.recentSearches || [];
+  });
+  const [isPresetDropdownOpen, setIsPresetDropdownOpen] = useState(false);
+  const presetDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Save Modal State
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [presetNameInput, setPresetNameInput] = useState('');
+
+  // Persist presets and recent searches
+  const savePresetsToStorage = (newPresets: SearchPreset[]) => {
+    setPresets(newPresets);
+    try {
+      localStorage.setItem('mhzipy_search_presets', JSON.stringify(newPresets));
+    } catch {}
+  };
+
+  const saveRecentToStorage = (newRecent: SearchPreset[]) => {
+    setRecentSearches(newRecent);
+    try {
+      localStorage.setItem('mhzipy_search_recent', JSON.stringify(newRecent));
+    } catch {}
+  };
+
+  const applyPreset = (preset: SearchPreset) => {
+    setLocalQuery(preset.query || '');
+    setUseRegex(Boolean(preset.useRegex));
+    setSizeQuery(preset.sizeQuery || '');
+    setSelectedType(preset.type || 'All');
+    setDateAfter(preset.dateAfter || '');
+    setDateBefore(preset.dateBefore || '');
+    setSearchMode(preset.searchMode || 'directory');
+    if (preset.directorySearchPaths && preset.directorySearchPaths.length > 0) {
+      setDirectorySearchPaths(new Set(preset.directorySearchPaths));
+    }
+    if (preset.sizeQuery || preset.type !== 'All' || preset.dateAfter || preset.dateBefore) {
+      setShowFilters(true);
+    }
+    setIsPresetDropdownOpen(false);
+    onSearchChange?.(preset.query || '');
+  };
+
+  const handleOpenSaveModal = () => {
+    const defaultName = localQuery
+      ? `Search: ${localQuery.slice(0, 20)}`
+      : `${selectedType !== 'All' ? selectedType : 'All'} Files`;
+    setPresetNameInput(defaultName);
+    setIsSaveModalOpen(true);
+    setIsPresetDropdownOpen(false);
+  };
+
+  const handleConfirmSavePreset = () => {
+    const name = presetNameInput.trim() || 'Untitled Search';
+    const newPreset: SearchPreset = {
+      id: 'sp_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name,
+      query: localQuery,
+      useRegex,
+      sizeQuery,
+      type: selectedType,
+      dateAfter,
+      dateBefore,
+      searchMode,
+      directorySearchPaths: Array.from(directorySearchPaths),
+      createdAt: Date.now()
+    };
+    const updated = [newPreset, ...presets.filter(p => p.name !== name)];
+    savePresetsToStorage(updated);
+    setIsSaveModalOpen(false);
+  };
+
+  const handleDeletePreset = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    savePresetsToStorage(presets.filter(p => p.id !== id));
+  };
+
+  const handleDeleteRecent = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    saveRecentToStorage(recentSearches.filter(r => r.id !== id));
+  };
+
+  const handleClearAllRecent = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    saveRecentToStorage([]);
+  };
+
   const updateQuery = (newQuery: string) => {
     setLocalQuery(newQuery);
     if (!newQuery || !newQuery.trim()) {
@@ -188,11 +287,13 @@ export default function SearchView({
         dateBefore,
         showFilters,
         searchMode,
-        directorySearchPaths: Array.from(directorySearchPaths)
+        directorySearchPaths: Array.from(directorySearchPaths),
+        presets,
+        recentSearches
       });
     }, 1000);
     return () => clearTimeout(handler);
-  }, [localQuery, useRegex, sizeQuery, selectedType, dateAfter, dateBefore, showFilters, searchMode, directorySearchPaths, onSaveSearchConfig]);
+  }, [localQuery, useRegex, sizeQuery, selectedType, dateAfter, dateBefore, showFilters, searchMode, directorySearchPaths, presets, recentSearches, onSaveSearchConfig]);
 
   // Regex 유효성 검사 및 에러 상태 관리 (사이드 이펙트 분리)
   useEffect(() => {
@@ -219,6 +320,9 @@ export default function SearchView({
     function handleClickOutside(event: MouseEvent) {
       if (folderSelectRef.current && !folderSelectRef.current.contains(event.target as Node)) {
         setIsFolderSelectOpen(false);
+      }
+      if (presetDropdownRef.current && !presetDropdownRef.current.contains(event.target as Node)) {
+        setIsPresetDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -399,6 +503,37 @@ export default function SearchView({
 
         if (isMounted) {
           setResults(fileDataList.filter((f): f is FileData => f !== null));
+
+          // Record in Recent Searches if there is an active search query or filter
+          if (localQuery && localQuery.trim().length >= 2) {
+            setRecentSearches(prevRecent => {
+              const currentItem: SearchPreset = {
+                id: 'rc_' + Date.now(),
+                name: localQuery.trim(),
+                query: localQuery.trim(),
+                useRegex,
+                sizeQuery,
+                type: selectedType,
+                dateAfter,
+                dateBefore,
+                searchMode,
+                directorySearchPaths: Array.from(directorySearchPaths),
+                createdAt: Date.now()
+              };
+              // Exclude duplicates with same query and filters
+              const filtered = prevRecent.filter(r =>
+                r.query !== currentItem.query ||
+                r.useRegex !== currentItem.useRegex ||
+                r.type !== currentItem.type ||
+                r.sizeQuery !== currentItem.sizeQuery
+              );
+              const updated = [currentItem, ...filtered].slice(0, 8);
+              try {
+                localStorage.setItem('mhzipy_search_recent', JSON.stringify(updated));
+              } catch {}
+              return updated;
+            });
+          }
         }
       } catch (e) {
         console.error("Search failed:", e);
@@ -551,6 +686,205 @@ export default function SearchView({
             >
               <span>⚙️ {t('search.filterSettings', { defaultValue: 'Filter Settings' })}</span>
             </button>
+
+            {/* Presets & Recent Dropdown Anchor */}
+            <div style={{ position: 'relative' }} ref={presetDropdownRef}>
+              <button
+                onClick={() => setIsPresetDropdownOpen(!isPresetDropdownOpen)}
+                title="Saved Search Presets & History"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '6px', padding: '5px 12px', borderRadius: '7px',
+                  backgroundColor: isPresetDropdownOpen ? '#3b82f6' : '#1e293b',
+                  color: isPresetDropdownOpen ? '#ffffff' : '#cbd5e1',
+                  border: '1px solid rgba(255, 255, 255, 0.12)', cursor: 'pointer', fontSize: '0.82em', fontWeight: '600', transition: 'all 0.15s'
+                }}
+              >
+                <span>⭐ Presets</span>
+                <span style={{ fontSize: '0.75em', opacity: 0.8 }}>▼</span>
+              </button>
+
+              {isPresetDropdownOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    right: 0,
+                    marginTop: '6px',
+                    width: '320px',
+                    backgroundColor: '#0f172a',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: '8px',
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.5)',
+                    zIndex: 1100,
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                >
+                  {/* Action Header: Save Current Search */}
+                  <div style={{ padding: '8px 10px', backgroundColor: '#1e293b', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <button
+                      onClick={handleOpenSaveModal}
+                      style={{
+                        width: '100%',
+                        padding: '6px 10px',
+                        backgroundColor: '#2563eb',
+                        border: '1px solid #3b82f6',
+                        borderRadius: '6px',
+                        color: '#ffffff',
+                        fontSize: '0.82em',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                        boxShadow: '0 2px 6px rgba(37,99,235,0.3)'
+                      }}
+                    >
+                      <span>💾</span>
+                      <span>Save Current Search Criteria...</span>
+                    </button>
+                  </div>
+
+                  <div style={{ maxHeight: '360px', overflowY: 'auto' }}>
+                    {/* Section 1: Saved Presets */}
+                    <div style={{ padding: '8px 12px 4px 12px', fontSize: '0.75em', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Saved Presets ({presets.length})
+                    </div>
+                    {presets.length === 0 ? (
+                      <div style={{ padding: '8px 16px', fontSize: '0.8em', color: '#64748b', fontStyle: 'italic' }}>
+                        No saved presets yet. Click "Save Current Search Criteria" above.
+                      </div>
+                    ) : (
+                      presets.map(p => (
+                        <div
+                          key={p.id}
+                          onClick={() => applyPreset(p)}
+                          style={{
+                            padding: '7px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                            transition: 'background 0.12s'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.12)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden', paddingRight: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ fontSize: '0.9em' }}>⭐</span>
+                              <span style={{ fontSize: '0.85em', fontWeight: '600', color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {p.name}
+                              </span>
+                              {p.useRegex && (
+                                <span style={{ fontSize: '0.65em', padding: '1px 4px', borderRadius: '3px', backgroundColor: '#0284c7', color: '#fff', fontWeight: 'bold' }}>
+                                  REGEX
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '0.74em', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {p.query ? `"${p.query}"` : '(No keyword)'}
+                              {p.type !== 'All' ? ` • ${p.type}` : ''}
+                              {p.sizeQuery ? ` • ${p.sizeQuery}` : ''}
+                              {p.searchMode === 'index' ? ' • MFT' : ' • Folder'}
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => handleDeletePreset(p.id, e)}
+                            title="Delete Preset"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#64748b',
+                              cursor: 'pointer',
+                              padding: '2px 5px',
+                              borderRadius: '4px',
+                              fontSize: '0.85em'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = '#64748b'; }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    )}
+
+                    {/* Section 2: Recent Searches */}
+                    <div style={{ padding: '12px 12px 4px 12px', fontSize: '0.75em', fontWeight: '700', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Recent Searches ({recentSearches.length})</span>
+                      {recentSearches.length > 0 && (
+                        <button
+                          onClick={handleClearAllRecent}
+                          style={{ background: 'none', border: 'none', color: '#64748b', fontSize: '0.9em', cursor: 'pointer', padding: 0 }}
+                          title="Clear all recent searches"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    {recentSearches.length === 0 ? (
+                      <div style={{ padding: '8px 16px', fontSize: '0.8em', color: '#64748b', fontStyle: 'italic' }}>
+                        No recent searches.
+                      </div>
+                    ) : (
+                      recentSearches.map(r => (
+                        <div
+                          key={r.id}
+                          onClick={() => applyPreset(r)}
+                          style={{
+                            padding: '6px 12px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            cursor: 'pointer',
+                            borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                            transition: 'background 0.12s'
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', paddingRight: '8px' }}>
+                            <span style={{ fontSize: '0.85em', color: '#94a3b8' }}>🕒</span>
+                            <span style={{ fontSize: '0.83em', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {r.query}
+                            </span>
+                            {r.useRegex && (
+                              <span style={{ fontSize: '0.62em', padding: '1px 3px', borderRadius: '3px', backgroundColor: '#334155', color: '#38bdf8', fontWeight: 'bold' }}>
+                                REGEX
+                              </span>
+                            )}
+                            {r.type !== 'All' && (
+                              <span style={{ fontSize: '0.7em', color: '#94a3b8' }}>[{r.type}]</span>
+                            )}
+                          </div>
+                          <button
+                            onClick={(e) => handleDeleteRecent(r.id, e)}
+                            title="Remove from history"
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#64748b',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              borderRadius: '4px',
+                              fontSize: '0.8em'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = '#64748b'; }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -724,24 +1058,59 @@ export default function SearchView({
 
       {/* Results Area */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', backgroundColor: '#0b0f19' }}>
-        <div style={{ padding: '8px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#0f172a', fontSize: '0.85em', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' }}>
-          <span>
-            {isSearching ? (
-              <span style={{ color: '#38bdf8', fontWeight: '600' }}>
-                🔍 {t('search.searchingFor', { defaultValue: 'Searching for' })} <span style={{ fontStyle: 'italic' }}>"{localQuery}"</span>...
-              </span>
-            ) : (
-              <>
-                {localQuery ? (
-                  <>✅ {t('search.searchResults', { defaultValue: 'Search results:' })} <span style={{ fontWeight: 'bold', color: '#38bdf8' }}>{filteredResults.length}</span> {t('search.items', { defaultValue: 'items' })}</>
-                ) : (
-                  t('search.enterQuery', { defaultValue: 'Enter a query to start searching' })
-                )}
-              </>
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#0f172a', fontSize: '0.85em', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span>
+              {isSearching ? (
+                <span style={{ color: '#38bdf8', fontWeight: '600' }}>
+                  🔍 {t('search.searchingFor', { defaultValue: 'Searching for' })} <span style={{ fontStyle: 'italic' }}>"{localQuery}"</span>...
+                </span>
+              ) : (
+                <>
+                  {localQuery ? (
+                    <>✅ {t('search.searchResults', { defaultValue: 'Search results:' })} <span style={{ fontWeight: 'bold', color: '#38bdf8' }}>{filteredResults.length}</span> {t('search.items', { defaultValue: 'items' })}</>
+                  ) : (
+                    t('search.enterQuery', { defaultValue: 'Enter a query to start searching' })
+                  )}
+                </>
+              )}
+            </span>
+            {!isSearching && results.length !== filteredResults.length && (
+              <span style={{ fontSize: '0.82em', color: '#64748b' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
             )}
-          </span>
-          {!isSearching && results.length !== filteredResults.length && (
-            <span style={{ fontSize: '0.82em', color: '#64748b' }}>(Filtered: {results.length - filteredResults.length} excluded)</span>
+          </div>
+
+          {/* Quick Save Search Button on Results Header */}
+          {(localQuery || sizeQuery || selectedType !== 'All' || dateAfter || dateBefore) && (
+            <button
+              onClick={handleOpenSaveModal}
+              title="Save current search criteria as preset"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 10px',
+                backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                borderRadius: '5px',
+                color: '#38bdf8',
+                fontSize: '0.82em',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = '#0284c7';
+                e.currentTarget.style.color = '#ffffff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.1)';
+                e.currentTarget.style.color = '#38bdf8';
+              }}
+            >
+              <span>⭐</span>
+              <span>Save Current Search</span>
+            </button>
           )}
         </div>
         <div style={{ flex: 1, minHeight: 0, opacity: isSearching ? 0.5 : 1, transition: 'opacity 0.2s', overflowY: 'auto' }}>
@@ -825,6 +1194,127 @@ export default function SearchView({
         message={dialogState.message}
         onClose={() => setDialogState((prev) => ({ ...prev, open: false }))}
       />
+
+      {/* Save Search Criteria Modal */}
+      {isSaveModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px'
+          }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setIsSaveModalOpen(false);
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#0f172a',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              borderRadius: '10px',
+              width: '100%',
+              maxWidth: '440px',
+              boxShadow: '0 16px 36px rgba(0, 0, 0, 0.6)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+          >
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', color: '#f8fafc', fontSize: '0.95em' }}>
+                <span>⭐</span>
+                <span>Save Search Criteria</span>
+              </div>
+              <button
+                onClick={() => setIsSaveModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.1em', padding: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '0.82em', fontWeight: '600', color: '#cbd5e1' }}>Preset Name:</label>
+                <input
+                  type="text"
+                  value={presetNameInput}
+                  onChange={(e) => setPresetNameInput(e.target.value)}
+                  placeholder="e.g. Recent PDF Reports, Big Videos..."
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleConfirmSavePreset();
+                    if (e.key === 'Escape') setIsSaveModalOpen(false);
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#1e293b',
+                    border: '1px solid #38bdf8',
+                    borderRadius: '6px',
+                    color: '#f8fafc',
+                    fontSize: '0.9em',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              {/* Criteria Summary Card */}
+              <div style={{ backgroundColor: '#1e293b', padding: '10px 12px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.06)', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.78em', color: '#94a3b8' }}>
+                <div style={{ fontWeight: '600', color: '#38bdf8', marginBottom: '2px' }}>Search Criteria to be Saved:</div>
+                <div>• Keyword: <span style={{ color: '#f8fafc' }}>{localQuery ? `"${localQuery}"` : '(None)'}</span> {useRegex && <span style={{ color: '#38bdf8', fontWeight: 'bold' }}>[REGEX]</span>}</div>
+                <div>• File Type: <span style={{ color: '#f8fafc' }}>{selectedType}</span></div>
+                {sizeQuery && <div>• File Size: <span style={{ color: '#f8fafc' }}>{sizeQuery}</span></div>}
+                {(dateAfter || dateBefore) && (
+                  <div>• Date: <span style={{ color: '#f8fafc' }}>{dateAfter || '~'} ~ {dateBefore || '~'}</span></div>
+                )}
+                <div>• Mode &amp; Folders: <span style={{ color: '#f8fafc' }}>{searchMode === 'index' ? 'MFT Index' : `${directorySearchPaths.size} Folder(s)`}</span></div>
+              </div>
+            </div>
+
+            <div style={{ padding: '10px 16px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', backgroundColor: '#131d2e', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                onClick={() => setIsSaveModalOpen(false)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '6px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: '#cbd5e1',
+                  fontSize: '0.85em',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSavePreset}
+                style={{
+                  padding: '6px 16px',
+                  borderRadius: '6px',
+                  backgroundColor: '#2563eb',
+                  border: '1px solid #3b82f6',
+                  color: '#ffffff',
+                  fontSize: '0.85em',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(37,99,235,0.4)'
+                }}
+              >
+                Save Preset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

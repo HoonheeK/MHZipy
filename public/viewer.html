@@ -1151,6 +1151,10 @@
 
         <!-- Title Bar Feature Menus (Icon-only with English tooltips) -->
         <div id="pdf-header-toolbar">
+            <button type="button" class="pdf-tool-btn" id="btn-print-pdf" title="Print PDF (Ctrl+P)">
+                <span>🖨️</span>
+            </button>
+            <div class="pdf-header-sep"></div>
             <button type="button" class="pdf-tool-btn" id="btn-extract-pages" title="Extract Pages (Create new PDF from selected pages)">
                 <span>✂️</span>
             </button>
@@ -2861,6 +2865,13 @@
         }
 
         // --- 페이지 표시 및 이동 ---
+        let _printSyncChannel = null;
+        try {
+            if (typeof BroadcastChannel !== 'undefined') {
+                _printSyncChannel = new BroadcastChannel('mhzipy_pdf_print_sync');
+            }
+        } catch (e) {}
+
         function updatePageIndicator(pageNum) {
             const pageInputContainer = document.getElementById('page-input-container');
             // 입력 모드일 때는 업데이트하지 않음
@@ -2873,6 +2884,11 @@
                 const statusInfo = document.getElementById('pdf-status-info');
                 if (statusInfo) {
                     statusInfo.textContent = `Page ${cur} / ${pdfDoc.numPages} | ${Math.round(currentScale * 100)}%`;
+                }
+                if (_printSyncChannel) {
+                    try {
+                        _printSyncChannel.postMessage({ type: 'current-page', pageNum: cur });
+                    } catch (e) {}
                 }
             }
 
@@ -3479,6 +3495,16 @@
             const isCtrl = e.ctrlKey || e.metaKey;
             const key = e.key;
             const keyLower = key.toLowerCase();
+
+            // 0. Ctrl+P 인쇄 다이얼로그 호출 (Acrobat 스타일 Modeless 윈도우)
+            if (isCtrl && !e.altKey && !e.shiftKey && keyLower === 'p') {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof window.openPrintDialog === 'function') {
+                    window.openPrintDialog();
+                }
+                return;
+            }
 
             // 1. Outline 활성화 시 키보드 컨트롤 (PDF 화면 제어 차단)
             if (currentFocusArea === 'outline' && sidebar.classList.contains('open') && isOutlinePanelActive()) {
@@ -4308,6 +4334,84 @@
                     }
                 };
             });
+
+            // === Feature 0: Modeless Acrobat-Style Print Dialog (Ctrl+P / 🖨️ 버튼) ===
+            const savePdfBytesToPrintIndexedDB = async (storageKey, bytes) => {
+                return new Promise((resolve) => {
+                    try {
+                        const req = indexedDB.open('PDFViewerDB', 1);
+                        req.onupgradeneeded = (ev) => {
+                            const db = ev.target.result;
+                            if (!db.objectStoreNames.contains('files')) {
+                                db.createObjectStore('files');
+                            }
+                        };
+                        req.onsuccess = (ev) => {
+                            try {
+                                const db = ev.target.result;
+                                const tx = db.transaction(['files'], 'readwrite');
+                                const store = tx.objectStore('files');
+                                store.put(bytes.buffer ? bytes.buffer : bytes, storageKey);
+                                tx.oncomplete = () => resolve(true);
+                                tx.onerror = () => resolve(false);
+                            } catch {
+                                resolve(false);
+                            }
+                        };
+                        req.onerror = () => resolve(false);
+                    } catch {
+                        resolve(false);
+                    }
+                });
+            };
+
+            window.openPrintDialog = async () => {
+                if (!pdfDoc) {
+                    showToast('No PDF document loaded to print.', '⚠️', 2500);
+                    return;
+                }
+                const totalPages = pdfDoc ? pdfDoc.numPages : 1;
+                const curPage = selectedPageNum || parseInt(document.getElementById('current-page')?.textContent) || 1;
+                const docTitle = document.getElementById('pdf-header-filename')?.textContent || title || 'Document.pdf';
+                const currentPdfPath = fullPath || pdfPath || window.__PDF_PATH__ || '';
+                const printStorageKey = 'print_doc_latest';
+
+                try {
+                    const bytes = await getCurrentPdfBytes();
+                    if (bytes && bytes.length > 0) {
+                        await savePdfBytesToPrintIndexedDB(printStorageKey, bytes);
+                    }
+                } catch (err) {
+                    console.warn('Could not cache PDF bytes to IndexedDB for print dialog:', err);
+                }
+
+                const invoke = getTauriInvoke();
+                if (invoke) {
+                    try {
+                        await invoke('open_pdf_print_dialog', {
+                            pdfPath: currentPdfPath,
+                            storageId: printStorageKey,
+                            title: docTitle,
+                            currentPage: curPage,
+                            totalPages: totalPages,
+                            password: pdfSessionPassword || null
+                        });
+                        return;
+                    } catch (err) {
+                        console.warn('open_pdf_print_dialog failed, falling back to window.open:', err);
+                    }
+                }
+
+                const q = `print-dialog.html?pdfPath=${encodeURIComponent(currentPdfPath)}&storageId=${encodeURIComponent(printStorageKey)}&title=${encodeURIComponent(docTitle)}&currentPage=${curPage}&totalPages=${totalPages}&pwd=${encodeURIComponent(pdfSessionPassword || '')}`;
+                window.open(q, 'MHZipyPrintDialog', 'width=960,height=710,menubar=no,toolbar=no,location=no,status=no,resizable=yes');
+            };
+
+            const btnPrintPdf = document.getElementById('btn-print-pdf');
+            if (btnPrintPdf) {
+                btnPrintPdf.onclick = () => {
+                    window.openPrintDialog();
+                };
+            }
 
             // === Feature 1: Page Extraction (페이지 추출) ===
             const btnExtractPages = document.getElementById('btn-extract-pages');

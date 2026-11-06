@@ -1,0 +1,1989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <title>Print PDF</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background: #1e293b;
+            color: #e2e8f0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-size: 12.5px;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+        }
+
+        /* Custom Title Bar */
+        #dialog-header {
+            height: 38px;
+            background: #0f172a;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 8px 0 14px;
+            flex-shrink: 0;
+            -webkit-app-region: drag;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            color: #f8fafc;
+            overflow: hidden;
+        }
+        .doc-badge {
+            font-weight: 400;
+            font-size: 11.5px;
+            color: #94a3b8;
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 8px;
+            border-radius: 4px;
+            max-width: 360px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .modeless-tag {
+            font-size: 10px;
+            font-weight: 600;
+            color: #38bdf8;
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 1px 6px;
+            border-radius: 999px;
+            letter-spacing: 0.02em;
+        }
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            -webkit-app-region: no-drag;
+        }
+        .win-btn {
+            width: 30px;
+            height: 28px;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .win-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #f8fafc;
+        }
+        .win-btn.close:hover {
+            background: #e11d48;
+            color: #ffffff;
+        }
+
+        /* Top Printer Bar (Acrobat Header Section) */
+        #printer-top-bar {
+            background: #162032;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+        .printer-select-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 320px;
+        }
+        .field-label-inline {
+            font-weight: 600;
+            color: #cbd5e1;
+            white-space: nowrap;
+            min-width: 52px;
+        }
+        select, input[type="text"], input[type="number"] {
+            background: #0f172a;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            color: #f8fafc;
+            border-radius: 5px;
+            padding: 5px 8px;
+            font-size: 12.5px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        select:focus, input[type="text"]:focus, input[type="number"]:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        select:disabled, input:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        #printer-select {
+            flex: 1;
+            max-width: 340px;
+            font-weight: 500;
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            color: #e2e8f0;
+            border-radius: 5px;
+            padding: 5px 11px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .btn-secondary:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.13);
+            border-color: rgba(255, 255, 255, 0.24);
+        }
+        .btn-secondary:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .copies-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        #copies-input {
+            width: 62px;
+            text-align: center;
+        }
+        .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            color: #cbd5e1;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .checkbox-label input[type="checkbox"] {
+            accent-color: #3b82f6;
+            width: 14px;
+            height: 14px;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        /* Main Split Content (Left Settings + Right Live Preview) */
+        #dialog-main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        /* Left Column: Acrobat Settings Panels */
+        #settings-column {
+            width: 470px;
+            min-width: 420px;
+            max-width: 540px;
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 12px 14px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: #1e293b;
+        }
+        #settings-column::-webkit-scrollbar {
+            width: 6px;
+        }
+        #settings-column::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+        }
+
+        .acrobat-section {
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+            font-size: 12.5px;
+            color: #f8fafc;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            padding-bottom: 6px;
+            margin-bottom: 2px;
+        }
+        .section-header span.sub {
+            font-size: 11px;
+            font-weight: 400;
+            color: #94a3b8;
+        }
+
+        .radio-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 24px;
+        }
+        .radio-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: #e2e8f0;
+            min-width: 125px;
+        }
+        .radio-label input[type="radio"] {
+            accent-color: #3b82f6;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .sub-options-box {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 6px;
+            padding: 8px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            margin-top: 2px;
+        }
+        .form-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .form-row label {
+            color: #cbd5e1;
+            font-size: 12px;
+        }
+
+        /* Acrobat 4-Mode Sizing Tabs (Size | Poster | Multiple | Booklet) */
+        .sizing-mode-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+            background: #0f172a;
+            padding: 4px;
+            border-radius: 7px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .sizing-tab-btn {
+            background: transparent;
+            border: 1px solid transparent;
+            color: #94a3b8;
+            border-radius: 5px;
+            padding: 6px 4px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            font-size: 11.5px;
+            font-weight: 600;
+            transition: all 0.15s;
+        }
+        .sizing-tab-btn .tab-icon {
+            font-size: 15px;
+            line-height: 1;
+        }
+        .sizing-tab-btn:hover {
+            color: #f1f5f9;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .sizing-tab-btn.active {
+            background: #2563eb;
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 2px 6px rgba(37, 99, 235, 0.35);
+        }
+
+        .sizing-pane {
+            display: none;
+            flex-direction: column;
+            gap: 7px;
+            padding-top: 4px;
+        }
+        .sizing-pane.active {
+            display: flex;
+        }
+
+        /* Right Column: Live Print Preview */
+        #preview-column {
+            flex: 1;
+            background: #0f172a;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            overflow: hidden;
+            position: relative;
+        }
+        .preview-top-info {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            padding: 6px 12px;
+            font-size: 12px;
+            color: #cbd5e1;
+            flex-shrink: 0;
+        }
+        .preview-top-info .dim-text {
+            font-weight: 600;
+            color: #f8fafc;
+        }
+        .preview-badges {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .preview-badge {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            padding: 1px 7px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        /* Paper Stage with Acrobat Dimension Callouts */
+        #preview-stage {
+            flex: 1;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+            padding: 26px;
+        }
+        #paper-preview-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.12);
+            background: #ffffff;
+            transition: width 0.15s ease, height 0.15s ease;
+        }
+        #preview-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Acrobat-style Dimension Rulers around Paper */
+        .ruler-top {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            right: 0;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10.5px;
+            color: #94a3b8;
+        }
+        .ruler-top::before, .ruler-top::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: #475569;
+            margin: 0 6px;
+        }
+        .ruler-left {
+            position: absolute;
+            left: -24px;
+            top: 0;
+            bottom: 0;
+            width: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            font-size: 10.5px;
+            color: #94a3b8;
+        }
+        .ruler-left::before, .ruler-left::after {
+            content: "";
+            flex: 1;
+            width: 1px;
+            background: #475569;
+            margin: 6px 0;
+        }
+
+        /* Preview Navigation Controls */
+        .preview-nav-bar {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            padding: 6px 12px;
+            flex-shrink: 0;
+        }
+        .nav-icon-btn {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #e2e8f0;
+            min-width: 36px;
+            height: 26px;
+            padding: 0 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            line-height: 1;
+            white-space: nowrap;
+            flex-shrink: 0;
+            transition: background 0.12s;
+        }
+        #btn-sheet-first,
+        #btn-sheet-last {
+            min-width: 42px;
+            padding: 0 10px;
+            letter-spacing: -0.5px;
+        }
+        .nav-icon-btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.16);
+        }
+        .nav-icon-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        #preview-sheet-input {
+            width: 46px;
+            height: 23px;
+            text-align: center;
+            padding: 2px 4px;
+            font-size: 12px;
+        }
+
+        /* Bottom Action Footer */
+        #dialog-footer {
+            height: 52px;
+            background: #162032;
+            border-top: 1px solid rgba(255, 255, 255, 0.09);
+            padding: 0 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        #print-status-msg {
+            font-size: 12px;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .footer-buttons {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .btn-primary-print {
+            background: #2563eb;
+            border: 1px solid #3b82f6;
+            color: #ffffff;
+            border-radius: 6px;
+            padding: 7px 22px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);
+            transition: background 0.15s, transform 0.1s;
+        }
+        .btn-primary-print:hover:not(:disabled) {
+            background: #1d4ed8;
+        }
+        .btn-primary-print:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+        .btn-primary-print:disabled {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        /* Hidden Print Mount Container (Only visible during actual printing) */
+        #print-mount-container {
+            display: none;
+        }
+
+        @media print {
+            @page {
+                margin: 0;
+            }
+            html, body {
+                background: #ffffff !important;
+                color: #000000 !important;
+                height: auto !important;
+                width: auto !important;
+                overflow: visible !important;
+                display: block !important;
+            }
+            #dialog-header,
+            #printer-top-bar,
+            #dialog-main,
+            #dialog-footer {
+                display: none !important;
+            }
+            #print-mount-container {
+                display: block !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .print-sheet-item {
+                page-break-after: always;
+                break-after: page;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 100vw;
+                height: 100vh;
+                overflow: hidden;
+            }
+            .print-sheet-item:last-child {
+                page-break-after: auto;
+                break-after: auto;
+            }
+            .print-sheet-item canvas {
+                max-width: 100%;
+                max-height: 100%;
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Custom Frameless Window Title Bar -->
+    <header id="dialog-header" data-tauri-drag-region>
+        <div class="header-left" data-tauri-drag-region>
+            <span>🖨️</span>
+            <span>Print</span>
+            <span class="doc-badge" id="doc-title-badge">Document.pdf</span>
+        </div>
+        <div class="header-controls">
+            <button type="button" class="win-btn" id="btn-win-minimize" title="Minimize">─</button>
+            <button type="button" class="win-btn close" id="btn-win-close" title="Close (Esc)">✕</button>
+        </div>
+    </header>
+
+    <!-- Top Printer & Copies Bar -->
+    <section id="printer-top-bar">
+        <div class="printer-select-group">
+            <span class="field-label-inline">Printer:</span>
+            <select id="printer-select" title="Select target printer"></select>
+            <button type="button" class="btn-secondary" id="btn-printer-props" title="Open Windows Printer Properties">Properties...</button>
+        </div>
+        <div class="copies-group">
+            <span class="field-label-inline" style="min-width: auto;">Copies:</span>
+            <input type="number" id="copies-input" value="1" min="1" max="999">
+            <label class="checkbox-label" title="Keep pages of each copy together in order">
+                <input type="checkbox" id="chk-collate" checked>
+                <span>Collate</span>
+            </label>
+            <label class="checkbox-label" title="Convert colors to shades of gray">
+                <input type="checkbox" id="chk-grayscale">
+                <span>Print in grayscale (black &amp; white)</span>
+            </label>
+        </div>
+    </section>
+
+    <!-- Main 2-Column Content -->
+    <main id="dialog-main">
+        <!-- Left Column: Acrobat Print Settings -->
+        <div id="settings-column">
+            <!-- 1. Pages to Print -->
+            <div class="acrobat-section">
+                <div class="section-header">
+                    <span>Pages to Print</span>
+                    <span class="sub" id="total-pages-label">Total 1 page</span>
+                </div>
+                <div class="radio-row">
+                    <label class="radio-label">
+                        <input type="radio" name="pages-mode" value="all" checked>
+                        <span>All</span>
+                    </label>
+                </div>
+                <div class="radio-row">
+                    <label class="radio-label">
+                        <input type="radio" name="pages-mode" value="current">
+                        <span>Current page</span>
+                    </label>
+                    <span style="font-size: 11.5px; color: #38bdf8; font-weight: 600;" id="current-page-badge">(Page 1)</span>
+                </div>
+                <div class="radio-row">
+                    <label class="radio-label" style="min-width: 75px;">
+                        <input type="radio" name="pages-mode" value="range">
+                        <span>Pages</span>
+                    </label>
+                    <input type="text" id="pages-range-input" placeholder="e.g. 1-5, 8, 11-13" style="flex: 1;" disabled>
+                </div>
+
+                <!-- More Options: Odd/Even & Reverse -->
+                <div class="sub-options-box">
+                    <div class="form-row">
+                        <label for="subset-select">Odd or Even Pages:</label>
+                        <select id="subset-select" style="width: 195px;">
+                            <option value="all">All pages in range</option>
+                            <option value="odd">Odd pages only</option>
+                            <option value="even">Even pages only</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-reverse-pages">
+                            <span>Reverse pages</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Page Sizing & Handling (Acrobat 4 Tabs) -->
+            <div class="acrobat-section">
+                <div class="section-header">
+                    <span>Page Sizing &amp; Handling</span>
+                    <span class="sub">Acrobat Layout Modes</span>
+                </div>
+
+                <div class="sizing-mode-tabs">
+                    <button type="button" class="sizing-tab-btn active" data-sizing-mode="size">
+                        <span class="tab-icon">📏</span>
+                        <span>Size</span>
+                    </button>
+                    <button type="button" class="sizing-tab-btn" data-sizing-mode="poster">
+                        <span class="tab-icon">🪧</span>
+                        <span>Poster</span>
+                    </button>
+                    <button type="button" class="sizing-tab-btn" data-sizing-mode="multiple">
+                        <span class="tab-icon">⊞</span>
+                        <span>Multiple</span>
+                    </button>
+                    <button type="button" class="sizing-tab-btn" data-sizing-mode="booklet">
+                        <span class="tab-icon">📖</span>
+                        <span>Booklet</span>
+                    </button>
+                </div>
+
+                <!-- Tab 1: Size -->
+                <div class="sizing-pane active" id="pane-size">
+                    <div class="radio-row">
+                        <label class="radio-label">
+                            <input type="radio" name="size-option" value="fit" checked>
+                            <span>Fit</span>
+                        </label>
+                    </div>
+                    <div class="radio-row">
+                        <label class="radio-label">
+                            <input type="radio" name="size-option" value="actual">
+                            <span>Actual size</span>
+                        </label>
+                    </div>
+                    <div class="radio-row">
+                        <label class="radio-label">
+                            <input type="radio" name="size-option" value="shrink">
+                            <span>Shrink oversized pages</span>
+                        </label>
+                    </div>
+                    <div class="radio-row">
+                        <label class="radio-label">
+                            <input type="radio" name="size-option" value="custom">
+                            <span>Custom Scale:</span>
+                        </label>
+                        <input type="number" id="custom-scale-input" value="100" min="10" max="1000" step="5" style="width: 72px;" disabled>
+                        <span>%</span>
+                    </div>
+                    <div class="form-row" style="margin-top: 2px;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-center-page" checked>
+                            <span>Center PDF page on sheet</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Poster -->
+                <div class="sizing-pane" id="pane-poster">
+                    <div class="form-row">
+                        <label for="poster-scale-input">Tile Scale:</label>
+                        <div>
+                            <input type="number" id="poster-scale-input" value="150" min="50" max="800" step="10" style="width: 76px;">
+                            <span>%</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="poster-overlap-input">Overlap:</label>
+                        <div>
+                            <input type="number" id="poster-overlap-input" value="0" min="0" max="50" step="1" style="width: 76px;">
+                            <span>mm</span>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-poster-cutmarks" checked>
+                            <span>Cut marks</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-poster-labels" checked>
+                            <span>Labels</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Multiple (N-up) -->
+                <div class="sizing-pane" id="pane-multiple">
+                    <div class="form-row">
+                        <label for="multiple-preset">Pages per sheet:</label>
+                        <select id="multiple-preset" style="width: 115px;">
+                            <option value="2">2</option>
+                            <option value="4" selected>4</option>
+                            <option value="6">6</option>
+                            <option value="9">9</option>
+                            <option value="16">16</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <div id="multiple-custom-box" style="display: none; align-items: center; gap: 4px;">
+                            <input type="number" id="multiple-cols" value="2" min="1" max="10" style="width: 48px;">
+                            <span>×</span>
+                            <input type="number" id="multiple-rows" value="2" min="1" max="10" style="width: 48px;">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <label for="multiple-order">Page order:</label>
+                        <select id="multiple-order" style="width: 195px;">
+                            <option value="horizontal">Horizontal</option>
+                            <option value="horizontal-rev">Horizontal Reversed</option>
+                            <option value="vertical">Vertical</option>
+                            <option value="vertical-rev">Vertical Reversed</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-page-border" checked>
+                            <span>Print page border</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Booklet -->
+                <div class="sizing-pane" id="pane-booklet">
+                    <div class="form-row">
+                        <label for="booklet-subset">Booklet subset:</label>
+                        <select id="booklet-subset" style="width: 195px;">
+                            <option value="both">Both sides</option>
+                            <option value="front">Front side only</option>
+                            <option value="back">Back side only</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label for="booklet-binding">Binding:</label>
+                        <select id="booklet-binding" style="width: 195px;">
+                            <option value="left">Left</option>
+                            <option value="right">Right</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Orientation, Duplex & Paper Setup -->
+            <div class="acrobat-section">
+                <div class="section-header">
+                    <span>Orientation, Duplex &amp; Paper</span>
+                    <span class="sub">Page Setup</span>
+                </div>
+
+                <div class="form-row">
+                    <label>Orientation:</label>
+                    <div style="display: flex; gap: 10px;">
+                        <label class="radio-label" style="min-width: auto;">
+                            <input type="radio" name="orientation-mode" value="auto" checked>
+                            <span>Auto</span>
+                        </label>
+                        <label class="radio-label" style="min-width: auto;">
+                            <input type="radio" name="orientation-mode" value="portrait">
+                            <span>Portrait</span>
+                        </label>
+                        <label class="radio-label" style="min-width: auto;">
+                            <input type="radio" name="orientation-mode" value="landscape">
+                            <span>Landscape</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="sub-options-box">
+                    <div class="form-row">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="chk-duplex">
+                            <span>Print on both sides of paper</span>
+                        </label>
+                        <select id="duplex-mode" style="width: 175px;" disabled>
+                            <option value="LongEdge">Flip on long edge</option>
+                            <option value="ShortEdge">Flip on short edge</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label for="paper-size-select">Paper Size:</label>
+                        <select id="paper-size-select" style="width: 205px;">
+                            <optgroup label="ISO A Series (Standard & Large)">
+                                <option value="A0">A0 (841 × 1189 mm)</option>
+                                <option value="A1">A1 (594 × 841 mm)</option>
+                                <option value="A2">A2 (420 × 594 mm)</option>
+                                <option value="A3">A3 (297 × 420 mm)</option>
+                                <option value="A4" selected>A4 (210 × 297 mm)</option>
+                                <option value="A5">A5 (148 × 210 mm)</option>
+                            </optgroup>
+                            <optgroup label="ISO B Series">
+                                <option value="B0">B0 (1000 × 1414 mm)</option>
+                                <option value="B1">B1 (707 × 1000 mm)</option>
+                                <option value="B2">B2 (500 × 707 mm)</option>
+                                <option value="B3">B3 (353 × 500 mm)</option>
+                                <option value="B4">B4 (250 × 353 mm)</option>
+                                <option value="B5">B5 (176 × 250 mm)</option>
+                            </optgroup>
+                            <optgroup label="ANSI / North America">
+                                <option value="Letter">Letter (215.9 × 279.4 mm)</option>
+                                <option value="Legal">Legal (215.9 × 355.6 mm)</option>
+                                <option value="Tabloid">Tabloid / Ledger (279.4 × 431.8 mm)</option>
+                                <option value="ArchE">Arch E (914.4 × 1219.2 mm)</option>
+                                <option value="ArchD">Arch D (609.6 × 914.4 mm)</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <label for="margin-preset-select">Page Margins:</label>
+                        <select id="margin-preset-select" style="width: 195px;">
+                            <option value="8" selected>Default (8 mm)</option>
+                            <option value="4">Minimal (4 mm)</option>
+                            <option value="0">None / Borderless (0 mm)</option>
+                            <option value="15">Wide (15 mm)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Live Print Preview -->
+        <div id="preview-column">
+            <div class="preview-top-info">
+                <span class="dim-text" id="preview-dim-label">A4 — 210 × 297 mm (Portrait)</span>
+                <div class="preview-badges">
+                    <span class="preview-badge" id="preview-scale-badge">Scale: Fit</span>
+                    <span class="preview-badge" id="preview-sheets-badge">1 Sheet</span>
+                </div>
+            </div>
+
+            <div id="preview-stage">
+                <div id="paper-preview-wrapper">
+                    <div class="ruler-top" id="ruler-top-text">210.0 mm</div>
+                    <div class="ruler-left" id="ruler-left-text">297.0 mm</div>
+                    <canvas id="preview-canvas" width="420" height="594"></canvas>
+                </div>
+            </div>
+
+            <div class="preview-nav-bar">
+                <button type="button" class="nav-icon-btn" id="btn-sheet-first" title="First Sheet">|◀</button>
+                <button type="button" class="nav-icon-btn" id="btn-sheet-prev" title="Previous Sheet">◀</button>
+                <span style="font-size: 12px; color: #cbd5e1;">
+                    Sheet <input type="number" id="preview-sheet-input" value="1" min="1"> of <span id="preview-sheet-total">1</span>
+                </span>
+                <button type="button" class="nav-icon-btn" id="btn-sheet-next" title="Next Sheet">▶</button>
+                <button type="button" class="nav-icon-btn" id="btn-sheet-last" title="Last Sheet">▶|</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bottom Footer -->
+    <footer id="dialog-footer">
+        <div id="print-status-msg">Ready to print</div>
+        <div class="footer-buttons">
+            <button type="button" class="btn-secondary" id="btn-cancel-print" style="padding: 7px 16px;">Cancel</button>
+            <button type="button" class="btn-primary-print" id="btn-execute-print">
+                <span>🖨️</span>
+                <span>Print</span>
+            </button>
+        </div>
+    </footer>
+
+    <!-- Print Mount Container for High-DPI Native Spooling -->
+    <div id="print-mount-container"></div>
+
+    <!-- Load pdf.js -->
+    <script type="module">
+        import * as pdfjsLib from '/lib/pdfjs/pdf.min.mjs';
+        import * as pdfjsWorker from '/lib/pdfjs/pdf.worker.min.mjs';
+
+        window.pdfjsWorker = pdfjsWorker;
+        globalThis.pdfjsWorker = pdfjsWorker;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/lib/pdfjs/pdf.worker.min.mjs';
+
+        // --- Paper Sizes in mm ---
+        const PAPER_SIZES_MM = {
+            A0: { w: 841, h: 1189 },
+            A1: { w: 594, h: 841 },
+            A2: { w: 420, h: 594 },
+            A3: { w: 297, h: 420 },
+            A4: { w: 210, h: 297 },
+            A5: { w: 148, h: 210 },
+            B0: { w: 1000, h: 1414 },
+            B1: { w: 707, h: 1000 },
+            B2: { w: 500, h: 707 },
+            B3: { w: 353, h: 500 },
+            B4: { w: 250, h: 353 },
+            B5: { w: 176, h: 250 },
+            Letter: { w: 215.9, h: 279.4 },
+            Legal: { w: 215.9, h: 355.6 },
+            Tabloid: { w: 279.4, h: 431.8 },
+            ArchE: { w: 914.4, h: 1219.2 },
+            ArchD: { w: 609.6, h: 914.4 }
+        };
+
+        // --- URL Params & State ---
+        const params = new URLSearchParams(window.location.search);
+        const pdfPath = params.get('pdfPath') || '';
+        const storageId = params.get('storageId') || 'print_doc_latest';
+        const docTitle = params.get('title') || (pdfPath ? pdfPath.split(/[\\/]/).pop() : 'Document.pdf');
+        const sessionPwd = params.get('pwd') || '';
+        let viewerCurrentPage = parseInt(params.get('currentPage') || '1', 10) || 1;
+        let totalPdfPages = parseInt(params.get('totalPages') || '1', 10) || 1;
+
+        let pdfDoc = null;
+        let currentSizingMode = 'size'; // 'size' | 'poster' | 'multiple' | 'booklet'
+        let computedSheets = [];        // Array of sheet descriptors
+        let currentSheetIdx = 0;        // 0-based index into computedSheets
+        let previewRenderToken = 0;
+
+        // Expose function so Rust or BroadcastChannel can update current page live
+        window.__updateViewerCurrentPage = (pageNum) => {
+            if (pageNum && pageNum >= 1 && pageNum <= totalPdfPages) {
+                viewerCurrentPage = pageNum;
+                const badge = document.getElementById('current-page-badge');
+                if (badge) badge.textContent = `(Page ${viewerCurrentPage})`;
+                const curRadio = document.querySelector('input[name="pages-mode"][value="current"]');
+                if (curRadio && curRadio.checked) {
+                    recomputeSheetsAndPreview();
+                }
+            }
+        };
+
+        try {
+            const bc = new BroadcastChannel('mhzipy_pdf_print_sync');
+            bc.onmessage = (ev) => {
+                if (ev.data && ev.data.type === 'current-page') {
+                    window.__updateViewerCurrentPage(ev.data.pageNum);
+                }
+            };
+        } catch (e) {}
+
+        function getTauriInvoke() {
+            return window.__TAURI__?.core?.invoke || window.__TAURI_INTERNALS__?.invoke || null;
+        }
+
+        // --- IndexedDB Loader ---
+        function loadFromIndexedDB(id) {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open('PDFViewerDB', 1);
+                req.onsuccess = (ev) => {
+                    const db = ev.target.result;
+                    if (!db.objectStoreNames.contains('files')) {
+                        reject(new Error('No files store'));
+                        return;
+                    }
+                    const tx = db.transaction(['files'], 'readonly');
+                    const getReq = tx.objectStore('files').get(id);
+                    getReq.onsuccess = () => {
+                        if (getReq.result) resolve(getReq.result);
+                        else reject(new Error('Not found in DB'));
+                    };
+                    getReq.onerror = () => reject(getReq.error);
+                };
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        async function loadPdfDocument() {
+            const statusEl = document.getElementById('print-status-msg');
+            statusEl.textContent = 'Loading PDF document for preview...';
+
+            let pdfBytes = null;
+            // 1. Try IndexedDB first (contains latest viewer bytes including any saved/in-memory state)
+            if (storageId) {
+                try {
+                    const data = await loadFromIndexedDB(storageId);
+                    if (data) pdfBytes = new Uint8Array(data);
+                } catch (e) {}
+            }
+            // 2. Fallback to reading file from disk via Tauri invoke
+            if (!pdfBytes && pdfPath) {
+                const invoke = getTauriInvoke();
+                if (invoke) {
+                    try {
+                        const raw = await invoke('read_binary_file', { path: pdfPath });
+                        if (raw && raw.length > 0) pdfBytes = new Uint8Array(raw);
+                    } catch (e) {
+                        console.warn('read_binary_file failed:', e);
+                    }
+                }
+            }
+
+            const config = {
+                cMapUrl: '/lib/pdfjs/cmaps/',
+                cMapPacked: true,
+            };
+            if (sessionPwd) config.password = sessionPwd;
+
+            if (pdfBytes) {
+                config.data = pdfBytes;
+            } else if (pdfPath) {
+                config.url = `http://pdf-data.localhost/${encodeURIComponent(pdfPath)}`;
+                config.disableRange = true;
+                config.disableStream = true;
+            } else {
+                statusEl.textContent = 'Failed to load PDF: No document source specified.';
+                return;
+            }
+
+            try {
+                pdfDoc = await pdfjsLib.getDocument(config).promise;
+                totalPdfPages = pdfDoc.numPages;
+                document.getElementById('total-pages-label').textContent = `Total ${totalPdfPages} page${totalPdfPages > 1 ? 's' : ''}`;
+                document.getElementById('pages-range-input').placeholder = `e.g. 1-${totalPdfPages}`;
+                document.getElementById('current-page-badge').textContent = `(Page ${Math.min(viewerCurrentPage, totalPdfPages)})`;
+                statusEl.textContent = `Ready — ${totalPdfPages} pages loaded`;
+                await recomputeSheetsAndPreview();
+            } catch (err) {
+                console.error('Failed to load PDF in print dialog:', err);
+                statusEl.textContent = `Error loading PDF: ${err.message || err}`;
+            }
+        }
+
+        // --- Load System Printers ---
+        async function loadSystemPrinters() {
+            const selectEl = document.getElementById('printer-select');
+            const invoke = getTauriInvoke();
+            selectEl.innerHTML = '';
+
+            if (invoke) {
+                try {
+                    const printers = await invoke('get_system_printers');
+                    if (Array.isArray(printers) && printers.length > 0) {
+                        printers.forEach(p => {
+                            const opt = document.createElement('option');
+                            opt.value = p.name;
+                            opt.textContent = p.is_default ? `${p.name} (Default)` : p.name;
+                            if (p.is_default) opt.selected = true;
+                            selectEl.appendChild(opt);
+                        });
+                        updatePrinterPropsButtonState();
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('get_system_printers failed:', e);
+                }
+            }
+
+            // Fallback default options
+            ['Microsoft Print to PDF', 'Save as PDF'].forEach((name, idx) => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = idx === 0 ? `${name} (Default)` : name;
+                selectEl.appendChild(opt);
+            });
+            updatePrinterPropsButtonState();
+        }
+
+        function updatePrinterPropsButtonState() {
+            const printerName = document.getElementById('printer-select').value;
+            const propsBtn = document.getElementById('btn-printer-props');
+            if (propsBtn) {
+                propsBtn.disabled = !printerName || printerName === 'Save as PDF';
+            }
+        }
+
+        // --- Parse Page Ranges & Filter Subset ---
+        function getSelectedPageNumbers() {
+            if (!pdfDoc) return [1];
+            const mode = document.querySelector('input[name="pages-mode"]:checked')?.value || 'all';
+            let pages = [];
+
+            if (mode === 'all') {
+                for (let i = 1; i <= totalPdfPages; i++) pages.push(i);
+            } else if (mode === 'current') {
+                pages.push(Math.max(1, Math.min(totalPdfPages, viewerCurrentPage)));
+            } else if (mode === 'range') {
+                const raw = document.getElementById('pages-range-input').value.trim();
+                if (!raw) {
+                    for (let i = 1; i <= totalPdfPages; i++) pages.push(i);
+                } else {
+                    const parts = raw.split(',');
+                    for (const part of parts) {
+                        const trimmed = part.trim();
+                        if (!trimmed) continue;
+                        if (trimmed.includes('-')) {
+                            const [sStr, eStr] = trimmed.split('-');
+                            let s = parseInt(sStr, 10);
+                            let e = parseInt(eStr, 10);
+                            if (!isNaN(s) && !isNaN(e)) {
+                                s = Math.max(1, Math.min(totalPdfPages, s));
+                                e = Math.max(1, Math.min(totalPdfPages, e));
+                                const step = s <= e ? 1 : -1;
+                                for (let p = s; step > 0 ? p <= e : p >= e; p += step) {
+                                    pages.push(p);
+                                }
+                            }
+                        } else {
+                            const p = parseInt(trimmed, 10);
+                            if (!isNaN(p) && p >= 1 && p <= totalPdfPages) {
+                                pages.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (pages.length === 0) pages = [1];
+
+            // Subset filter (Odd / Even)
+            const subset = document.getElementById('subset-select').value;
+            if (subset === 'odd') {
+                pages = pages.filter(p => p % 2 === 1);
+            } else if (subset === 'even') {
+                pages = pages.filter(p => p % 2 === 0);
+            }
+
+            if (pages.length === 0) pages = [1];
+
+            // Reverse order
+            if (document.getElementById('chk-reverse-pages').checked) {
+                pages.reverse();
+            }
+
+            return pages;
+        }
+
+        // --- Compute Print Sheets according to Acrobat Sizing & Handling Mode ---
+        async function buildSheetsDescriptor() {
+            const pages = getSelectedPageNumbers();
+            const paperKey = document.getElementById('paper-size-select').value || 'A4';
+            const basePaper = PAPER_SIZES_MM[paperKey] || PAPER_SIZES_MM.A4;
+            const orientMode = document.querySelector('input[name="orientation-mode"]:checked')?.value || 'auto';
+            const marginMm = parseFloat(document.getElementById('margin-preset-select').value || '8') || 0;
+            const grayscale = document.getElementById('chk-grayscale').checked;
+
+            // Inspect first selected page aspect ratio for 'auto' orientation
+            let firstPageLandscape = false;
+            if (pdfDoc && pages.length > 0) {
+                try {
+                    const p = await pdfDoc.getPage(pages[0]);
+                    const vp = p.getViewport({ scale: 1 });
+                    firstPageLandscape = vp.width > vp.height;
+                } catch (e) {}
+            }
+
+            const sheets = [];
+
+            if (currentSizingMode === 'size') {
+                const sizeOpt = document.querySelector('input[name="size-option"]:checked')?.value || 'fit';
+                const customScale = (parseFloat(document.getElementById('custom-scale-input').value) || 100) / 100;
+                const centerPage = document.getElementById('chk-center-page').checked;
+
+                for (const pageNum of pages) {
+                    let isLandscape = orientMode === 'landscape';
+                    if (orientMode === 'auto' && pdfDoc) {
+                        try {
+                            const p = await pdfDoc.getPage(pageNum);
+                            const vp = p.getViewport({ scale: 1 });
+                            isLandscape = vp.width > vp.height;
+                        } catch (e) {
+                            isLandscape = firstPageLandscape;
+                        }
+                    }
+                    const sheetW = isLandscape ? basePaper.h : basePaper.w;
+                    const sheetH = isLandscape ? basePaper.w : basePaper.h;
+
+                    sheets.push({
+                        mode: 'size',
+                        paperKey,
+                        sheetW,
+                        sheetH,
+                        isLandscape,
+                        marginMm,
+                        grayscale,
+                        pageNum,
+                        sizeOpt,
+                        customScale,
+                        centerPage
+                    });
+                }
+            } else if (currentSizingMode === 'multiple') {
+                const preset = document.getElementById('multiple-preset').value;
+                let cols = 2, rows = 2;
+                if (preset === '2') { cols = 2; rows = 1; }
+                else if (preset === '4') { cols = 2; rows = 2; }
+                else if (preset === '6') { cols = 3; rows = 2; }
+                else if (preset === '9') { cols = 3; rows = 3; }
+                else if (preset === '16') { cols = 4; rows = 4; }
+                else {
+                    cols = Math.max(1, parseInt(document.getElementById('multiple-cols').value, 10) || 2);
+                    rows = Math.max(1, parseInt(document.getElementById('multiple-rows').value, 10) || 2);
+                }
+
+                // In Multiple mode, if orientMode is auto, choose landscape when cols > rows
+                let isLandscape = orientMode === 'landscape';
+                if (orientMode === 'auto') {
+                    isLandscape = cols > rows ? true : (cols < rows ? false : firstPageLandscape);
+                }
+                const sheetW = isLandscape ? basePaper.h : basePaper.w;
+                const sheetH = isLandscape ? basePaper.w : basePaper.h;
+                const perSheet = cols * rows;
+                const order = document.getElementById('multiple-order').value;
+                const drawBorder = document.getElementById('chk-page-border').checked;
+
+                for (let i = 0; i < pages.length; i += perSheet) {
+                    const chunk = pages.slice(i, i + perSheet);
+                    sheets.push({
+                        mode: 'multiple',
+                        paperKey,
+                        sheetW,
+                        sheetH,
+                        isLandscape,
+                        marginMm,
+                        grayscale,
+                        cols,
+                        rows,
+                        order,
+                        drawBorder,
+                        pages: chunk
+                    });
+                }
+            } else if (currentSizingMode === 'poster') {
+                const tileScale = Math.max(0.2, (parseFloat(document.getElementById('poster-scale-input').value) || 150) / 100);
+                const overlapMm = Math.max(0, parseFloat(document.getElementById('poster-overlap-input').value) || 0);
+                const cutMarks = document.getElementById('chk-poster-cutmarks').checked;
+                const labels = document.getElementById('chk-poster-labels').checked;
+
+                for (const pageNum of pages) {
+                    let pageWmm = 210, pageHmm = 297;
+                    if (pdfDoc) {
+                        try {
+                            const p = await pdfDoc.getPage(pageNum);
+                            const vp = p.getViewport({ scale: 1 });
+                            // 1 pt = 25.4 / 72 mm
+                            pageWmm = vp.width * (25.4 / 72);
+                            pageHmm = vp.height * (25.4 / 72);
+                        } catch (e) {}
+                    }
+
+                    const isLandscape = orientMode === 'landscape' || (orientMode === 'auto' && pageWmm > pageHmm);
+                    const sheetW = isLandscape ? basePaper.h : basePaper.w;
+                    const sheetH = isLandscape ? basePaper.w : basePaper.h;
+                    const printableW = Math.max(20, sheetW - marginMm * 2 - overlapMm);
+                    const printableH = Math.max(20, sheetH - marginMm * 2 - overlapMm);
+
+                    const totalTiledW = pageWmm * tileScale;
+                    const totalTiledH = pageHmm * tileScale;
+
+                    const cols = Math.max(1, Math.ceil(totalTiledW / printableW));
+                    const rows = Math.max(1, Math.ceil(totalTiledH / printableH));
+
+                    for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                            sheets.push({
+                                mode: 'poster',
+                                paperKey,
+                                sheetW,
+                                sheetH,
+                                isLandscape,
+                                marginMm,
+                                grayscale,
+                                pageNum,
+                                tileScale,
+                                overlapMm,
+                                cutMarks,
+                                labels,
+                                tileCol: c,
+                                tileRow: r,
+                                totalCols: cols,
+                                totalRows: rows
+                            });
+                        }
+                    }
+                }
+            } else if (currentSizingMode === 'booklet') {
+                // Booklet mode places 2 pages side-by-side in Landscape
+                const isLandscape = true;
+                const sheetW = basePaper.h;
+                const sheetH = basePaper.w;
+                const subset = document.getElementById('booklet-subset').value; // 'both' | 'front' | 'back'
+                const binding = document.getElementById('booklet-binding').value; // 'left' | 'right'
+
+                // Pad page count to multiple of 4 for saddle-stitch booklet signature
+                const totalP = Math.ceil(pages.length / 4) * 4;
+                const padded = [...pages];
+                while (padded.length < totalP) padded.push(null); // blank page
+
+                const numPhysicalSheets = totalP / 4;
+                for (let s = 0; s < numPhysicalSheets; s++) {
+                    // Front side of physical sheet s: [totalP - 1 - 2*s, 2*s]
+                    const frontLeft = binding === 'left' ? padded[totalP - 1 - 2 * s] : padded[2 * s];
+                    const frontRight = binding === 'left' ? padded[2 * s] : padded[totalP - 1 - 2 * s];
+
+                    // Back side of physical sheet s: [2*s + 1, totalP - 2 - 2*s]
+                    const backLeft = binding === 'left' ? padded[2 * s + 1] : padded[totalP - 2 - 2 * s];
+                    const backRight = binding === 'left' ? padded[totalP - 2 - 2 * s] : padded[2 * s + 1];
+
+                    if (subset === 'both' || subset === 'front') {
+                        sheets.push({
+                            mode: 'booklet',
+                            paperKey,
+                            sheetW,
+                            sheetH,
+                            isLandscape,
+                            marginMm,
+                            grayscale,
+                            sideLabel: `Sheet ${s + 1} Front`,
+                            leftPage: frontLeft,
+                            rightPage: frontRight
+                        });
+                    }
+                    if (subset === 'both' || subset === 'back') {
+                        sheets.push({
+                            mode: 'booklet',
+                            paperKey,
+                            sheetW,
+                            sheetH,
+                            isLandscape,
+                            marginMm,
+                            grayscale,
+                            sideLabel: `Sheet ${s + 1} Back`,
+                            leftPage: backLeft,
+                            rightPage: backRight
+                        });
+                    }
+                }
+            }
+
+            return sheets;
+        }
+
+        // --- Render a Single Sheet Descriptor onto a Target Canvas ---
+        async function renderSheetToCanvas(sheet, canvas, pxPerMm = 3.0) {
+            const widthPx = Math.round(sheet.sheetW * pxPerMm);
+            const heightPx = Math.round(sheet.sheetH * pxPerMm);
+            canvas.width = widthPx;
+            canvas.height = heightPx;
+
+            const ctx = canvas.getContext('2d');
+            ctx.save();
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, widthPx, heightPx);
+
+            if (sheet.grayscale) {
+                ctx.filter = 'grayscale(100%)';
+            }
+
+            const marginPx = sheet.marginMm * pxPerMm;
+            const availW = Math.max(10, widthPx - marginPx * 2);
+            const availH = Math.max(10, heightPx - marginPx * 2);
+
+            if (!pdfDoc) {
+                ctx.restore();
+                return { effectiveScalePct: 100 };
+            }
+
+            let effectiveScalePct = 100;
+
+            if (sheet.mode === 'size') {
+                const page = await pdfDoc.getPage(sheet.pageNum);
+                const vp1 = page.getViewport({ scale: 1 });
+                // 1 pt = 25.4 / 72 mm
+                const pageWmm = vp1.width * (25.4 / 72);
+                const pageHmm = vp1.height * (25.4 / 72);
+                const naturalWpx = pageWmm * pxPerMm;
+                const naturalHpx = pageHmm * pxPerMm;
+
+                let scaleRatio = 1.0;
+                if (sheet.sizeOpt === 'fit') {
+                    scaleRatio = Math.min(availW / naturalWpx, availH / naturalHpx);
+                } else if (sheet.sizeOpt === 'actual') {
+                    scaleRatio = 1.0;
+                } else if (sheet.sizeOpt === 'shrink') {
+                    scaleRatio = Math.min(1.0, availW / naturalWpx, availH / naturalHpx);
+                } else if (sheet.sizeOpt === 'custom') {
+                    scaleRatio = sheet.customScale;
+                }
+
+                effectiveScalePct = Math.round(scaleRatio * 100);
+                const drawW = naturalWpx * scaleRatio;
+                const drawH = naturalHpx * scaleRatio;
+                const drawX = sheet.centerPage ? marginPx + (availW - drawW) / 2 : marginPx;
+                const drawY = sheet.centerPage ? marginPx + (availH - drawH) / 2 : marginPx;
+
+                const offCanvas = document.createElement('canvas');
+                const renderScale = (drawW / vp1.width);
+                const renderVp = page.getViewport({ scale: Math.max(0.1, renderScale) });
+                offCanvas.width = Math.max(1, Math.round(renderVp.width));
+                offCanvas.height = Math.max(1, Math.round(renderVp.height));
+                await page.render({ canvasContext: offCanvas.getContext('2d'), viewport: renderVp }).promise;
+
+                // Clip to printable area
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(marginPx, marginPx, availW, availH);
+                ctx.clip();
+                ctx.drawImage(offCanvas, drawX, drawY, drawW, drawH);
+                ctx.restore();
+                page.cleanup();
+            } else if (sheet.mode === 'multiple') {
+                const { cols, rows, order, drawBorder, pages } = sheet;
+                const gapPx = Math.max(4, 3 * pxPerMm);
+                const cellW = (availW - gapPx * (cols - 1)) / cols;
+                const cellH = (availH - gapPx * (rows - 1)) / rows;
+
+                for (let idx = 0; idx < pages.length; idx++) {
+                    const pageNum = pages[idx];
+                    let c = 0, r = 0;
+                    if (order === 'horizontal') {
+                        r = Math.floor(idx / cols);
+                        c = idx % cols;
+                    } else if (order === 'horizontal-rev') {
+                        r = Math.floor(idx / cols);
+                        c = (cols - 1) - (idx % cols);
+                    } else if (order === 'vertical') {
+                        c = Math.floor(idx / rows);
+                        r = idx % rows;
+                    } else if (order === 'vertical-rev') {
+                        c = Math.floor(idx / rows);
+                        r = (rows - 1) - (idx % rows);
+                    }
+
+                    const cellX = marginPx + c * (cellW + gapPx);
+                    const cellY = marginPx + r * (cellH + gapPx);
+
+                    const page = await pdfDoc.getPage(pageNum);
+                    const vp1 = page.getViewport({ scale: 1 });
+                    const scale = Math.min((cellW - 4) / vp1.width, (cellH - 4) / vp1.height);
+                    const renderVp = page.getViewport({ scale: Math.max(0.1, scale) });
+
+                    const offCanvas = document.createElement('canvas');
+                    offCanvas.width = Math.max(1, Math.round(renderVp.width));
+                    offCanvas.height = Math.max(1, Math.round(renderVp.height));
+                    await page.render({ canvasContext: offCanvas.getContext('2d'), viewport: renderVp }).promise;
+
+                    const dx = cellX + (cellW - renderVp.width) / 2;
+                    const dy = cellY + (cellH - renderVp.height) / 2;
+                    ctx.drawImage(offCanvas, dx, dy, renderVp.width, renderVp.height);
+
+                    if (drawBorder) {
+                        ctx.strokeStyle = '#475569';
+                        ctx.lineWidth = Math.max(1, 0.3 * pxPerMm);
+                        ctx.strokeRect(dx, dy, renderVp.width, renderVp.height);
+                    }
+                    page.cleanup();
+                }
+                effectiveScalePct = Math.round(100 / Math.max(cols, rows));
+            } else if (sheet.mode === 'poster') {
+                const page = await pdfDoc.getPage(sheet.pageNum);
+                const vp1 = page.getViewport({ scale: 1 });
+                const pageWmm = vp1.width * (25.4 / 72);
+                const pageHmm = vp1.height * (25.4 / 72);
+
+                const totalWpx = pageWmm * sheet.tileScale * pxPerMm;
+                const totalHpx = pageHmm * sheet.tileScale * pxPerMm;
+                const renderScale = totalWpx / vp1.width;
+                const renderVp = page.getViewport({ scale: Math.max(0.1, renderScale) });
+
+                const offCanvas = document.createElement('canvas');
+                offCanvas.width = Math.max(1, Math.round(renderVp.width));
+                offCanvas.height = Math.max(1, Math.round(renderVp.height));
+                await page.render({ canvasContext: offCanvas.getContext('2d'), viewport: renderVp }).promise;
+
+                const overlapPx = sheet.overlapMm * pxPerMm;
+                const stepX = availW - overlapPx;
+                const stepY = availH - overlapPx;
+                const srcX = sheet.tileCol * stepX;
+                const srcY = sheet.tileRow * stepY;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(marginPx, marginPx, availW, availH);
+                ctx.clip();
+                ctx.drawImage(offCanvas, marginPx - srcX, marginPx - srcY);
+                ctx.restore();
+
+                if (sheet.cutMarks) {
+                    ctx.strokeStyle = '#ef4444';
+                    ctx.lineWidth = 1;
+                    const m = marginPx;
+                    const len = 4 * pxPerMm;
+                    // Top-left
+                    ctx.beginPath();
+                    ctx.moveTo(m - len, m); ctx.lineTo(m + len, m);
+                    ctx.moveTo(m, m - len); ctx.lineTo(m, m + len);
+                    // Top-right
+                    ctx.moveTo(widthPx - m - len, m); ctx.lineTo(widthPx - m + len, m);
+                    ctx.moveTo(widthPx - m, m - len); ctx.lineTo(widthPx - m, m + len);
+                    // Bottom-left
+                    ctx.moveTo(m - len, heightPx - m); ctx.lineTo(m + len, heightPx - m);
+                    ctx.moveTo(m, heightPx - m - len); ctx.lineTo(m, heightPx - m + len);
+                    // Bottom-right
+                    ctx.moveTo(widthPx - m - len, heightPx - m); ctx.lineTo(widthPx - m + len, heightPx - m);
+                    ctx.moveTo(widthPx - m, heightPx - m - len); ctx.lineTo(widthPx - m, heightPx - m + len);
+                    ctx.stroke();
+                }
+
+                if (sheet.labels) {
+                    ctx.fillStyle = '#64748b';
+                    ctx.font = `${Math.max(9, Math.round(2.8 * pxPerMm))}px sans-serif`;
+                    ctx.fillText(
+                        `Page ${sheet.pageNum} — Tile (${sheet.tileCol + 1}, ${sheet.tileRow + 1}) of ${sheet.totalCols}×${sheet.totalRows}`,
+                        marginPx + 4,
+                        Math.max(12, marginPx - 3)
+                    );
+                }
+                effectiveScalePct = Math.round(sheet.tileScale * 100);
+                page.cleanup();
+            } else if (sheet.mode === 'booklet') {
+                const halfW = availW / 2;
+                const pairs = [
+                    { pageNum: sheet.leftPage, x: marginPx },
+                    { pageNum: sheet.rightPage, x: marginPx + halfW }
+                ];
+
+                for (const side of pairs) {
+                    if (!side.pageNum) continue;
+                    const page = await pdfDoc.getPage(side.pageNum);
+                    const vp1 = page.getViewport({ scale: 1 });
+                    const scale = Math.min((halfW - 6) / vp1.width, availH / vp1.height);
+                    const renderVp = page.getViewport({ scale: Math.max(0.1, scale) });
+
+                    const offCanvas = document.createElement('canvas');
+                    offCanvas.width = Math.max(1, Math.round(renderVp.width));
+                    offCanvas.height = Math.max(1, Math.round(renderVp.height));
+                    await page.render({ canvasContext: offCanvas.getContext('2d'), viewport: renderVp }).promise;
+
+                    const dx = side.x + (halfW - renderVp.width) / 2;
+                    const dy = marginPx + (availH - renderVp.height) / 2;
+                    ctx.drawImage(offCanvas, dx, dy, renderVp.width, renderVp.height);
+                    page.cleanup();
+                }
+
+                // Center fold line
+                ctx.save();
+                ctx.strokeStyle = '#94a3b8';
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(marginPx + halfW, marginPx);
+                ctx.lineTo(marginPx + halfW, marginPx + availH);
+                ctx.stroke();
+                ctx.restore();
+                effectiveScalePct = 70;
+            }
+
+            ctx.restore();
+            return { effectiveScalePct };
+        }
+
+        // --- Recompute Sheets & Render Current Preview Sheet ---
+        async function recomputeSheetsAndPreview() {
+            const token = ++previewRenderToken;
+            computedSheets = await buildSheetsDescriptor();
+            if (token !== previewRenderToken) return;
+
+            if (computedSheets.length === 0) {
+                computedSheets = [{
+                    mode: 'size',
+                    paperKey: 'A4',
+                    sheetW: 210,
+                    sheetH: 297,
+                    isLandscape: false,
+                    marginMm: 8,
+                    grayscale: false,
+                    pageNum: 1,
+                    sizeOpt: 'fit',
+                    customScale: 1,
+                    centerPage: true
+                }];
+            }
+
+            if (currentSheetIdx >= computedSheets.length) {
+                currentSheetIdx = computedSheets.length - 1;
+            }
+            if (currentSheetIdx < 0) currentSheetIdx = 0;
+
+            await renderCurrentPreviewSheet(token);
+        }
+
+        async function renderCurrentPreviewSheet(token = ++previewRenderToken) {
+            const sheet = computedSheets[currentSheetIdx];
+            if (!sheet) return;
+
+            // Update Top & Nav UI
+            const orientLabel = sheet.isLandscape ? 'Landscape' : 'Portrait';
+            document.getElementById('preview-dim-label').textContent =
+                `${sheet.paperKey} — ${sheet.sheetW.toFixed(1)} × ${sheet.sheetH.toFixed(1)} mm (${orientLabel})`;
+            document.getElementById('ruler-top-text').textContent = `${sheet.sheetW.toFixed(1)} mm`;
+            document.getElementById('ruler-left-text').textContent = `${sheet.sheetH.toFixed(1)} mm`;
+
+            const totalSheets = computedSheets.length;
+            document.getElementById('preview-sheets-badge').textContent =
+                `${totalSheets} Sheet${totalSheets > 1 ? 's' : ''}`;
+            document.getElementById('preview-sheet-total').textContent = String(totalSheets);
+            document.getElementById('preview-sheet-input').value = String(currentSheetIdx + 1);
+            document.getElementById('preview-sheet-input').max = String(totalSheets);
+
+            document.getElementById('btn-sheet-first').disabled = currentSheetIdx <= 0;
+            document.getElementById('btn-sheet-prev').disabled = currentSheetIdx <= 0;
+            document.getElementById('btn-sheet-next').disabled = currentSheetIdx >= totalSheets - 1;
+            document.getElementById('btn-sheet-last').disabled = currentSheetIdx >= totalSheets - 1;
+
+            // Size paper wrapper inside #preview-stage while preserving aspect ratio
+            const stage = document.getElementById('preview-stage');
+            const wrapper = document.getElementById('paper-preview-wrapper');
+            const maxW = Math.max(180, stage.clientWidth - 70);
+            const maxH = Math.max(180, stage.clientHeight - 60);
+            const ratio = Math.min(maxW / sheet.sheetW, maxH / sheet.sheetH);
+            wrapper.style.width = `${Math.round(sheet.sheetW * ratio)}px`;
+            wrapper.style.height = `${Math.round(sheet.sheetH * ratio)}px`;
+
+            const previewCanvas = document.getElementById('preview-canvas');
+            const { effectiveScalePct } = await renderSheetToCanvas(sheet, previewCanvas, 2.4);
+            if (token !== previewRenderToken) return;
+
+            // Draw subtle dashed margin guide on preview only
+            if (sheet.marginMm > 0) {
+                const ctx = previewCanvas.getContext('2d');
+                const mPx = sheet.marginMm * 2.4;
+                ctx.save();
+                ctx.strokeStyle = 'rgba(59, 130, 246, 0.35)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.strokeRect(mPx, mPx, previewCanvas.width - mPx * 2, previewCanvas.height - mPx * 2);
+                ctx.restore();
+            }
+
+            document.getElementById('preview-scale-badge').textContent = `Scale: ${effectiveScalePct}%`;
+        }
+
+        const closeSelf = () => {
+            const invoke = getTauriInvoke();
+            if (invoke) invoke('close_window');
+            else window.close();
+        };
+
+        // --- Execute Print Action ---
+        async function executePrintJob() {
+            const btnPrint = document.getElementById('btn-execute-print');
+            const statusEl = document.getElementById('print-status-msg');
+            const printerName = document.getElementById('printer-select').value;
+            const copies = Math.max(1, parseInt(document.getElementById('copies-input').value, 10) || 1);
+            const collate = document.getElementById('chk-collate').checked;
+            const grayscale = document.getElementById('chk-grayscale').checked;
+            const duplexChecked = document.getElementById('chk-duplex').checked;
+            const duplexMode = duplexChecked ? document.getElementById('duplex-mode').value : 'Simplex';
+
+            if (!pdfDoc || computedSheets.length === 0) return;
+
+            btnPrint.disabled = true;
+            const mount = document.getElementById('print-mount-container');
+            mount.innerHTML = '';
+
+            try {
+                // Render each sheet at print resolution (adaptive: 6.0 px/mm for A4/A3, downscaled for huge sheets like A0 to avoid canvas 16384px limit)
+                for (let i = 0; i < computedSheets.length; i++) {
+                    statusEl.textContent = `Rendering sheet ${i + 1} of ${computedSheets.length} for printing...`;
+                    const sheet = computedSheets[i];
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'print-sheet-item';
+                    const c = document.createElement('canvas');
+                    const maxDimMm = Math.max(sheet.sheetW, sheet.sheetH);
+                    const printPxPerMm = maxDimMm > 800 ? 3.0 : (maxDimMm > 500 ? 4.5 : 6.0);
+                    await renderSheetToCanvas(sheet, c, printPxPerMm);
+                    itemDiv.appendChild(c);
+                    mount.appendChild(itemDiv);
+                }
+
+                const firstSheet = computedSheets[0];
+                const invoke = getTauriInvoke();
+
+                // Check if "Save as PDF" virtual printer is selected
+                let saveToPdfPath = null;
+                if (printerName === 'Save as PDF') {
+                    if (window.__TAURI__?.dialog?.save) {
+                        saveToPdfPath = await window.__TAURI__.dialog.save({
+                            title: 'Save Printed PDF As',
+                            defaultPath: pdfPath ? pdfPath.replace(/\.pdf$/i, '_printed.pdf') : 'printed_output.pdf',
+                            filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
+                        });
+                        if (!saveToPdfPath) {
+                            statusEl.textContent = 'Save as PDF canceled.';
+                            btnPrint.disabled = false;
+                            return;
+                        }
+                    } else if (pdfPath) {
+                        saveToPdfPath = pdfPath.replace(/\.pdf$/i, '_printed.pdf');
+                    }
+                }
+
+                statusEl.textContent = `Sending ${computedSheets.length} sheet(s) to "${printerName}"...`;
+
+                if (invoke) {
+                    try {
+                        const resultMsg = await invoke('execute_webview_print', {
+                            printerName,
+                            copies,
+                            collate,
+                            grayscale,
+                            duplex: duplexMode,
+                            landscape: Boolean(firstSheet.isLandscape),
+                            pageWidthMm: firstSheet.isLandscape ? firstSheet.sheetH : firstSheet.sheetW,
+                            pageHeightMm: firstSheet.isLandscape ? firstSheet.sheetW : firstSheet.sheetH,
+                            saveToPdfPath
+                        });
+                        statusEl.textContent = `✅ ${resultMsg}`;
+                        setTimeout(() => closeSelf(), 350);
+                    } catch (err) {
+                        console.warn('Direct WebView2 print returned error, falling back to window.print():', err);
+                        window.print();
+                        statusEl.textContent = 'Print dialog completed.';
+                        setTimeout(() => closeSelf(), 350);
+                    }
+                } else {
+                    window.print();
+                    statusEl.textContent = 'Print dialog completed.';
+                    setTimeout(() => closeSelf(), 350);
+                }
+            } catch (err) {
+                console.error('Print execution error:', err);
+                statusEl.textContent = `❌ Print failed: ${err.message || err}`;
+                btnPrint.disabled = false;
+            } finally {
+                mount.innerHTML = '';
+            }
+        }
+
+        // --- Wire UI Event Listeners ---
+        document.getElementById('doc-title-badge').textContent = docTitle;
+        document.title = `Print - ${docTitle}`;
+
+        // Window Controls
+        document.getElementById('btn-win-minimize').onclick = () => {
+            const invoke = getTauriInvoke();
+            if (invoke) invoke('minimize_window');
+        };
+        document.getElementById('btn-win-close').onclick = closeSelf;
+        document.getElementById('btn-cancel-print').onclick = closeSelf;
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeSelf();
+            } else if (e.key === 'Enter' && document.activeElement?.tagName !== 'INPUT') {
+                e.preventDefault();
+                executePrintJob();
+            }
+        });
+
+        // Printer & Properties
+        document.getElementById('printer-select').addEventListener('change', updatePrinterPropsButtonState);
+        document.getElementById('btn-printer-props').addEventListener('click', async () => {
+            const printerName = document.getElementById('printer-select').value;
+            const invoke = getTauriInvoke();
+            if (invoke && printerName) {
+                try {
+                    await invoke('open_printer_properties', { printerName });
+                } catch (e) {
+                    document.getElementById('print-status-msg').textContent = String(e);
+                }
+            }
+        });
+
+        // Pages to Print radio buttons
+        document.querySelectorAll('input[name="pages-mode"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const isRange = document.querySelector('input[name="pages-mode"]:checked')?.value === 'range';
+                const rangeInput = document.getElementById('pages-range-input');
+                rangeInput.disabled = !isRange;
+                if (isRange) rangeInput.focus();
+                recomputeSheetsAndPreview();
+            });
+        });
+        document.getElementById('pages-range-input').addEventListener('input', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('subset-select').addEventListener('change', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('chk-reverse-pages').addEventListener('change', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('chk-grayscale').addEventListener('change', () => {
+            recomputeSheetsAndPreview();
+        });
+
+        // Sizing Mode Tabs (Size | Poster | Multiple | Booklet)
+        document.querySelectorAll('.sizing-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.sizing-tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSizingMode = btn.dataset.sizingMode || 'size';
+
+                document.querySelectorAll('.sizing-pane').forEach(p => p.classList.remove('active'));
+                document.getElementById(`pane-${currentSizingMode}`)?.classList.add('active');
+
+                currentSheetIdx = 0;
+                recomputeSheetsAndPreview();
+            });
+        });
+
+        // Size Tab Options
+        document.querySelectorAll('input[name="size-option"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                const isCustom = document.querySelector('input[name="size-option"]:checked')?.value === 'custom';
+                const customInput = document.getElementById('custom-scale-input');
+                customInput.disabled = !isCustom;
+                if (isCustom) customInput.focus();
+                recomputeSheetsAndPreview();
+            });
+        });
+        document.getElementById('custom-scale-input').addEventListener('input', recomputeSheetsAndPreview);
+        document.getElementById('chk-center-page').addEventListener('change', recomputeSheetsAndPreview);
+
+        // Poster Tab Options
+        document.getElementById('poster-scale-input').addEventListener('input', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('poster-overlap-input').addEventListener('input', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('chk-poster-cutmarks').addEventListener('change', recomputeSheetsAndPreview);
+        document.getElementById('chk-poster-labels').addEventListener('change', recomputeSheetsAndPreview);
+
+        // Multiple Tab Options
+        document.getElementById('multiple-preset').addEventListener('change', (e) => {
+            const isCustom = e.target.value === 'custom';
+            document.getElementById('multiple-custom-box').style.display = isCustom ? 'flex' : 'none';
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('multiple-cols').addEventListener('input', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('multiple-rows').addEventListener('input', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('multiple-order').addEventListener('change', recomputeSheetsAndPreview);
+        document.getElementById('chk-page-border').addEventListener('change', recomputeSheetsAndPreview);
+
+        // Booklet Tab Options
+        document.getElementById('booklet-subset').addEventListener('change', () => {
+            currentSheetIdx = 0;
+            recomputeSheetsAndPreview();
+        });
+        document.getElementById('booklet-binding').addEventListener('change', recomputeSheetsAndPreview);
+
+        // Orientation, Duplex & Paper
+        document.querySelectorAll('input[name="orientation-mode"]').forEach(radio => {
+            radio.addEventListener('change', recomputeSheetsAndPreview);
+        });
+        document.getElementById('chk-duplex').addEventListener('change', (e) => {
+            document.getElementById('duplex-mode').disabled = !e.target.checked;
+        });
+        document.getElementById('paper-size-select').addEventListener('change', recomputeSheetsAndPreview);
+        document.getElementById('margin-preset-select').addEventListener('change', recomputeSheetsAndPreview);
+
+        // Preview Sheet Navigation
+        document.getElementById('btn-sheet-first').onclick = () => {
+            currentSheetIdx = 0;
+            renderCurrentPreviewSheet();
+        };
+        document.getElementById('btn-sheet-prev').onclick = () => {
+            if (currentSheetIdx > 0) {
+                currentSheetIdx--;
+                renderCurrentPreviewSheet();
+            }
+        };
+        document.getElementById('btn-sheet-next').onclick = () => {
+            if (currentSheetIdx < computedSheets.length - 1) {
+                currentSheetIdx++;
+                renderCurrentPreviewSheet();
+            }
+        };
+        document.getElementById('btn-sheet-last').onclick = () => {
+            currentSheetIdx = Math.max(0, computedSheets.length - 1);
+            renderCurrentPreviewSheet();
+        };
+        document.getElementById('preview-sheet-input').addEventListener('change', (e) => {
+            const val = parseInt(e.target.value, 10);
+            if (!isNaN(val) && val >= 1 && val <= computedSheets.length) {
+                currentSheetIdx = val - 1;
+                renderCurrentPreviewSheet();
+            } else {
+                e.target.value = String(currentSheetIdx + 1);
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            renderCurrentPreviewSheet();
+        });
+
+        document.getElementById('btn-execute-print').onclick = executePrintJob;
+
+        // Initialize
+        loadSystemPrinters();
+        loadPdfDocument();
+    </script>
+</body>
+</html>
+

@@ -3,6 +3,15 @@ import { invoke } from '@tauri-apps/api/core';
 import { checkPathPermission } from '../command/fileOperations';
 import { getDragPayload, consumeDragPayload, resolveExternalDropPaths, decideExternalDropOp } from '../utils/crossWindowDrag';
 
+export interface WebFolderBadgeInfo {
+  wfName: string;
+  isOpen: boolean;
+  uploadUnlocked: boolean;
+  safetyLevel: string;
+  isCurrentTarget?: boolean;
+  subpathLabel?: string;
+}
+
 interface FolderTreeProps {
   path: string;
   name: string;
@@ -25,11 +34,12 @@ interface FolderTreeProps {
   renameText?: string;
   onRenameTextChange?: (text: string) => void;
   showMessage?: (title: string, message: string) => void;
+  webFolderBadges?: Record<string, WebFolderBadgeInfo>;
   isRoot?: boolean;
   depth?: number;
 }
 
-export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage, isRoot: _isRoot, depth = 0 }: FolderTreeProps) {
+export default function FolderTree({ path, name, onSelect, activePath, selectedPaths, expandedPaths, onToggleExpand, onMove, refreshTrigger, onContextMenu, clipboard, editableFolders, readonlyFolders, allowedPaths, renamingPath, onStartRename, onFinishRename, onCancelRename, renameText, onRenameTextChange, showMessage, webFolderBadges, isRoot: _isRoot, depth = 0 }: FolderTreeProps) {
   const isAncestorOf = (ancestor: string, descendant: string) => {
     if (!descendant.startsWith(ancestor)) return false;
     if (descendant.length === ancestor.length) return true;
@@ -386,7 +396,47 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
         ) : (
           <>
             <span style={{ marginRight: '4px', flexShrink: 0 }}>{isExpanded ? '📂' : '📁'}</span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{name}</span>
+            {(() => {
+              const normKey = path.replace(/[\\/]+$/, '').toLowerCase();
+              const wfBadge = webFolderBadges?.[normKey];
+              if (!wfBadge) return null;
+              return (
+                <span
+                  title={`Web Folder: ${wfBadge.wfName}\nWindow: ${wfBadge.isOpen ? 'OPEN' : 'Closed'}\nUpload: ${wfBadge.uploadUnlocked ? 'UNLOCKED' : 'LOCKED'}${wfBadge.isCurrentTarget ? '\nActive Download Target Folder' : ''}`}
+                  style={{
+                    marginLeft: '6px',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    flexShrink: 0,
+                    background: wfBadge.isCurrentTarget && wfBadge.isOpen
+                      ? 'rgba(56, 189, 248, 0.22)'
+                      : wfBadge.isOpen
+                        ? 'rgba(34, 197, 94, 0.18)'
+                        : 'rgba(148, 163, 184, 0.15)',
+                    border: wfBadge.isCurrentTarget && wfBadge.isOpen
+                      ? '1px solid rgba(56, 189, 248, 0.55)'
+                      : wfBadge.isOpen
+                        ? '1px solid rgba(34, 197, 94, 0.45)'
+                        : '1px solid rgba(148, 163, 184, 0.3)',
+                    color: wfBadge.isCurrentTarget && wfBadge.isOpen
+                      ? '#7dd3fc'
+                      : wfBadge.isOpen
+                        ? '#86efac'
+                        : '#94a3b8',
+                  }}
+                >
+                  <span>{wfBadge.isOpen ? '🟢' : '🌐'}</span>
+                  <span>{wfBadge.uploadUnlocked ? '🔓' : '🔒'}</span>
+                  {wfBadge.isCurrentTarget && wfBadge.isOpen && <span>Target</span>}
+                </span>
+              );
+            })()}
           </>
         )}
       </div>
@@ -416,6 +466,7 @@ export default function FolderTree({ path, name, onSelect, activePath, selectedP
               onFinishRename={onFinishRename}
               onCancelRename={onCancelRename}
               showMessage={showMessage}
+              webFolderBadges={webFolderBadges}
             />
           ))}
         </div>

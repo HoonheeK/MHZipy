@@ -1,10 +1,86 @@
+import { invoke } from '@tauri-apps/api/core';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { message } from '@tauri-apps/plugin-dialog';
-interface PdfFile {
+
+export interface PdfFile {
   path: string;
   name: string;
 }
+
+/**
+ * Acrobat PDF 스타일의 별도 Modeless 인쇄 다이얼로그 윈도우를 엽니다.
+ *
+ * @param file 인쇄할 PDF 파일 정보 (경로 및 이름)
+ * @param currentPage 현재 표시 중인 페이지 번호 (기본값: 1)
+ * @param totalPages 전체 페이지 수 (기본값: 1)
+ * @param storageId IndexedDB 캐시 키 (선택)
+ */
+export const openPdfPrintDialog = async (
+  file: PdfFile,
+  currentPage = 1,
+  totalPages = 1,
+  storageId = ''
+) => {
+  try {
+    await invoke('open_pdf_print_dialog', {
+      pdfPath: file.path,
+      storageId,
+      title: file.name,
+      currentPage,
+      totalPages,
+      password: null,
+    });
+    return;
+  } catch (err) {
+    console.warn('invoke open_pdf_print_dialog fallback to WebviewWindow:', err);
+  }
+
+  const cleanKey = (file.path || file.name).replace(/[^a-zA-Z0-9-_]/g, '').slice(-32);
+  const dialogLabel = `pdf-print-dialog-${cleanKey || 'default'}`;
+
+  try {
+    const existingWin = await WebviewWindow.getByLabel(dialogLabel);
+    if (existingWin) {
+      await existingWin.setFocus();
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    let posX: number | undefined;
+    let posY: number | undefined;
+    try {
+      const currentWin = getCurrentWindow();
+      const position = await currentWin.outerPosition();
+      posX = position.x + 60;
+      posY = position.y + 45;
+    } catch (e) {}
+
+    const url = `print-dialog.html?pdfPath=${encodeURIComponent(file.path)}&storageId=${encodeURIComponent(storageId)}&title=${encodeURIComponent(file.name)}&currentPage=${currentPage}&totalPages=${totalPages}`;
+    const printWin = new WebviewWindow(dialogLabel, {
+      url,
+      title: `Print - ${file.name}`,
+      width: 960,
+      height: 710,
+      minWidth: 820,
+      minHeight: 580,
+      decorations: false,
+      resizable: true,
+      ...(posX !== undefined && posY !== undefined ? { x: posX, y: posY } : {}),
+    });
+
+    printWin.once('tauri://error', (e) => {
+      console.error('Print dialog window creation error:', e);
+    });
+  } catch (error) {
+    console.error('인쇄 다이얼로그를 열 수 없습니다:', error);
+    await message(`인쇄 다이얼로그를 열 수 없습니다: ${String(error)}`, {
+      title: '인쇄 오류',
+      kind: 'error',
+    });
+  }
+};
 
 /**
  * PDF 파일을 새 창에서 엽니다.

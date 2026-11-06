@@ -1946,6 +1946,1908 @@ fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("파일 읽기 실패 {}: {}", path, e))
 }
 
+#[derive(serde::Serialize, Clone)]
+struct PrinterInfo {
+    name: String,
+    is_default: bool,
+    port: String,
+}
+
+/// 시스템에 설치된 프린터 목록 및 기본 프린터 조회
+#[tauri::command]
+fn get_system_printers() -> Result<Vec<PrinterInfo>, String> {
+    let mut printers = Vec::new();
+    let mut default_printer = String::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        use winreg::enums::HKEY_CURRENT_USER;
+        use winreg::RegKey;
+
+        let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+        if let Ok(win_key) =
+            hkcu.open_subkey("Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows")
+        {
+            if let Ok(device_val) = win_key.get_value::<String, _>("Device") {
+                if let Some(first) = device_val.split(',').next() {
+                    default_printer = first.trim().to_string();
+                }
+            }
+        }
+
+        if let Ok(dev_key) =
+            hkcu.open_subkey("Software\\Microsoft\\Windows NT\\CurrentVersion\\Devices")
+        {
+            for item in dev_key.enum_values().flatten() {
+                let name = item.0.trim().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let val_str = dev_key.get_value::<String, _>(&name).unwrap_or_default();
+                let is_def =
+                    !default_printer.is_empty() && name.eq_ignore_ascii_case(&default_printer);
+                printers.push(PrinterInfo {
+                    name,
+                    is_default: is_def,
+                    port: val_str,
+                });
+            }
+        }
+    }
+
+    printers.sort_by(|a, b| {
+        b.is_default
+            .cmp(&a.is_default)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    if printers.is_empty() {
+        printers.push(PrinterInfo {
+            name: "Microsoft Print to PDF".to_string(),
+            is_default: true,
+            port: "PORTPROMPT:".to_string(),
+        });
+    }
+
+    if !printers.iter().any(|p| p.name == "Save as PDF") {
+        printers.push(PrinterInfo {
+            name: "Save as PDF".to_string(),
+            is_default: false,
+            port: "FILE:".to_string(),
+        });
+    }
+
+    Ok(printers)
+}
+
+/// 선택한 Windows 프린터의 네이티브 속성(Properties) 다이얼로그 열기
+#[tauri::command]
+fn open_printer_properties(printer_name: String) -> Result<(), String> {
+    let trimmed = printer_name.trim();
+    if trimmed.is_empty() || trimmed == "Save as PDF" {
+        return Err("Virtual printer does not support properties.".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("rundll32.exe")
+            .args(["printui.dll,PrintUIEntry", "/p", "/n", trimmed])
+            .spawn()
+            .map_err(|e| format!("Failed to open printer properties: {}", e))?;
+    }
+    Ok(())
+}
+
+/// PDF Viewer에서 Ctrl+P 또는 인쇄 버튼 클릭 시 별도의 Modeless 인쇄 다이얼로그 윈도우를 엽니다.
+#[tauri::command]
+fn open_pdf_print_dialog(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    pdf_path: String,
+    storage_id: String,
+    title: String,
+    current_page: u32,
+    total_pages: u32,
+    password: Option<String>,
+) -> Result<(), String> {
+    let key_source = if !pdf_path.trim().is_empty() {
+        pdf_path.trim().to_lowercase()
+    } else if !storage_id.trim().is_empty() {
+        storage_id.trim().to_string()
+    } else {
+        title.trim().to_string()
+    };
+
+    let mut hash: u64 = 5381;
+    for b in key_source.bytes() {
+        hash = ((hash << 5).wrapping_add(hash)).wrapping_add(b as u64);
+    }
+    let dialog_label = format!("pdf-print-dialog-{:x}", hash);
+
+    if let Some(existing) = app.get_webview_window(&dialog_label) {
+        focus_webview_window(&existing);
+        let _ = existing.eval(&format!(
+            "if (typeof window.__updateViewerCurrentPage === 'function') {{ window.__updateViewerCurrentPage({}); }}",
+            current_page
+        ));
+        return Ok(());
+    }
+
+    let pos = window.outer_position().ok();
+    let app_clone = app.clone();
+    let pwd_str = password.unwrap_or_default();
+
+    std::thread::spawn(move || {
+        let query = format!(
+            "print-dialog.html?pdfPath={}&storageId={}&title={}&currentPage={}&totalPages={}&pwd={}",
+            urlencoding::encode(&pdf_path),
+            urlencoding::encode(&storage_id),
+            urlencoding::encode(&title),
+            current_page,
+            total_pages,
+            urlencoding::encode(&pwd_str),
+        );
+
+        let mut builder = tauri::WebviewWindowBuilder::new(
+            &app_clone,
+            &dialog_label,
+            tauri::WebviewUrl::App(std::path::PathBuf::from(query)),
+        )
+        .title(format!("Print - {}", title))
+        .inner_size(960.0, 710.0)
+        .min_inner_size(820.0, 580.0)
+        .decorations(false)
+        .resizable(true)
+        .visible(true)
+        .focused(true);
+
+        if let Some(p) = pos {
+            builder = builder.position((p.x + 60) as f64, (p.y + 45) as f64);
+        }
+
+        if let Ok(win) = builder.build() {
+            focus_webview_window(&win);
+        }
+    });
+
+    Ok(())
+}
+
+/// WebView2 네이티브 인쇄 API를 통해 지정된 프린터(또는 PDF 파일)로 즉시 인쇄 실행
+#[tauri::command]
+async fn execute_webview_print(
+    window: tauri::WebviewWindow,
+    printer_name: String,
+    copies: i32,
+    collate: bool,
+    grayscale: bool,
+    duplex: String,
+    landscape: bool,
+    page_width_mm: f64,
+    page_height_mm: f64,
+    save_to_pdf_path: Option<String>,
+) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2Environment6, ICoreWebView2PrintSettings2, ICoreWebView2_16,
+            ICoreWebView2_2, ICoreWebView2_7, COREWEBVIEW2_PRINT_COLLATION_COLLATED,
+            COREWEBVIEW2_PRINT_COLLATION_UNCOLLATED, COREWEBVIEW2_PRINT_COLOR_MODE_COLOR,
+            COREWEBVIEW2_PRINT_COLOR_MODE_GRAYSCALE, COREWEBVIEW2_PRINT_DUPLEX_ONE_SIDED,
+            COREWEBVIEW2_PRINT_DUPLEX_TWO_SIDED_LONG_EDGE,
+            COREWEBVIEW2_PRINT_DUPLEX_TWO_SIDED_SHORT_EDGE,
+            COREWEBVIEW2_PRINT_ORIENTATION_LANDSCAPE, COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT,
+            COREWEBVIEW2_PRINT_STATUS_PRINTER_UNAVAILABLE, COREWEBVIEW2_PRINT_STATUS_SUCCEEDED,
+        };
+        use webview2_com::{PrintCompletedHandler, PrintToPdfCompletedHandler};
+        use windows61::core::{Interface, PCWSTR};
+
+        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+
+        let webview_res = window.with_webview(move |pw| unsafe {
+            let controller = pw.controller();
+            let Ok(core) = controller.CoreWebView2() else {
+                let _ = tx.send(Err(
+                    "CoreWebView2 인터페이스를 가져올 수 없습니다.".to_string()
+                ));
+                return;
+            };
+
+            let Ok(core2) = core.cast::<ICoreWebView2_2>() else {
+                let _ = tx.send(Err("ICoreWebView2_2 캐스팅 실패".to_string()));
+                return;
+            };
+
+            let Ok(env) = core2.Environment() else {
+                let _ = tx.send(Err("WebView2 Environment 조회 실패".to_string()));
+                return;
+            };
+
+            let Ok(env6) = env.cast::<ICoreWebView2Environment6>() else {
+                let _ = tx.send(Err("ICoreWebView2Environment6 캐스팅 실패".to_string()));
+                return;
+            };
+
+            let Ok(settings) = env6.CreatePrintSettings() else {
+                let _ = tx.send(Err("PrintSettings 생성 실패".to_string()));
+                return;
+            };
+
+            let w_in = (page_width_mm / 25.4).max(1.0);
+            let h_in = (page_height_mm / 25.4).max(1.0);
+            let _ = settings.SetOrientation(if landscape {
+                COREWEBVIEW2_PRINT_ORIENTATION_LANDSCAPE
+            } else {
+                COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT
+            });
+            let _ = settings.SetPageWidth(w_in);
+            let _ = settings.SetPageHeight(h_in);
+            let _ = settings.SetMarginTop(0.0);
+            let _ = settings.SetMarginBottom(0.0);
+            let _ = settings.SetMarginLeft(0.0);
+            let _ = settings.SetMarginRight(0.0);
+            let _ = settings.SetScaleFactor(1.0);
+            let _ = settings.SetShouldPrintBackgrounds(true.into());
+            let _ = settings.SetShouldPrintHeaderAndFooter(false.into());
+
+            if let Some(pdf_out) = save_to_pdf_path {
+                if !pdf_out.trim().is_empty() {
+                    let Ok(core7) = core.cast::<ICoreWebView2_7>() else {
+                        let _ = tx.send(Err("ICoreWebView2_7 캐스팅 실패".to_string()));
+                        return;
+                    };
+                    let wide_path: Vec<u16> = std::ffi::OsStr::new(pdf_out.trim())
+                        .encode_wide()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    let tx_clone = tx.clone();
+                    let out_label = pdf_out.clone();
+                    let handler = PrintToPdfCompletedHandler::create(Box::new(move |hr, ok| {
+                        if hr.is_ok() && ok {
+                            let _ = tx_clone.send(Ok(format!("Saved to PDF: {}", out_label)));
+                        } else {
+                            let _ = tx_clone
+                                .send(Err(format!("Failed to save PDF (hr={:?}).", hr)));
+                        }
+                        Ok(())
+                    }));
+                    if let Err(e) =
+                        core7.PrintToPdf(PCWSTR(wide_path.as_ptr()), &settings, &handler)
+                    {
+                        let _ = tx.send(Err(format!("PrintToPdf failed: {}", e)));
+                    }
+                    return;
+                }
+            }
+
+            if let Ok(settings2) = settings.cast::<ICoreWebView2PrintSettings2>() {
+                if !printer_name.trim().is_empty() {
+                    let wide_printer: Vec<u16> = std::ffi::OsStr::new(printer_name.trim())
+                        .encode_wide()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    let _ = settings2.SetPrinterName(PCWSTR(wide_printer.as_ptr()));
+                }
+                let _ = settings2.SetCopies(copies.max(1));
+                let _ = settings2.SetCollation(if collate {
+                    COREWEBVIEW2_PRINT_COLLATION_COLLATED
+                } else {
+                    COREWEBVIEW2_PRINT_COLLATION_UNCOLLATED
+                });
+                let _ = settings2.SetColorMode(if grayscale {
+                    COREWEBVIEW2_PRINT_COLOR_MODE_GRAYSCALE
+                } else {
+                    COREWEBVIEW2_PRINT_COLOR_MODE_COLOR
+                });
+                let duplex_val = match duplex.as_str() {
+                    "LongEdge" => COREWEBVIEW2_PRINT_DUPLEX_TWO_SIDED_LONG_EDGE,
+                    "ShortEdge" => COREWEBVIEW2_PRINT_DUPLEX_TWO_SIDED_SHORT_EDGE,
+                    _ => COREWEBVIEW2_PRINT_DUPLEX_ONE_SIDED,
+                };
+                let _ = settings2.SetDuplex(duplex_val);
+            }
+
+            let Ok(core16) = core.cast::<ICoreWebView2_16>() else {
+                let _ = tx.send(Err("ICoreWebView2_16 캐스팅 실패".to_string()));
+                return;
+            };
+
+            let tx_clone = tx.clone();
+            let p_name = printer_name.clone();
+            let handler = PrintCompletedHandler::create(Box::new(move |hr, status| {
+                if hr.is_ok() && status == COREWEBVIEW2_PRINT_STATUS_SUCCEEDED {
+                    let _ =
+                        tx_clone.send(Ok(format!("Print job sent to '{}'.", p_name)));
+                } else if status == COREWEBVIEW2_PRINT_STATUS_PRINTER_UNAVAILABLE {
+                    let _ = tx_clone.send(Err(format!(
+                        "Printer '{}' is unavailable or offline.",
+                        p_name
+                    )));
+                } else {
+                    let _ = tx_clone.send(Err(format!(
+                        "Printing failed or was canceled (status={:?}, hr={:?}).",
+                        status, hr
+                    )));
+                }
+                Ok(())
+            }));
+
+            if let Err(e) = core16.Print(&settings, &handler) {
+                let _ = tx.send(Err(format!("Print call failed: {}", e)));
+            }
+        });
+
+        if let Err(e) = webview_res {
+            return Err(format!("Failed to access WebView: {}", e));
+        }
+
+        let res = tauri::async_runtime::spawn_blocking(move || {
+            rx.recv_timeout(std::time::Duration::from_secs(120))
+                .map_err(|_| "Print operation timed out.".to_string())?
+        })
+        .await
+        .map_err(|e| format!("Print thread error: {}", e))?;
+
+        res
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Direct printing is not supported on this OS.".to_string())
+    }
+}
+
+/// 업로드 안전 잠금(Upload Lock)과 사전 파일 검수기(Pre-Upload Inspector)가 내장된 전용 WebView 창으로 웹 폴더(Box 등)를 엽니다.
+#[tauri::command]
+fn open_safe_web_folder_window(
+    app: tauri::AppHandle,
+    window: tauri::Window,
+    id: String,
+    name: String,
+    url: String,
+    linked_local_path: String,
+    safety_level: String,
+) -> Result<(), String> {
+    let clean_id: String = id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let label = format!(
+        "web-folder-{}",
+        if clean_id.is_empty() { "default" } else { &clean_id }
+    );
+
+    if let Some(existing) = app.get_webview_window(&label) {
+        focus_webview_window(&existing);
+        let _ = app.emit(
+            "web-folder-live-state",
+            serde_json::json!({
+                "id": id,
+                "label": label,
+                "isOpen": true,
+            }),
+        );
+        return Ok(());
+    }
+
+    let parsed_url: tauri::Url = url
+        .trim()
+        .parse()
+        .map_err(|e| format!("Invalid Web Folder URL '{}': {}", url, e))?;
+
+    let pos = window.outer_position().ok();
+    let app_clone = app.clone();
+
+    let name_json = serde_json::to_string(&name).unwrap_or_else(|_| "\"Web Folder\"".to_string());
+    let local_json =
+        serde_json::to_string(&linked_local_path).unwrap_or_else(|_| "\"\"".to_string());
+    let level_json =
+        serde_json::to_string(&safety_level).unwrap_or_else(|_| "\"caution\"".to_string());
+    let root_url_json = serde_json::to_string(url.trim()).unwrap_or_else(|_| "\"\"".to_string());
+
+    let init_script = format!(
+        r#"
+(function() {{
+    if (window.__MHZIPY_WEB_GUARD_ACTIVE__) return;
+    window.__MHZIPY_WEB_GUARD_ACTIVE__ = true;
+
+    const FOLDER_NAME = {name_json};
+    const LINKED_LOCAL = {local_json};
+    const SAFETY_LEVEL = {level_json}; // 'download_only' | 'caution' | 'strict'
+    const ROOT_URL = {root_url_json};
+
+    let uploadUnlocked = false;
+    let unlockExpireTime = 0;
+    let countdownTimer = null;
+    let inspectedFilesPass = false;
+
+    // Hierarchy & Download State
+    let relativeSubpath = [];
+    let manualSubpathOverride = null; // null = auto-detect from web folder breadcrumbs
+    let autoExtractZip = true;
+    let rootBreadcrumbs = null;
+    const navHistoryMap = new Map(); // pathname -> string[]
+
+    function sanitizeSegment(seg) {{
+        return (seg || '')
+            .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .replace(/^\.+|\.+$/g, '');
+    }}
+
+    function getActiveSubpath() {{
+        return manualSubpathOverride !== null ? manualSubpathOverride : relativeSubpath;
+    }}
+
+    function syncDownloadStateToHost() {{
+        try {{
+            const rem = uploadUnlocked ? Math.max(0, Math.ceil((unlockExpireTime - Date.now()) / 1000)) : 0;
+            if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {{
+                window.chrome.webview.postMessage(JSON.stringify({{
+                    type: 'mhzipy-web-folder-state',
+                    subpath: getActiveSubpath(),
+                    autoExtractZip: !!autoExtractZip,
+                    uploadUnlocked: !!uploadUnlocked,
+                    remainingSeconds: rem
+                }}));
+            }}
+        }} catch (_) {{}}
+    }}
+
+    function scrapeBreadcrumbsFromDOM() {{
+        const selectors = [
+            '.ItemListBreadcrumb ol li a, .ItemListBreadcrumb ol li span[data-resin-target]',
+            '.ItemListBreadcrumb a, .ItemListBreadcrumb span',
+            '[data-resin-target="breadcrumb"] a, [data-resin-target="breadcrumb"] span',
+            'nav[aria-label*="Breadcrumb" i] a, nav[aria-label*="Breadcrumb" i] button, nav[aria-label*="Breadcrumb" i] span',
+            '[role="navigation"][aria-label*="breadcrumb" i] a, [role="navigation"][aria-label*="breadcrumb" i] button, [role="navigation"][aria-label*="breadcrumb" i] [role="listitem"]',
+            '[data-automationid="breadcrumb"] a, [data-automationid="breadcrumb"] button, [data-automationid="breadcrumb"] span',
+            '[class*="Breadcrumb" i] a, [class*="Breadcrumb" i] button, [class*="BreadcrumbItem" i]'
+        ];
+
+        const noiseSet = new Set(['...', '…', '>', '/', '\\', 'more', '더보기', 'all files', '모든 파일', 'box', 'home', '홈']);
+        for (const sel of selectors) {{
+            const nodes = Array.from(document.querySelectorAll(sel));
+            if (nodes.length === 0) continue;
+            const raw = [];
+            for (const el of nodes) {{
+                // Skip hidden elements or elements that wrap other matched children
+                if (el.offsetParent === null) continue;
+                if ( nodes.some(other => other !== el && el.contains(other)) ) continue;
+                const txt = sanitizeSegment(el.textContent || '');
+                if (!txt) continue;
+                if (noiseSet.has(txt.toLowerCase())) continue;
+                if (raw.length === 0 || raw[raw.length - 1] !== txt) {{
+                    raw.push(txt);
+                }}
+            }}
+            if (raw.length > 0) return raw;
+        }}
+
+        // Fallback: parse document.title (e.g., "SubFolderName | Powered by Box" or "SubFolderName - Box")
+        const title = (document.title || '').trim();
+        const boxMatch = title.match(/^(.+?)\s*(?:\|\s*Powered by Box|-\s*Box|-\s*Google Drive|-\s*OneDrive)$/i);
+        if (boxMatch && boxMatch[1]) {{
+            const tSeg = sanitizeSegment(boxMatch[1]);
+            if (tSeg && !noiseSet.has(tSeg.toLowerCase())) {{
+                return [tSeg];
+            }}
+        }}
+        return [];
+    }}
+
+    function isAtRootUrl() {{
+        try {{
+            const rootU = new URL(ROOT_URL, window.location.origin);
+            return window.location.pathname.replace(/\/+$/, '') === rootU.pathname.replace(/\/+$/, '');
+        }} catch (_) {{
+            return false;
+        }}
+    }}
+
+    function updateDetectedHierarchy() {{
+        if (!LINKED_LOCAL) return;
+        const crumbs = scrapeBreadcrumbsFromDOM();
+        const atRoot = isAtRootUrl();
+
+        if (atRoot) {{
+            if (crumbs.length > 0 && !rootBreadcrumbs) {{
+                rootBreadcrumbs = crumbs.slice();
+            }}
+            relativeSubpath = [];
+            navHistoryMap.set(window.location.pathname, []);
+            syncDownloadStateToHost();
+            updateSubpathBarUI();
+            return;
+        }}
+
+        if (crumbs.length === 0) return;
+
+        // 1. Check if FOLDER_NAME or linked local folder leaf name appears in the breadcrumbs
+        const localLeaf = sanitizeSegment((LINKED_LOCAL.split(/[/\\]/).filter(Boolean).pop()) || '');
+        const rootCandidates = [sanitizeSegment(FOLDER_NAME), localLeaf].filter(Boolean).map(s => s.toLowerCase());
+
+        let computed = null;
+        for (let i = crumbs.length - 1; i >= 0; i--) {{
+            if (rootCandidates.includes(crumbs[i].toLowerCase())) {{
+                computed = crumbs.slice(i + 1);
+                break;
+            }}
+        }}
+
+        // 2. Otherwise, if rootBreadcrumbs was captured at root URL, strip common prefix
+        if (computed === null && rootBreadcrumbs && rootBreadcrumbs.length > 0) {{
+            const rootLast = rootBreadcrumbs[rootBreadcrumbs.length - 1].toLowerCase();
+            const idx = crumbs.findIndex(c => c.toLowerCase() === rootLast);
+            if (idx >= 0) {{
+                computed = crumbs.slice(idx + 1);
+            }} else {{
+                let common = 0;
+                while (common < rootBreadcrumbs.length && common < crumbs.length &&
+                       rootBreadcrumbs[common].toLowerCase() === crumbs[common].toLowerCase()) {{
+                    common++;
+                }}
+                computed = crumbs.slice(common);
+            }}
+        }}
+
+        // 3. Fallback: if we navigated from a known parent trail in navHistoryMap, stitch it
+        if (computed === null) {{
+            computed = crumbs;
+        }}
+
+        // Stitch with parent history if Box collapsed intermediate folders into "..."
+        for (const [, prevSub] of navHistoryMap.entries()) {{
+            if (prevSub.length > 0 && computed.length > 0) {{
+                const overlapIdx = prevSub.findIndex(p => p.toLowerCase() === computed[0].toLowerCase());
+                if (overlapIdx > 0) {{
+                    computed = prevSub.slice(0, overlapIdx).concat(computed);
+                    break;
+                }}
+            }}
+        }}
+
+        const cleaned = computed.map(sanitizeSegment).filter(Boolean);
+        navHistoryMap.set(window.location.pathname, cleaned);
+
+        const prevKey = relativeSubpath.join('/');
+        const nextKey = cleaned.join('/');
+        if (prevKey !== nextKey) {{
+            relativeSubpath = cleaned;
+            syncDownloadStateToHost();
+            updateSubpathBarUI();
+        }}
+    }}
+
+    function updateSubpathBarUI() {{
+        const subEl = document.getElementById('mhzipy-subpath-badge');
+        if (!subEl) return;
+        const active = getActiveSubpath();
+        const isManual = manualSubpathOverride !== null;
+        if (active.length === 0) {{
+            subEl.textContent = isManual ? '📁 [Root (Manual)]' : '📁 [Root]';
+            subEl.style.color = '#94a3b8';
+            subEl.style.borderColor = 'rgba(148,163,184,0.35)';
+        }} else {{
+            subEl.textContent = '📂 \\' + active.join('\\') + (isManual ? ' ✎' : '');
+            subEl.style.color = '#34d399';
+            subEl.style.borderColor = 'rgba(52,211,153,0.5)';
+        }}
+    }}
+
+    window.__mhzipyNotifyDownloadStart = function(fileName, targetDir) {{
+        showGuardToast('📥 Downloading "' + fileName + '" → ' + targetDir, false);
+    }};
+
+    window.__mhzipyNotifyDownloadDone = function(msg, isError) {{
+        showGuardToast(msg, !!isError);
+    }};
+
+    const RISKY_KEYWORDS = ['초안', '임시', '복사본', '사본', '비밀', '대외비', 'temp', 'tmp', 'draft', 'copy', 'test', 'backup', '.bak', '~$'];
+
+    function checkRiskyName(fileName) {{
+        const lower = (fileName || '').toLowerCase();
+        return RISKY_KEYWORDS.filter(k => lower.includes(k));
+    }}
+
+    function showGuardToast(msg, isError = true) {{
+        let toast = document.getElementById('mhzipy-guard-toast');
+        if (!toast) {{
+            toast = document.createElement('div');
+            toast.id = 'mhzipy-guard-toast';
+            toast.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;padding:12px 18px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:13px;font-weight:600;color:#fff;box-shadow:0 10px 28px rgba(0,0,0,0.45);transition:opacity 0.2s,transform 0.2s;display:flex;align-items:center;gap:10px;max-width:440px;line-height:1.4;';
+            document.documentElement.appendChild(toast);
+        }}
+        toast.style.background = isError ? 'linear-gradient(135deg, #dc2626, #991b1b)' : 'linear-gradient(135deg, #0284c7, #0369a1)';
+        toast.style.border = isError ? '1px solid #f87171' : '1px solid #38bdf8';
+        toast.textContent = msg;
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+        clearTimeout(toast.__timer);
+        toast.__timer = setTimeout(() => {{
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(8px)';
+        }}, 4000);
+    }}
+
+    // 1. Intercept Drag & Drop uploads when locked
+    function isInsideInspector(target) {{
+        return !!(target && target.closest && target.closest('#mhzipy-inspector-modal'));
+    }}
+
+    function hasFileTransfer(dt) {{
+        if (!dt) return false;
+        if (dt.files && dt.files.length > 0) return true;
+        if (dt.types) {{
+            const types = Array.from(dt.types);
+            if (types.includes('Files') || types.includes('application/x-moz-file')) return true;
+        }}
+        return false;
+    }}
+
+    window.addEventListener('dragenter', (e) => {{
+        if (isInsideInspector(e.target)) return;
+        if (!uploadUnlocked && hasFileTransfer(e.dataTransfer)) {{
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            try {{ e.dataTransfer.dropEffect = 'none'; }} catch (_) {{}}
+        }}
+    }}, true);
+
+    window.addEventListener('dragover', (e) => {{
+        if (isInsideInspector(e.target)) return;
+        if (!uploadUnlocked && hasFileTransfer(e.dataTransfer)) {{
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            try {{ e.dataTransfer.dropEffect = 'none'; }} catch (_) {{}}
+        }}
+    }}, true);
+
+    window.addEventListener('drop', (e) => {{
+        if (isInsideInspector(e.target)) {{
+            return; // Allow dropping into our Pre-Upload Inspector
+        }}
+        const hasFiles = hasFileTransfer(e.dataTransfer);
+        if (hasFiles && !uploadUnlocked) {{
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showGuardToast('🔒 [Upload Locked] Drag & Drop upload was blocked to protect "' + FOLDER_NAME + '". Unlock upload in the top safety bar first.', true);
+            return false;
+        }}
+        if (hasFiles && uploadUnlocked && e.dataTransfer && e.dataTransfer.files) {{
+            // Do NOT call window.confirm() here because a synchronous modal loop inside 'drop'
+            // invalidates transient DataTransfer / webkitGetAsEntry handles in WebView2 (breaking Box uploads).
+            const risky = [];
+            for (const f of e.dataTransfer.files) {{
+                const hits = checkRiskyName(f.name);
+                if (hits.length > 0) risky.push(f.name + ' (' + hits.join(', ') + ')');
+            }}
+            if (risky.length > 0) {{
+                showGuardToast('⚠️ Caution: Uploaded file(s) contain caution keywords: ' + risky.join(', '), true);
+            }} else {{
+                showGuardToast('📤 Uploading ' + e.dataTransfer.files.length + ' item(s) to "' + FOLDER_NAME + '"...', false);
+            }}
+        }}
+    }}, true);
+
+    // 2. Intercept Paste (Ctrl+V) file uploads when locked
+    window.addEventListener('paste', (e) => {{
+        if (!uploadUnlocked && e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {{
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showGuardToast('🔒 [Upload Locked] Clipboard file paste was blocked. Unlock upload in the top safety bar if you intend to upload.', true);
+            return false;
+        }}
+    }}, true);
+
+    // 3. Intercept <input type="file"> programmatic & user clicks when locked
+    const origInputClick = HTMLInputElement.prototype.click;
+    HTMLInputElement.prototype.click = function() {{
+        if (this.type === 'file' && !this.hasAttribute('data-mhzipy-inspector')) {{
+            if (!uploadUnlocked) {{
+                showGuardToast('🔒 [Upload Locked] File upload dialog blocked. Click "Unlock Upload" on the top bar after reviewing files.', true);
+                openInspectorModal();
+                return;
+            }}
+        }}
+        return origInputClick.apply(this, arguments);
+    }};
+
+    window.addEventListener('click', (e) => {{
+        const el = e.target;
+        if (el && el.tagName === 'INPUT' && el.type === 'file' && !el.hasAttribute('data-mhzipy-inspector')) {{
+            if (!uploadUnlocked) {{
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                showGuardToast('🔒 [Upload Locked] File upload is currently locked.', true);
+                openInspectorModal();
+                return false;
+            }}
+        }}
+    }}, true);
+
+    window.addEventListener('change', (e) => {{
+        const el = e.target;
+        if (el && el.tagName === 'INPUT' && el.type === 'file' && !el.hasAttribute('data-mhzipy-inspector') && el.files && el.files.length > 0) {{
+            const risky = [];
+            for (const f of el.files) {{
+                const hits = checkRiskyName(f.name);
+                if (hits.length > 0) risky.push(f.name + ' [' + hits.join(', ') + ']');
+            }}
+            if (risky.length > 0) {{
+                const proceed = window.confirm('⚠️ Caution Keywords Detected in Selected Upload Files:\n\n' + risky.join('\n') + '\n\nDo you still want to proceed with uploading to "' + FOLDER_NAME + '"?');
+                if (!proceed) {{
+                    el.value = '';
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                }}
+            }}
+        }}
+    }}, true);
+
+    function setUploadLockState(unlocked, durationSeconds = 300) {{
+        if (SAFETY_LEVEL === 'download_only') {{
+            uploadUnlocked = false;
+            showGuardToast('🟢 This web folder is set to DOWNLOAD ONLY mode. Uploading is permanently disabled.', true);
+            return;
+        }}
+        uploadUnlocked = unlocked;
+        clearInterval(countdownTimer);
+        if (unlocked) {{
+            unlockExpireTime = Date.now() + durationSeconds * 1000;
+            countdownTimer = setInterval(() => {{
+                const rem = Math.max(0, Math.ceil((unlockExpireTime - Date.now()) / 1000));
+                if (rem <= 0) {{
+                    setUploadLockState(false);
+                    showGuardToast('🔒 Upload lock has been automatically re-enabled for safety.', false);
+                }} else {{
+                    updateBarUI(rem);
+                    syncDownloadStateToHost();
+                }}
+            }}, 1000);
+            updateBarUI(durationSeconds);
+            syncDownloadStateToHost();
+            showGuardToast('🔓 Upload unlocked for 5 minutes. Please upload carefully!', false);
+        }} else {{
+            updateBarUI(0);
+            syncDownloadStateToHost();
+        }}
+    }}
+
+    function formatSize(bytes) {{
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(2) + ' MB';
+    }}
+
+    function openInspectorModal() {{
+        if (SAFETY_LEVEL === 'download_only') {{
+            showGuardToast('🟢 This folder is configured as "Download Only". Change its safety level in MHZipy if you need to upload.', true);
+            return;
+        }}
+        let modal = document.getElementById('mhzipy-inspector-modal');
+        if (modal) modal.remove();
+
+        modal = document.createElement('div');
+        modal.id = 'mhzipy-inspector-modal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.75);backdrop-filter:blur(4px);z-index:2147483646;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f8fafc;';
+
+        const isStrict = SAFETY_LEVEL === 'strict';
+        const badgeColor = isStrict ? '#ef4444' : '#f59e0b';
+
+        modal.innerHTML = `
+            <div style="background:#0f172a;border:2px solid ${{badgeColor}};border-radius:12px;width:540px;max-width:94vw;box-shadow:0 20px 50px rgba(0,0,0,0.7);overflow:hidden;">
+                <div style="padding:14px 18px;background:#1e293b;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;justify-content:space-between;align-items:center;">
+                    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;">
+                        <span>🛡️</span>
+                        <span>Pre-Upload Safety Gate — ${{FOLDER_NAME}}</span>
+                    </div>
+                    <button id="mhzipy-modal-close" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">✕</button>
+                </div>
+                <div style="padding:16px 18px;display:flex;flex-direction:column;gap:14px;font-size:13px;">
+                    <div style="padding:10px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#fcd34d;line-height:1.45;">
+                        ⚠️ <b>Upload Caution:</b> You are about to unlock file uploading for <b>${{FOLDER_NAME}}</b>.<br>
+                        Please inspect the files you plan to upload below to prevent accidental or draft file uploads.
+                    </div>
+
+                    <div id="mhzipy-inspect-dropzone" style="background:#1e293b;border:1px dashed #38bdf8;border-radius:8px;padding:12px;text-align:center;transition:background 0.15s,border-color 0.15s;">
+                        <input type="file" id="mhzipy-file-inspector-input" data-mhzipy-inspector="true" multiple style="display:none;">
+                        <button id="mhzipy-btn-pick-inspect" style="background:#0284c7;color:#fff;border:none;padding:7px 14px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12.5px;">
+                            🔍 Select or Drop Files Here to Inspect Before Uploading...
+                        </button>
+                        <div style="font-size:11.5px;color:#94a3b8;margin-top:6px;">Checks for draft/temp keywords (초안, 임시, 복사본, temp, ~$), file size, and last modified time</div>
+                        <div id="mhzipy-inspect-results" style="margin-top:10px;text-align:left;max-height:150px;overflow-y:auto;display:none;background:#0f172a;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);"></div>
+                    </div>
+
+                    <div style="display:flex;flex-direction:column;gap:8px;background:#1e293b;padding:10px 12px;border-radius:8px;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="mhzipy-chk-1" style="width:15px;height:15px;accent-color:#3b82f6;">
+                            <span>I have verified that the target web folder (<b>${{FOLDER_NAME}}</b>) is correct.</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="mhzipy-chk-2" style="width:15px;height:15px;accent-color:#3b82f6;">
+                            <span>I have checked that the files are final versions and contain no sensitive/temporary data.</span>
+                        </label>
+                    </div>
+                </div>
+                <div style="padding:12px 18px;background:#131c2e;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:flex-end;gap:10px;">
+                    <button id="mhzipy-btn-cancel-unlock" style="padding:7px 16px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#cbd5e1;cursor:pointer;font-weight:600;">Keep Locked</button>
+                    <button id="mhzipy-btn-confirm-unlock" disabled style="padding:7px 18px;border-radius:6px;background:#dc2626;border:1px solid #ef4444;color:#fff;cursor:not-allowed;font-weight:700;opacity:0.45;">🔓 Unlock Upload (5 min)</button>
+                </div>
+            </div>
+        `;
+
+        document.documentElement.appendChild(modal);
+
+        const close = () => modal.remove();
+        modal.querySelector('#mhzipy-modal-close').onclick = close;
+        modal.querySelector('#mhzipy-btn-cancel-unlock').onclick = close;
+
+        const chk1 = modal.querySelector('#mhzipy-chk-1');
+        const chk2 = modal.querySelector('#mhzipy-chk-2');
+        const btnConfirm = modal.querySelector('#mhzipy-btn-confirm-unlock');
+        const syncBtn = () => {{
+            const ok = chk1.checked && chk2.checked;
+            btnConfirm.disabled = !ok;
+            btnConfirm.style.opacity = ok ? '1' : '0.45';
+            btnConfirm.style.cursor = ok ? 'pointer' : 'not-allowed';
+        }};
+        chk1.onchange = syncBtn;
+        chk2.onchange = syncBtn;
+
+        const fileInput = modal.querySelector('#mhzipy-file-inspector-input');
+        const resultsBox = modal.querySelector('#mhzipy-inspect-results');
+        const dropzone = modal.querySelector('#mhzipy-inspect-dropzone');
+        modal.querySelector('#mhzipy-btn-pick-inspect').onclick = () => fileInput.click();
+
+        const renderInspectedFiles = (files) => {{
+            if (!files || files.length === 0) return;
+            resultsBox.style.display = 'block';
+            resultsBox.innerHTML = files.map(f => {{
+                const hits = checkRiskyName(f.name);
+                const mtime = f.lastModified ? new Date(f.lastModified).toLocaleString() : '';
+                const badge = hits.length > 0
+                    ? `<span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700;">⚠️ Caution: ${{hits.join(', ')}}</span>`
+                    : `<span style="background:#059669;color:#fff;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700;">✅ Clean</span>`;
+                return `<div style="padding:5px 4px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;">
+                    <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                        <b style="color:${{hits.length > 0 ? '#fca5a5' : '#e2e8f0'}}">${{f.name}}</b>
+                        <span style="color:#64748b;font-size:11px;margin-left:6px;">(${{formatSize(f.size)}} • ${{mtime}})</span>
+                    </div>
+                    ${{badge}}
+                </div>`;
+            }}).join('');
+        }};
+
+        fileInput.onchange = () => {{
+            renderInspectedFiles(Array.from(fileInput.files || []));
+        }};
+
+        if (dropzone) {{
+            dropzone.addEventListener('dragover', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.style.background = 'rgba(2,132,199,0.22)';
+                dropzone.style.borderColor = '#7dd3fc';
+            }});
+            dropzone.addEventListener('dragleave', () => {{
+                dropzone.style.background = '#1e293b';
+                dropzone.style.borderColor = '#38bdf8';
+            }});
+            dropzone.addEventListener('drop', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.style.background = '#1e293b';
+                dropzone.style.borderColor = '#38bdf8';
+                if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {{
+                    renderInspectedFiles(Array.from(e.dataTransfer.files));
+                }}
+            }});
+        }}
+
+        btnConfirm.onclick = () => {{
+            if (chk1.checked && chk2.checked) {{
+                close();
+                setUploadLockState(true, 300);
+            }}
+        }};
+    }}
+
+    function updateBarUI(remSeconds = 0) {{
+        const statusBtn = document.getElementById('mhzipy-lock-toggle-btn');
+        const bar = document.getElementById('mhzipy-safety-bar');
+        if (!statusBtn || !bar) return;
+
+        if (SAFETY_LEVEL === 'download_only') {{
+            statusBtn.innerHTML = '🟢 Download Only (Upload Disabled)';
+            statusBtn.style.background = '#065f46';
+            statusBtn.style.borderColor = '#10b981';
+            return;
+        }}
+
+        if (uploadUnlocked) {{
+            const m = String(Math.floor(remSeconds / 60)).padStart(2, '0');
+            const s = String(remSeconds % 60).padStart(2, '0');
+            statusBtn.innerHTML = `🔓 Upload UNLOCKED (${{m}}:${{s}}) — Click to Lock Now`;
+            statusBtn.style.background = '#dc2626';
+            statusBtn.style.borderColor = '#f87171';
+            bar.style.borderBottom = '2px solid #ef4444';
+        }} else {{
+            statusBtn.innerHTML = '🔒 Upload Locked (Safe Mode) — Click to Unlock...';
+            statusBtn.style.background = '#1e293b';
+            statusBtn.style.borderColor = '#38bdf8';
+            bar.style.borderBottom = SAFETY_LEVEL === 'strict' ? '2px solid #f59e0b' : '1px solid #334155';
+        }}
+    }}
+
+    let barCollapsed = false;
+
+    function ensureLayoutStyle() {{
+        if (document.getElementById('mhzipy-layout-style')) return;
+        const style = document.createElement('style');
+        style.id = 'mhzipy-layout-style';
+        style.textContent = `
+            html.mhzipy-bar-expanded > body {{
+                margin-top: 38px !important;
+                height: calc(100vh - 38px) !important;
+                max-height: calc(100vh - 38px) !important;
+                transform: translateZ(0) !important;
+                position: relative !important;
+                box-sizing: border-box !important;
+            }}
+            html.mhzipy-bar-expanded > body > #app,
+            html.mhzipy-bar-expanded > body > .react-container,
+            html.mhzipy-bar-expanded > body > .bd,
+            html.mhzipy-bar-expanded > body > main {{
+                max-height: calc(100vh - 38px) !important;
+            }}
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }}
+
+    function syncBarCollapseState() {{
+        const bar = document.getElementById('mhzipy-safety-bar');
+        const pill = document.getElementById('mhzipy-collapsed-pill');
+        ensureLayoutStyle();
+        if (barCollapsed) {{
+            document.documentElement.classList.remove('mhzipy-bar-expanded');
+            if (bar) bar.style.display = 'none';
+            if (pill) pill.style.display = 'flex';
+        }} else {{
+            document.documentElement.classList.add('mhzipy-bar-expanded');
+            if (bar) bar.style.display = 'flex';
+            if (pill) pill.style.display = 'none';
+        }}
+    }}
+
+    function mountSafetyBar() {{
+        ensureLayoutStyle();
+        if (document.getElementById('mhzipy-safety-bar')) {{
+            syncBarCollapseState();
+            return;
+        }}
+        const bar = document.createElement('div');
+        bar.id = 'mhzipy-safety-bar';
+        bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:38px;background:#0f172a;color:#f8fafc;z-index:2147483645;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.35);border-bottom:1px solid #334155;user-select:none;box-sizing:border-box;';
+
+        const levelBadge = SAFETY_LEVEL === 'strict'
+            ? '<span style="background:#dc2626;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;">🔴 STRICT OFFICIAL</span>'
+            : (SAFETY_LEVEL === 'download_only'
+                ? '<span style="background:#059669;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;">🟢 DOWNLOAD ONLY</span>'
+                : '<span style="background:#d97706;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;">🟡 CAUTION GUARD</span>');
+
+        bar.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
+                ${{levelBadge}}
+                <span style="font-weight:700;color:#38bdf8;white-space:nowrap;">🌐 ${{FOLDER_NAME}}</span>
+                ${{LINKED_LOCAL ? `
+                    <span style="color:#cbd5e1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;" title="Linked Local Root Folder: ${{LINKED_LOCAL}}">📥 ${{LINKED_LOCAL}}</span>
+                    <button id="mhzipy-subpath-badge" title="Auto-detected Web Folder hierarchy subpath. Click to customize or reset to auto-detect." style="background:rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.35);color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">
+                        📁 [Root]
+                    </button>
+                ` : `<span style="color:#64748b;font-size:11px;">(No linked local folder — downloads go to default Downloads)</span>`}}
+            </div>
+            <div style="display:flex;align-items:center;gap:7px;flex-shrink:0;">
+                ${{LINKED_LOCAL ? `
+                    <button id="mhzipy-auto-zip-btn" title="When ON, downloading a folder (.zip) from Box automatically extracts its folder hierarchy into the target local path." style="background:#065f46;border:1px solid #10b981;color:#ecfdf5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
+                        📦 Auto-Unpack ZIP: ON
+                    </button>
+                ` : ''}}
+                <button id="mhzipy-inspect-btn" style="background:#0284c7;border:1px solid #38bdf8;color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
+                    🔍 Pre-Upload File Inspector
+                </button>
+                <button id="mhzipy-lock-toggle-btn" style="background:#1e293b;border:1px solid #38bdf8;color:#fff;padding:3px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;">
+                    🔒 Upload Locked (Safe Mode) — Click to Unlock...
+                </button>
+                <button id="mhzipy-collapse-bar-btn" title="Minimize Safety Bar" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);color:#cbd5e1;padding:3px 7px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
+                    ▲ Hide
+                </button>
+            </div>
+        `;
+
+        document.documentElement.appendChild(bar);
+
+        const pill = document.createElement('button');
+        pill.id = 'mhzipy-collapsed-pill';
+        pill.title = 'Click to expand MHZipy Web Folder Safety Bar';
+        pill.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:2147483645;background:#0f172a;border:1px solid #38bdf8;color:#f8fafc;padding:6px 12px;border-radius:999px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:11.5px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,0.5);display:none;align-items:center;gap:6px;opacity:0.9;';
+        pill.innerHTML = '🛡️ Safe Guard ▼';
+        pill.onclick = () => {{
+            barCollapsed = false;
+            syncBarCollapseState();
+        }};
+        document.documentElement.appendChild(pill);
+
+        bar.querySelector('#mhzipy-collapse-bar-btn').onclick = () => {{
+            barCollapsed = true;
+            syncBarCollapseState();
+        }};
+
+        syncBarCollapseState();
+
+        const subBadge = bar.querySelector('#mhzipy-subpath-badge');
+        if (subBadge) {{
+            subBadge.onclick = () => {{
+                const cur = getActiveSubpath().join('\\');
+                const input = window.prompt(
+                    '📂 Relative Subfolder Path inside "' + LINKED_LOCAL + '":\n\n' +
+                    '• Leave empty and click OK to reset to Auto-Detect from Web Folder breadcrumbs.\n' +
+                    '• Or enter a custom subfolder path (e.g. 01_Specs\\Drafts):',
+                    cur
+                );
+                if (input === null) return;
+                const trimmed = input.trim();
+                if (!trimmed) {{
+                    manualSubpathOverride = null;
+                    updateDetectedHierarchy();
+                    showGuardToast('📂 Subfolder path set to Auto-Detect from Web Folder hierarchy.', false);
+                }} else {{
+                    manualSubpathOverride = trimmed.split(/[/\\]+/).map(sanitizeSegment).filter(Boolean);
+                    syncDownloadStateToHost();
+                    updateSubpathBarUI();
+                    showGuardToast('📂 Custom download subpath set to: \\' + manualSubpathOverride.join('\\'), false);
+                }}
+            }};
+        }}
+
+        const autoZipBtn = bar.querySelector('#mhzipy-auto-zip-btn');
+        if (autoZipBtn) {{
+            autoZipBtn.onclick = () => {{
+                autoExtractZip = !autoExtractZip;
+                autoZipBtn.textContent = autoExtractZip ? '📦 Auto-Unpack ZIP: ON' : '📦 Auto-Unpack ZIP: OFF';
+                autoZipBtn.style.background = autoExtractZip ? '#065f46' : '#334155';
+                autoZipBtn.style.borderColor = autoExtractZip ? '#10b981' : '#64748b';
+                syncDownloadStateToHost();
+                showGuardToast(
+                    autoExtractZip
+                        ? '📦 Auto-Unpack ZIP enabled: Downloaded folder ZIPs will be automatically extracted with their full folder hierarchy.'
+                        : '📦 Auto-Unpack ZIP disabled: Downloaded ZIP files will be saved as .zip archives.',
+                    false
+                );
+            }};
+        }}
+
+        bar.querySelector('#mhzipy-inspect-btn').onclick = () => openInspectorModal();
+        bar.querySelector('#mhzipy-lock-toggle-btn').onclick = () => {{
+            if (uploadUnlocked) {{
+                setUploadLockState(false);
+                showGuardToast('🔒 Upload is now LOCKED.', false);
+            }} else {{
+                openInspectorModal();
+            }}
+        }};
+
+        updateBarUI(0);
+        updateSubpathBarUI();
+        syncDownloadStateToHost();
+    }}
+
+    if (document.readyState === 'loading') {{
+        window.addEventListener('DOMContentLoaded', mountSafetyBar);
+    }} else {{
+        mountSafetyBar();
+    }}
+    setTimeout(mountSafetyBar, 800);
+
+    // Continuously track breadcrumb hierarchy changes as user navigates inside the Web Folder
+    setInterval(() => {{
+        mountSafetyBar();
+        updateDetectedHierarchy();
+    }}, 900);
+    window.addEventListener('popstate', () => setTimeout(updateDetectedHierarchy, 200));
+    window.addEventListener('click', () => {{
+        updateDetectedHierarchy();
+        setTimeout(updateDetectedHierarchy, 350);
+    }}, true);
+}})();
+"#
+    );
+
+    let local_for_dl = linked_local_path.trim().to_string();
+
+    std::thread::spawn(move || {
+        let mut builder = tauri::WebviewWindowBuilder::new(
+            &app_clone,
+            &label,
+            tauri::WebviewUrl::External(parsed_url),
+        )
+        .title(format!("🌐 {} — MHZipy Safe Web Folder", name))
+        .inner_size(1220.0, 860.0)
+        .min_inner_size(700.0, 500.0)
+        .decorations(true)
+        .resizable(true)
+        .visible(true)
+        .focused(true)
+        .disable_drag_drop_handler()
+        .initialization_script(&init_script);
+
+        if let Some(p) = pos {
+            builder = builder.position((p.x + 40) as f64, (p.y + 40) as f64);
+        }
+
+        if let Ok(win) = builder.build() {
+            let _ = app_clone.emit(
+                "web-folder-live-state",
+                serde_json::json!({
+                    "id": id,
+                    "label": label,
+                    "isOpen": true,
+                    "subpath": Vec::<String>::new(),
+                    "autoExtractZip": true,
+                    "uploadUnlocked": false,
+                    "remainingSeconds": 0,
+                }),
+            );
+            #[cfg(target_os = "windows")]
+            attach_web_folder_download_manager(&win, app_clone.clone(), id.clone(), local_for_dl);
+            focus_webview_window(&win);
+        }
+    });
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+struct WebFolderDownloadState {
+    linked_local_path: String,
+    relative_subpath: Vec<String>,
+    auto_extract_zip: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn sanitize_windows_segment(seg: &str) -> String {
+    let cleaned: String = seg
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    cleaned.trim().trim_matches('.').trim().to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn extract_downloaded_zip_preserving_hierarchy(
+    zip_path: &Path,
+    target_dir: &Path,
+) -> Result<usize, String> {
+    let file = File::open(zip_path).map_err(|e| format!("Failed to open ZIP: {}", e))?;
+    let mut archive = zip::ZipArchive::new(BufReader::new(file))
+        .map_err(|e| format!("Invalid ZIP archive: {}", e))?;
+
+    let mut common_root: Option<String> = None;
+    let mut all_share_root = true;
+
+    for i in 0..archive.len() {
+        if let Ok(entry) = archive.by_index(i) {
+            if let Some(enclosed) = entry.enclosed_name() {
+                let mut comps = enclosed.components();
+                if let Some(first) = comps.next() {
+                    let first_str = first.as_os_str().to_string_lossy().to_string();
+                    if comps.next().is_none() && !entry.is_dir() {
+                        all_share_root = false;
+                        break;
+                    }
+                    if let Some(ref existing) = common_root {
+                        if existing != &first_str {
+                            all_share_root = false;
+                            break;
+                        }
+                    } else {
+                        common_root = Some(first_str);
+                    }
+                }
+            }
+        }
+    }
+
+    // Strip the ZIP's top-level folder prefix ONLY if target_dir ALREADY ends with that exact folder name
+    // (e.g., user navigated inside "SubB" so target_dir is "...\SubB" and downloaded "SubB.zip").
+    // If the user is in parent "...\SubA" and downloaded child folder "SubB.zip", keep "SubB/" so "...\SubA\SubB\..." is created!
+    let strip_root = if all_share_root {
+        if let Some(ref root) = common_root {
+            target_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|leaf| leaf.eq_ignore_ascii_case(root))
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    let mut extracted_count = 0usize;
+    let mut buffer = [0u8; 65536];
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+        let Some(enclosed) = entry.enclosed_name() else {
+            continue;
+        };
+
+        let rel_path: PathBuf = if strip_root {
+            let mut comps = enclosed.components();
+            let _ = comps.next();
+            comps.as_path().to_path_buf()
+        } else {
+            enclosed.to_path_buf()
+        };
+
+        if rel_path.as_os_str().is_empty() {
+            continue;
+        }
+
+        let dest_path = target_dir.join(&rel_path);
+        if entry.is_dir() {
+            fs::create_dir_all(&dest_path).map_err(|e| e.to_string())?;
+        } else {
+            if let Some(parent) = dest_path.parent() {
+                if !parent.exists() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+            }
+            if let Ok(meta) = fs::metadata(&dest_path) {
+                let mut perms = meta.permissions();
+                if perms.readonly() {
+                    perms.set_readonly(false);
+                    let _ = fs::set_permissions(&dest_path, perms);
+                }
+            }
+            let mut outfile = File::create(&dest_path).map_err(|e| e.to_string())?;
+            loop {
+                let n = entry.read(&mut buffer).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    break;
+                }
+                outfile.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
+            }
+            extracted_count += 1;
+        }
+    }
+
+    Ok(extracted_count)
+}
+
+#[cfg(target_os = "windows")]
+fn attach_web_folder_download_manager(
+    win: &tauri::WebviewWindow,
+    app_handle: tauri::AppHandle,
+    wf_id: String,
+    linked_local_path: String,
+) {
+    use std::os::windows::ffi::OsStrExt;
+    use std::sync::Mutex;
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_4, COREWEBVIEW2_DOWNLOAD_STATE, COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED,
+    };
+    use webview2_com::{
+        DownloadStartingEventHandler, StateChangedEventHandler, WebMessageReceivedEventHandler,
+    };
+    use windows61::core::{Interface, PCWSTR, PWSTR};
+
+    let state = Arc::new(Mutex::new(WebFolderDownloadState {
+        linked_local_path,
+        relative_subpath: Vec::new(),
+        auto_extract_zip: true,
+    }));
+
+    let win_for_dl = win.clone();
+    let state_for_msg = state.clone();
+    let state_for_dl = state.clone();
+    let app_for_msg = app_handle.clone();
+    let wf_id_for_msg = wf_id.clone();
+    let app_for_dl = app_handle.clone();
+    let wf_id_for_dl = wf_id.clone();
+
+    let _ = win.with_webview(move |pw| unsafe {
+        let controller = pw.controller();
+        let Ok(core) = controller.CoreWebView2() else {
+            return;
+        };
+
+        // 1. Listen for hierarchy subpath & lock state updates from the injected Web Folder script
+        let msg_handler = WebMessageReceivedEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut raw = PWSTR::null();
+            if args.TryGetWebMessageAsString(&mut raw).is_err() {
+                return Ok(());
+            };
+            let text = webview2_com::take_pwstr(raw);
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                if json.get("type").and_then(|v| v.as_str()) == Some("mhzipy-web-folder-state") {
+                    let unlocked = json
+                        .get("uploadUnlocked")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let rem_sec = json
+                        .get("remainingSeconds")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    if let Ok(mut st) = state_for_msg.lock() {
+                        if let Some(arr) = json.get("subpath").and_then(|v| v.as_array()) {
+                            st.relative_subpath = arr
+                                .iter()
+                                .filter_map(|v| v.as_str())
+                                .map(sanitize_windows_segment)
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                        }
+                        if let Some(auto_zip) = json.get("autoExtractZip").and_then(|v| v.as_bool())
+                        {
+                            st.auto_extract_zip = auto_zip;
+                        }
+                        let _ = app_for_msg.emit(
+                            "web-folder-live-state",
+                            serde_json::json!({
+                                "id": wf_id_for_msg,
+                                "isOpen": true,
+                                "subpath": st.relative_subpath,
+                                "autoExtractZip": st.auto_extract_zip,
+                                "uploadUnlocked": unlocked,
+                                "remainingSeconds": rem_sec,
+                            }),
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }));
+        let mut msg_token: i64 = 0;
+        let _ = core.add_WebMessageReceived(&msg_handler, &mut msg_token);
+
+        // 2. Intercept WebView2 downloads and redirect to linked_local_path + relative_subpath
+        let Ok(core4) = core.cast::<ICoreWebView2_4>() else {
+            return;
+        };
+
+        let dl_handler = DownloadStartingEventHandler::create(Box::new(move |_sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+
+            let mut default_pwstr = PWSTR::null();
+            if args.ResultFilePath(&mut default_pwstr).is_err() {
+                return Ok(());
+            }
+            let default_path_str = webview2_com::take_pwstr(default_pwstr);
+            let file_name = Path::new(&default_path_str)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("downloaded_file")
+                .to_string();
+
+            let (base_dir, subpath, auto_extract_zip) = match state_for_dl.lock() {
+                Ok(st) => (
+                    st.linked_local_path.clone(),
+                    st.relative_subpath.clone(),
+                    st.auto_extract_zip,
+                ),
+                Err(_) => return Ok(()),
+            };
+
+            if base_dir.trim().is_empty() {
+                return Ok(());
+            }
+
+            let mut target_dir = PathBuf::from(&base_dir);
+            for seg in &subpath {
+                let clean = sanitize_windows_segment(seg);
+                if !clean.is_empty() {
+                    target_dir.push(clean);
+                }
+            }
+
+            // Create the full local folder hierarchy before saving the file
+            let _ = fs::create_dir_all(&target_dir);
+
+            let final_file_path = target_dir.join(&file_name);
+            let final_path_str = final_file_path.to_string_lossy().to_string();
+            let wide_path: Vec<u16> = std::ffi::OsStr::new(&final_path_str)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let _ = args.SetResultFilePath(PCWSTR(wide_path.as_ptr()));
+
+            // Notify UI that download started into the created hierarchy folder
+            let target_dir_display = target_dir.to_string_lossy().to_string();
+            if let (Ok(fn_json), Ok(td_json)) = (
+                serde_json::to_string(&file_name),
+                serde_json::to_string(&target_dir_display),
+            ) {
+                let _ = win_for_dl.eval(&format!(
+                    "window.__mhzipyNotifyDownloadStart && window.__mhzipyNotifyDownloadStart({}, {});",
+                    fn_json, td_json
+                ));
+            }
+
+            // Monitor download completion to notify user (and auto-unpack folder ZIP if enabled)
+            if let Ok(dl_op) = args.DownloadOperation() {
+                let win_done = win_for_dl.clone();
+                let app_done = app_for_dl.clone();
+                let wf_id_done = wf_id_for_dl.clone();
+                let saved_path = final_file_path.clone();
+                let saved_dir = target_dir.clone();
+                let saved_name = file_name.clone();
+                let handled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+                let state_handler = StateChangedEventHandler::create(Box::new(move |op_sender, _| {
+                    let Some(op) = op_sender else {
+                        return Ok(());
+                    };
+                    let mut dl_state = COREWEBVIEW2_DOWNLOAD_STATE::default();
+                    if op.State(&mut dl_state).is_ok()
+                        && dl_state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED
+                    {
+                        if handled.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            return Ok(());
+                        }
+                        let is_zip = saved_path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.eq_ignore_ascii_case("zip"))
+                            .unwrap_or(false);
+
+                        let win_notify = win_done.clone();
+                        let app_notify = app_done.clone();
+                        let wf_id_notify = wf_id_done.clone();
+                        let sp = saved_path.clone();
+                        let sd = saved_dir.clone();
+                        let sn = saved_name.clone();
+
+                        std::thread::spawn(move || {
+                            if is_zip && auto_extract_zip {
+                                match extract_downloaded_zip_preserving_hierarchy(&sp, &sd) {
+                                    Ok(count) if count > 0 => {
+                                        let _ = fs::remove_file(&sp);
+                                        let msg = format!(
+                                            "✅ Extracted {} file(s) with folder hierarchy from \"{}\" → {}",
+                                            count,
+                                            sn,
+                                            sd.to_string_lossy()
+                                        );
+                                        if let Ok(m_json) = serde_json::to_string(&msg) {
+                                            let _ = win_notify.eval(&format!(
+                                                "window.__mhzipyNotifyDownloadDone && window.__mhzipyNotifyDownloadDone({}, false);",
+                                                m_json
+                                            ));
+                                        }
+                                        let _ = app_notify.emit(
+                                            "web-folder-download-completed",
+                                            serde_json::json!({
+                                                "id": wf_id_notify,
+                                                "targetDir": sd.to_string_lossy(),
+                                                "fileName": format!("{} ({} files unpacked)", sn, count),
+                                            }),
+                                        );
+                                        return;
+                                    }
+                                    Err(err) => {
+                                        let msg = format!(
+                                            "⚠️ Downloaded \"{}\" to {}, but auto-extract failed: {}",
+                                            sn,
+                                            sd.to_string_lossy(),
+                                            err
+                                        );
+                                        if let Ok(m_json) = serde_json::to_string(&msg) {
+                                            let _ = win_notify.eval(&format!(
+                                                "window.__mhzipyNotifyDownloadDone && window.__mhzipyNotifyDownloadDone({}, true);",
+                                                m_json
+                                            ));
+                                        }
+                                        let _ = app_notify.emit(
+                                            "web-folder-download-completed",
+                                            serde_json::json!({
+                                                "id": wf_id_notify,
+                                                "targetDir": sd.to_string_lossy(),
+                                                "fileName": sn,
+                                            }),
+                                        );
+                                        return;
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            let msg = format!(
+                                "✅ Saved \"{}\" → {}",
+                                sn,
+                                sp.to_string_lossy()
+                            );
+                            if let Ok(m_json) = serde_json::to_string(&msg) {
+                                let _ = win_notify.eval(&format!(
+                                    "window.__mhzipyNotifyDownloadDone && window.__mhzipyNotifyDownloadDone({}, false);",
+                                    m_json
+                                ));
+                            }
+                            let _ = app_notify.emit(
+                                "web-folder-download-completed",
+                                serde_json::json!({
+                                    "id": wf_id_notify,
+                                    "targetDir": sd.to_string_lossy(),
+                                    "fileName": sn,
+                                }),
+                            );
+                        });
+                    }
+                    Ok(())
+                }));
+                let mut st_token: i64 = 0;
+                let _ = dl_op.add_StateChanged(&state_handler, &mut st_token);
+            }
+
+            Ok(())
+        }));
+        let mut dl_token: i64 = 0;
+        let _ = core4.add_DownloadStarting(&dl_handler, &mut dl_token);
+    });
+}
+
+#[derive(serde::Serialize, Clone)]
+struct FileContentInspection {
+    detected_kind: String,
+    is_text: bool,
+    is_image: bool,
+    is_pdf: bool,
+    is_video: bool,
+    is_zip: bool,
+}
+
+/// 확장자가 아닌 실제 파일 헤더(Magic Bytes) 및 바이트 내용을 분석하여 파일 종류를 판별합니다.
+#[tauri::command]
+fn inspect_file_content_kind(path: String) -> Result<FileContentInspection, String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("File does not exist: {}", path));
+    }
+    if p.is_dir() {
+        return Err("Cannot inspect a directory as a file.".to_string());
+    }
+
+    let mut f = File::open(p).map_err(|e| format!("Failed to open file: {}", e))?;
+    let mut buf = vec![0u8; 8192];
+    let n = f
+        .read(&mut buf)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    buf.truncate(n);
+
+    if n == 0 {
+        return Ok(FileContentInspection {
+            detected_kind: "Empty File (Text Compatible)".to_string(),
+            is_text: true,
+            is_image: false,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    // 1. PDF Check (%PDF- within first 1024 bytes)
+    let pdf_scan_len = n.min(1024);
+    if buf[..pdf_scan_len].windows(5).any(|w| w == b"%PDF-") {
+        return Ok(FileContentInspection {
+            detected_kind: "PDF Document (%PDF header)".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: true,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    // 2. ZIP Check (PK\x03\x04, PK\x05\x06, PK\x07\x08 + ZipArchive verification)
+    if n >= 4
+        && (&buf[0..4] == b"PK\x03\x04"
+            || &buf[0..4] == b"PK\x05\x06"
+            || &buf[0..4] == b"PK\x07\x08")
+    {
+        if let Ok(zf) = File::open(p) {
+            if zip::ZipArchive::new(BufReader::new(zf)).is_ok() {
+                return Ok(FileContentInspection {
+                    detected_kind: "ZIP Archive (PK header)".to_string(),
+                    is_text: false,
+                    is_image: false,
+                    is_pdf: false,
+                    is_video: false,
+                    is_zip: true,
+                });
+            }
+        }
+    }
+
+    // 3. Raster Image Checks
+    if n >= 8 && &buf[0..8] == b"\x89PNG\r\n\x1a\n" {
+        return Ok(FileContentInspection {
+            detected_kind: "PNG Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 3 && &buf[0..3] == b"\xFF\xD8\xFF" {
+        return Ok(FileContentInspection {
+            detected_kind: "JPEG Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 6 && (&buf[0..6] == b"GIF87a" || &buf[0..6] == b"GIF89a") {
+        return Ok(FileContentInspection {
+            detected_kind: "GIF Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 12 && &buf[0..4] == b"RIFF" && &buf[8..12] == b"WEBP" {
+        return Ok(FileContentInspection {
+            detected_kind: "WebP Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 14 && &buf[0..2] == b"BM" {
+        return Ok(FileContentInspection {
+            detected_kind: "BMP Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 4 && (&buf[0..4] == b"II*\x00" || &buf[0..4] == b"MM\x00*") {
+        return Ok(FileContentInspection {
+            detected_kind: "TIFF Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 4 && (&buf[0..4] == b"\x00\x00\x01\x00" || &buf[0..4] == b"\x00\x00\x02\x00") {
+        return Ok(FileContentInspection {
+            detected_kind: "ICO / CUR Icon Image".to_string(),
+            is_text: false,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    // 4. ISO Base Media File Format (ftyp at offset 4: AVIF/HEIF Image vs MP4/MOV/3GP/M4V Video)
+    if n >= 12 && &buf[4..8] == b"ftyp" {
+        let brand = &buf[8..12];
+        if brand == b"avif"
+            || brand == b"avis"
+            || brand == b"heic"
+            || brand == b"heix"
+            || brand == b"mif1"
+        {
+            return Ok(FileContentInspection {
+                detected_kind: "AVIF / HEIF Image".to_string(),
+                is_text: false,
+                is_image: true,
+                is_pdf: false,
+                is_video: false,
+                is_zip: false,
+            });
+        } else {
+            return Ok(FileContentInspection {
+                detected_kind: "MP4 / MOV / ISO Media Video".to_string(),
+                is_text: false,
+                is_image: false,
+                is_pdf: false,
+                is_video: true,
+                is_zip: false,
+            });
+        }
+    }
+
+    // Other Video Container Signatures
+    if n >= 8
+        && (&buf[4..8] == b"moov"
+            || &buf[4..8] == b"mdat"
+            || &buf[4..8] == b"wide"
+            || &buf[4..8] == b"free")
+    {
+        return Ok(FileContentInspection {
+            detected_kind: "QuickTime / MOV Video".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+    if n >= 4 && &buf[0..4] == b"\x1A\x45\xDF\xA3" {
+        return Ok(FileContentInspection {
+            detected_kind: "MKV / WebM Video (EBML)".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+    if n >= 12 && &buf[0..4] == b"RIFF" && &buf[8..12] == b"AVI " {
+        return Ok(FileContentInspection {
+            detected_kind: "AVI Video".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+    if n >= 16
+        && &buf[0..16]
+            == b"\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C"
+    {
+        return Ok(FileContentInspection {
+            detected_kind: "WMV / ASF Video".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+    if n >= 4 && &buf[0..3] == b"FLV" && buf[3] == 0x01 {
+        return Ok(FileContentInspection {
+            detected_kind: "FLV Video".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+    if n >= 4 && &buf[0..4] == b".RMF" {
+        return Ok(FileContentInspection {
+            detected_kind: "RealMedia (RMVB) Video".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+    if (n >= 4 && (&buf[0..4] == b"\x00\x00\x01\xBA" || &buf[0..4] == b"\x00\x00\x01\xB3"))
+        || (n >= 377 && buf[0] == 0x47 && buf[188] == 0x47 && buf[376] == 0x47)
+    {
+        return Ok(FileContentInspection {
+            detected_kind: "MPEG / Transport Stream Video".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: true,
+            is_zip: false,
+        });
+    }
+
+    // 5. Known non-text binary signatures (EXE/DLL, ELF, OLE2 Office, RAR, 7z)
+    if n >= 2 && &buf[0..2] == b"MZ" {
+        return Ok(FileContentInspection {
+            detected_kind: "Windows Executable / Binary (PE)".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+    if n >= 8 && &buf[0..8] == b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" {
+        return Ok(FileContentInspection {
+            detected_kind: "OLE2 Compound Binary Document".to_string(),
+            is_text: false,
+            is_image: false,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    // 6. Text vs Binary Heuristic (UTF-16 BOM, UTF-8 BOM, SVG XML, or NUL-free printable content)
+    let has_utf16_bom = n >= 2 && (&buf[0..2] == b"\xFF\xFE" || &buf[0..2] == b"\xFE\xFF");
+    let has_utf8_bom = n >= 3 && &buf[0..3] == b"\xEF\xBB\xBF";
+
+    let text_preview = String::from_utf8_lossy(&buf).to_lowercase();
+    let is_svg = text_preview.contains("<svg") && !buf.contains(&0u8);
+
+    if is_svg {
+        return Ok(FileContentInspection {
+            detected_kind: "SVG Vector Image (XML Text)".to_string(),
+            is_text: true,
+            is_image: true,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    if has_utf16_bom || has_utf8_bom {
+        return Ok(FileContentInspection {
+            detected_kind: "Plain Text (Unicode BOM)".to_string(),
+            is_text: true,
+            is_image: false,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    let nul_count = buf.iter().filter(|&&b| b == 0).count();
+    let bad_ctrl_count = buf
+        .iter()
+        .filter(|&&b| b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r' && b != 0x0C && b != 0x1B)
+        .count();
+
+    if nul_count == 0 && (bad_ctrl_count * 50 <= n) {
+        return Ok(FileContentInspection {
+            detected_kind: "Plain Text / Markdown Content".to_string(),
+            is_text: true,
+            is_image: false,
+            is_pdf: false,
+            is_video: false,
+            is_zip: false,
+        });
+    }
+
+    Ok(FileContentInspection {
+        detected_kind: "Binary File Content".to_string(),
+        is_text: false,
+        is_image: false,
+        is_pdf: false,
+        is_video: false,
+        is_zip: false,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "windows")]
@@ -2132,6 +4034,12 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let label = window.label();
                 if label != "main" {
+                    if label.starts_with("web-folder-") {
+                        let _ = window.app_handle().emit(
+                            "web-folder-window-closed",
+                            serde_json::json!({ "label": label }),
+                        );
+                    }
                     // 닫히는 PDF 뷰어 윈도우를 열림 목록에서 제거
                     if let Ok(mut map) = open_pdf_windows_map().lock() {
                         map.retain(|_, v| v != label);
@@ -2225,7 +4133,13 @@ pub fn run() {
             decrypt_pdf_file,
             check_pdf_encrypted,
             save_pdf_bytes,
-            read_binary_file
+            read_binary_file,
+            get_system_printers,
+            open_printer_properties,
+            open_pdf_print_dialog,
+            execute_webview_print,
+            open_safe_web_folder_window,
+            inspect_file_content_kind
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
