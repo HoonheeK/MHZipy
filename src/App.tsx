@@ -543,6 +543,7 @@ function App() {
         onExtract={() => fileExplorerRef.current?.extract()}
         onNewFolder={() => fileExplorerRef.current?.newFolder()}
         onNewMdFile={() => fileExplorerRef.current?.newMdFile()}
+        onOpenPowerShellManager={() => fileExplorerRef.current?.openPowerShellManager()}
         currentView={currentView}
         onToggleView={(view) => saveConfig({ view })}
       />

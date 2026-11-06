@@ -3848,6 +3848,112 @@ fn inspect_file_content_kind(path: String) -> Result<FileContentInspection, Stri
     })
 }
 
+#[derive(serde::Serialize, Clone)]
+struct PowerShellRunResult {
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
+    duration_ms: u64,
+    shell_used: String,
+}
+
+/// PowerShell 스크립트를 실행하고 stdout/stderr 결과 및 소요 시간을 반환합니다.
+/// 스크립트 내에서 `$CurrentDir` (현재 작업 폴더) 및 `$SelectedFiles` (선택된 파일 경로 배열) 변수를 바로 사용할 수 있습니다.
+#[tauri::command]
+async fn run_powershell_script(
+    code: String,
+    working_dir: String,
+    selected_files: Vec<String>,
+) -> Result<PowerShellRunResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+        use std::time::Instant;
+
+        let trimmed_wd = working_dir.trim();
+        let valid_wd = if !trimmed_wd.is_empty() && trimmed_wd != "My PC" {
+            let p = Path::new(trimmed_wd);
+            if p.exists() && p.is_dir() {
+                Some(p.to_path_buf())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let effective_wd = valid_wd
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let selected_json = serde_json::to_string(&selected_files).unwrap_or_else(|_| "[]".to_string());
+
+        let wrapped_script = format!(
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\r\n\
+             $OutputEncoding = [System.Text.Encoding]::UTF8\r\n\
+             $CurrentDir = $env:MHZ_CURRENT_DIR\r\n\
+             $SelectedFiles = if ($env:MHZ_SELECTED_FILES_JSON) {{ @(ConvertFrom-Json $env:MHZ_SELECTED_FILES_JSON) }} else {{ @() }}\r\n\
+             {}\r\n",
+            code
+        );
+
+        let utf16_bytes: Vec<u8> = wrapped_script
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let encoded_cmd = BASE64.encode(&utf16_bytes);
+
+        let start = Instant::now();
+
+        let run_with_shell = |shell_bin: &str| -> std::io::Result<std::process::Output> {
+            let mut cmd = Command::new(shell_bin);
+            cmd.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                &encoded_cmd,
+            ]);
+            if let Some(ref wd) = valid_wd {
+                cmd.current_dir(wd);
+            }
+            cmd.env("MHZ_CURRENT_DIR", &effective_wd);
+            cmd.env("MHZ_SELECTED_FILES_JSON", &selected_json);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+            cmd.output()
+        };
+
+        let (output, shell_used) = match run_with_shell("pwsh") {
+            Ok(out) => (out, "pwsh (PowerShell 7+)".to_string()),
+            Err(_) => match run_with_shell("powershell") {
+                Ok(out) => (out, "powershell.exe (Windows PowerShell)".to_string()),
+                Err(e) => return Err(format!("Failed to launch PowerShell: {}", e)),
+            },
+        };
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        Ok(PowerShellRunResult {
+            stdout,
+            stderr,
+            exit_code,
+            duration_ms,
+            shell_used,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "windows")]
@@ -4139,7 +4245,8 @@ pub fn run() {
             open_pdf_print_dialog,
             execute_webview_print,
             open_safe_web_folder_window,
-            inspect_file_content_kind
+            inspect_file_content_kind,
+            run_powershell_script
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())

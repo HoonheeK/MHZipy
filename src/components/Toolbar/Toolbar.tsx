@@ -19,6 +19,7 @@ import {
   X,
   Square,
   HardDrive,
+  Terminal,
 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -59,6 +60,7 @@ export interface ToolbarProps {
   onExtract: () => void;
   onNewFolder: () => void;
   onNewMdFile: () => void;
+  onOpenPowerShellManager?: () => void;
 
   // View Switcher
   currentView: 'folder' | 'search';
@@ -102,6 +104,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onExtract,
   onNewFolder,
   onNewMdFile,
+  onOpenPowerShellManager,
   currentView,
   onToggleView,
 }) => {
@@ -707,6 +710,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <FilePlus size={15} />
           <span className="tb-btn-text">{t('contextMenu.createMarkdownFile', 'New MD File')}</span>
         </button>
+
+        {/* PowerShell Studio Manager */}
+        {onOpenPowerShellManager && (
+          <button
+            type="button"
+            className="tb-btn"
+            onClick={onOpenPowerShellManager}
+            title="Open PowerShell Studio & Output Manager"
+          >
+            <Terminal size={15} color="#38bdf8" />
+            <span className="tb-btn-text">PS Studio</span>
+          </button>
+        )}
       </div>
 
       {/* 4. Drag Spacer: 빈 공간을 마우스로 잡고 창 이동 & 더블클릭 시 최대화/원래사이즈 토글 */}

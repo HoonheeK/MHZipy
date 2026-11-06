@@ -11,6 +11,7 @@ import { deleteFiles, pasteFiles, checkPathPermission } from '../command/fileOpe
 import MessageDialog from "../common/MessageDialog";
 import ConfirmDialog from "../common/ConfirmDialog";
 import { WebFolderItem, WebFolderEditModal } from "../WebFolder/WebFolderModals";
+import { openPowerShellManagerWindow } from "../PowerShellManager/openPowerShellManagerWindow";
 import "./FileExplorer.css";
 import { SearchConfig } from "../App";
 
@@ -33,6 +34,7 @@ export interface FileExplorerRef {
   refresh: () => void;
   goUp: () => void;
   navigate: (path: string) => void;
+  openPowerShellManager: () => void;
 }
 
 interface FileExplorerProps {
@@ -414,6 +416,15 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
       setSelected(path);
       setSelectedPaths(new Set([path]));
       if (onNavigate) onNavigate(path);
+    },
+    openPowerShellManager: () => {
+      const selFiles = filesSelected.size > 0 ? Array.from(filesSelected) : [];
+      const firstPs1 = selFiles.find((p) => p.toLowerCase().endsWith('.ps1'));
+      openPowerShellManagerWindow({
+        workingDir: selected && selected !== 'My PC' ? selected : '',
+        selectedFiles: selFiles,
+        scriptFilePath: firstPs1 || '',
+      });
     },
   }));
 
@@ -1618,6 +1629,20 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
                   style={{ padding: '2px 10px' }}
                 >
                   🌐 Pair with Web Folder (Box)...
+                </div>
+                <div
+                  className="context-menu-item"
+                  onClick={() => {
+                    const targetPath = contextMenu.path;
+                    setContextMenu(null);
+                    openPowerShellManagerWindow({
+                      workingDir: targetPath,
+                      selectedFiles: Array.from(selectedPaths),
+                    });
+                  }}
+                  style={{ padding: '2px 10px' }}
+                >
+                  ⚡ Open PowerShell Studio Here
                 </div>
                 <div className="context-menu-separator"></div>
                 <div className="context-menu-item" onClick={() => handleSetPermission(contextMenu.path, 'editable')} style={{ padding: '2px 10px' }}>{t('contextMenu.setAsEditable', { defaultValue: 'Set as Editable' })}</div>

@@ -12,6 +12,7 @@ import { openPdfInWindow } from '../PDFViewer/PDFViewer';
 import { openMarkdownInWindow } from '../MarkdownEditor/openMarkdownInWindow';
 import { openImageInWindow } from '../ImageViewer/openImageInWindow';
 import { openVideoInWindow } from '../VideoPlayer/openVideoInWindow';
+import { openPowerShellManagerWindow } from '../PowerShellManager/openPowerShellManagerWindow';
 import MessageDialog from '../common/MessageDialog';
 import ConfirmDialog from '../common/ConfirmDialog';
 import FileIcon from './FileIcon';
@@ -1190,7 +1191,7 @@ export default function FileList({
   };
 
   const openWithBuiltInAppChecked = async (
-    appType: 'markdown' | 'image' | 'pdf' | 'video' | 'zip',
+    appType: 'markdown' | 'image' | 'pdf' | 'video' | 'zip' | 'powershell',
     filePath: string,
     fileName: string,
     fileData?: FileData
@@ -1219,6 +1220,19 @@ export default function FileList({
         return;
       }
       await openMarkdownInWindow({ path: filePath, name: fileName });
+    } else if (appType === 'powershell') {
+      if (!info.is_text) {
+        showMessage(
+          'Unsupported File Content',
+          `Cannot open "${fileName}" as a script in PowerShell Studio.\n\nDetected file content: ${info.detected_kind}.\nPowerShell Studio script editor only supports plain text / PowerShell (.ps1) content.`
+        );
+        return;
+      }
+      await openPowerShellManagerWindow({
+        workingDir: path && path !== 'My PC' ? path : '',
+        selectedFiles: Array.from(selectedFiles),
+        scriptFilePath: filePath,
+      });
     } else if (appType === 'image') {
       if (!info.is_image) {
         showMessage(
@@ -2492,6 +2506,36 @@ export default function FileList({
                         >
                           <span>📦 ZIP Archive Inspector</span>
                           {isZip && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openWithBuiltInAppChecked('powershell', firstPath, fileName, fileData);
+                          }}
+                        >
+                          <span>⚡ PowerShell Studio (Script)</span>
+                          {fileName.toLowerCase().endsWith('.ps1') && <span style={badgeStyle}>Match</span>}
+                        </div>
+
+                        <div className="context-menu-separator" />
+
+                        <div
+                          className="context-menu-item"
+                          style={{ padding: '4px 10px' }}
+                          onClick={async () => {
+                            setBuiltInAppMenuOpen(false);
+                            setContextMenu(null);
+                            await openPowerShellManagerWindow({
+                              workingDir: path && path !== 'My PC' ? path : '',
+                              selectedFiles: Array.from(selectedFiles),
+                            });
+                          }}
+                        >
+                          <span>⚡ Send to PowerShell Studio ($SelectedFiles)</span>
                         </div>
 
                         <div className="context-menu-separator" />
