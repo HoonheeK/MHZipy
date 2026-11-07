@@ -4,6 +4,21 @@
     "date": "2026-11-06",
     "notes": {
       "ko": [
+        "MHZipy Version 1.0.4 Released!"
+      ],
+      "en": [
+        "MHZipy Version 1.0.4 Released!"
+      ],
+      "ja": [
+        "MHZipy バージョン 1.0.4 がリリースされました!"
+      ]
+    }
+  },
+  {
+    "version": "1.0.4",
+    "date": "2026-11-06",
+    "notes": {
+      "ko": [
         "PowerShell Studio 기능 추가"
       ],
       "en": [

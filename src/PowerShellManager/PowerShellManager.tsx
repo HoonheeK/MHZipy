@@ -14,6 +14,9 @@ export interface PowerShellFolder {
   order?: number;
 }
 
+export type PowerShellScriptType = 'readonly' | 'modify';
+export type PowerShellScriptTypeOption = 'auto' | 'readonly' | 'modify';
+
 export interface PowerShellSnippet {
   id: string;
   title: string;
@@ -22,7 +25,54 @@ export interface PowerShellSnippet {
   description: string;
   code: string;
   updatedAt: number;
+  scriptType?: PowerShellScriptTypeOption;
 }
+
+/**
+ * Static analyzer to classify PowerShell script as either:
+ * - 'readonly': safe inspection, querying, reporting, measuring
+ * - 'modify': file system / system state mutating actions (write, delete, move, create, process termination, git push, etc.)
+ */
+export const detectScriptType = (code: string): PowerShellScriptType => {
+  if (!code || !code.trim()) return 'readonly';
+
+  // 1. Strip multi-line comments <# ... #> and single-line comments # ...
+  const stripped = code
+    .replace(/<#[\s\S]*?#>/g, ' ')
+    .replace(/(^|[ \t])#.*$/gm, ' ');
+
+  // 2. Mutating PowerShell cmdlets, aliases, and dangerous operations
+  const mutatingCmdlets =
+    /\b(Remove-Item|Set-Content|Add-Content|Clear-Content|New-Item|Move-Item|Copy-Item|Rename-Item|Out-File|Export-Csv|Export-Clixml|Set-ItemProperty|New-ItemProperty|Remove-ItemProperty|Rename-ItemProperty|Clear-Item|Copy-ItemProperty|Move-ItemProperty|Stop-Process|Stop-Service|Restart-Service|Start-Service|Set-Service|New-Service|Enable-WindowsOptionalFeature|Disable-WindowsOptionalFeature|Install-Package|Uninstall-Package|Install-Module|Uninstall-Module|Update-Module|Format-Volume|Initialize-Disk|Clear-Disk|Remove-Partition|New-Partition|Set-Volume|Set-Partition|del|erase|rd|rmdir|rm|md|mkdir|ren|rename|move|mv|ni|sc|ac|clc|mi|cpi|cp|rni|ri|kill|spps)\b/i;
+
+  if (mutatingCmdlets.test(stripped)) {
+    return 'modify';
+  }
+
+  // 3. Redirection operators (> file, >> file) which write or overwrite files
+  if (/(?:^|\s)(?:>>|>)(?!=|\s*$)/.test(stripped)) {
+    return 'modify';
+  }
+
+  // 4. Mutating Git commands
+  if (/\bgit\s+(?:commit|push|checkout|reset|clean|revert|rebase|merge|stash\s+drop|branch\s+-[dD])\b/i.test(stripped)) {
+    return 'modify';
+  }
+
+  // 5. Destructive .NET or Win32 file calls: [System.IO.File]::Delete, ::WriteAllText, etc.
+  if (/\[(?:System\.IO\.)?(?:File|Directory)\]::(?:Delete|Write|Create|Move|Append)/i.test(stripped)) {
+    return 'modify';
+  }
+
+  return 'readonly';
+};
+
+export const getEffectiveScriptType = (snippet: PowerShellSnippet): PowerShellScriptType => {
+  if (snippet.scriptType === 'modify' || snippet.scriptType === 'readonly') {
+    return snippet.scriptType;
+  }
+  return detectScriptType(snippet.code);
+};
 
 export interface PowerShellRunRecord {
   id: string;
@@ -58,19 +108,114 @@ interface VisibleTreeItem {
 }
 
 const DEFAULT_FOLDERS: PowerShellFolder[] = [
-  { id: 'folder_files', name: 'Files', parentId: null },
-  { id: 'folder_security', name: 'Security', parentId: null },
-  { id: 'folder_analytics', name: 'Analytics', parentId: null },
-  { id: 'folder_dev_git', name: 'Dev & Git', parentId: null },
-  { id: 'folder_system', name: 'System', parentId: null },
+  { id: 'folder_default', name: 'Default', parentId: null },
 ];
 
 const DEFAULT_SNIPPETS: PowerShellSnippet[] = [
   {
+    id: 'ps_default_outlook_today_schedule',
+    title: "Outlook Today's Schedule & Meetings",
+    category: 'Default',
+    parentId: 'folder_default',
+    description: "Summarizes today's meetings and appointments from Microsoft Outlook calendar for the logged-in user.",
+    code: `<#
+.SYNOPSIS
+    Summarizes today's Outlook Calendar meetings and appointments for the current user.
+.DESCRIPTION
+    Connects to Microsoft Outlook via COM automation, retrieves today's calendar items
+    (including recurring series), and displays a clean schedule summary.
+#>
+
+$today = Get-Date
+$todayStart = $today.Date
+$todayEnd = $todayStart.AddDays(1).AddSeconds(-1)
+
+Write-Output "==========================================================="
+Write-Output " 📅 Outlook Today's Schedule - $($today.ToString('yyyy-MM-dd (ddd)'))"
+Write-Output "==========================================================="
+
+try {
+    # 1. Connect to local Outlook COM Object
+    $outlook = New-Object -ComObject Outlook.Application -ErrorAction Stop
+    $namespace = $outlook.GetNamespace("MAPI")
+    
+    $currentUser = $namespace.CurrentUser.Name
+    $currentAddr = $namespace.CurrentUser.Address
+    Write-Output "👤 User Account : $currentUser ($currentAddr)"
+    Write-Output "🕒 Query Window : $($todayStart.ToString('HH:mm')) ~ $($todayEnd.ToString('HH:mm'))\`n"
+
+    # 2. Get Default Calendar Folder (olFolderCalendar = 9)
+    $calendar = $namespace.GetDefaultFolder(9)
+    $items = $calendar.Items
+
+    # 3. Configure Recurrences & Sorting
+    $items.IncludeRecurrences = $true
+    $items.Sort("[Start]")
+
+    # 4. Restrict to Today's window
+    $filter = "[Start] >= '$($todayStart.ToString('g'))' and [Start] < '$($todayStart.AddDays(1).ToString('g'))'"
+    $todayItems = $items.Restrict($filter)
+
+    $meetingList = @()
+
+    foreach ($appt in $todayItems) {
+        # Determine Meeting Status
+        $statusText = switch ($appt.BusyStatus) {
+            0 { "Free" }
+            1 { "Tentative" }
+            2 { "Busy" }
+            3 { "Out of Office" }
+            4 { "Working Elsewhere" }
+            default { "Busy" }
+        }
+
+        # Check if All-Day
+        $timeStr = if ($appt.AllDayEvent) {
+            "All-Day"
+        } else {
+            "$($appt.Start.ToString('HH:mm')) ~ $($appt.End.ToString('HH:mm'))"
+        }
+
+        # Clean Location / Online meeting info
+        $loc = if ([string]::IsNullOrWhiteSpace($appt.Location)) { "(No Location / Online)" } else { $appt.Location.Trim() }
+
+        # Attendees count summary if available
+        $attendeeCount = if ($appt.Recipients) { $appt.Recipients.Count } else { 0 }
+
+        $meetingList += [PSCustomObject]@{
+            Time       = $timeStr
+            Subject    = $appt.Subject
+            Duration   = "$($appt.Duration)m"
+            Status     = $statusText
+            Organizer  = $appt.Organizer
+            Attendees  = $attendeeCount
+            Location   = $loc
+        }
+    }
+
+    if ($meetingList.Count -eq 0) {
+        Write-Output "🎉 No meetings or appointments scheduled for today!"
+        Write-Output "   Have a productive and relaxing day."
+    } else {
+        Write-Output "📋 Found $($meetingList.Count) event(s) scheduled for today:\`n"
+        $meetingList | Format-Table -AutoSize -Wrap | Out-String -Width 4096
+    }
+}
+catch {
+    Write-Output "⚠️ Could not connect to Microsoft Outlook desktop application."
+    Write-Output "Error details: $($_.Exception.Message)"
+    Write-Output "\`n[Note]"
+    Write-Output "- Make sure Microsoft Outlook desktop app is installed on this PC."
+    Write-Output "- If Outlook is closed, please start Outlook and try running this script again."
+}`,
+    updatedAt: Date.now(),
+    scriptType: 'readonly',
+  },
+  {
     id: 'ps_default_files_summary',
     title: 'Selected Files / Folder Summary',
-    category: 'Files',
-    parentId: 'folder_files',
+    category: 'Default',
+    parentId: 'folder_default',
     description: 'Lists file size, last modified time, and full path for selected files (or current folder).',
     code: `# Uses $SelectedFiles (from MHZipy FileList) or lists $CurrentDir
 if ($SelectedFiles.Count -gt 0) {
@@ -87,8 +232,8 @@ if ($SelectedFiles.Count -gt 0) {
   {
     id: 'ps_default_sha256',
     title: 'SHA-256 Checksum Calculator',
-    category: 'Security',
-    parentId: 'folder_security',
+    category: 'Default',
+    parentId: 'folder_default',
     description: 'Calculates SHA-256 hashes for selected files (or all files in current folder) for easy copying.',
     code: `$targets = if ($SelectedFiles.Count -gt 0) {
     $SelectedFiles | ForEach-Object { Get-Item -LiteralPath $_ } | Where-Object { -not $_.PSIsContainer }
@@ -113,8 +258,8 @@ if (-not $targets) {
   {
     id: 'ps_default_ext_stats',
     title: 'Directory Extension & Size Breakdown',
-    category: 'Analytics',
-    parentId: 'folder_analytics',
+    category: 'Default',
+    parentId: 'folder_default',
     description: 'Groups all files in $CurrentDir (recursively) by extension and calculates count and total MB.',
     code: `Write-Output "Scanning directory: $CurrentDir ..."
 Get-ChildItem -LiteralPath $CurrentDir -File -Recurse -ErrorAction SilentlyContinue |
@@ -129,8 +274,8 @@ Get-ChildItem -LiteralPath $CurrentDir -File -Recurse -ErrorAction SilentlyConti
   {
     id: 'ps_default_git_status',
     title: 'Git Status & Recent 10 Commits',
-    category: 'Dev & Git',
-    parentId: 'folder_dev_git',
+    category: 'Default',
+    parentId: 'folder_default',
     description: 'Shows git branch, status, and the last 10 commits in the current working directory.',
     code: `Write-Output "=== Working Directory: $CurrentDir ==="
 git status -sb
@@ -141,8 +286,8 @@ git log -n 10 --oneline --decorate`,
   {
     id: 'ps_default_sys_network',
     title: 'System & Active Listening Ports',
-    category: 'System',
-    parentId: 'folder_system',
+    category: 'Default',
+    parentId: 'folder_default',
     description: 'Displays OS version, IPv4 addresses, and top memory-consuming processes.',
     code: `Write-Output "=== IPv4 Addresses ==="
 Get-NetIPAddress -AddressFamily IPv4 |
@@ -154,6 +299,24 @@ Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 10 \`
     Name, Id, @{N='Memory(MB)';E={[math]::Round($_.WorkingSet64 / 1MB, 1)}} |
     Format-Table -AutoSize | Out-String -Width 4096`,
     updatedAt: Date.now(),
+    scriptType: 'readonly',
+  },
+  {
+    id: 'ps_default_clean_empty_folders',
+    title: 'Clean Empty Folders (Action)',
+    category: 'Default',
+    parentId: 'folder_default',
+    description: 'Finds and deletes empty subfolders under $CurrentDir (mutating file system action).',
+    code: `Write-Output "Scanning for empty directories in: $CurrentDir ..."
+Get-ChildItem -LiteralPath $CurrentDir -Directory -Recurse |
+    Where-Object { (Get-ChildItem -LiteralPath $_.FullName -Force | Measure-Object).Count -eq 0 } |
+    ForEach-Object {
+        Write-Output "Removing empty folder: $($_.FullName)"
+        Remove-Item -LiteralPath $_.FullName -Force -Recurse
+    }
+Write-Output "Folder cleanup completed."`,
+    updatedAt: Date.now(),
+    scriptType: 'modify',
   },
 ];
 
@@ -182,7 +345,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [selectedScriptIds, setSelectedScriptIds] = useState<Set<string>>(
     () => new Set([DEFAULT_SNIPPETS[0].id])
   );
-  const [activeFolderId, setActiveFolderId] = useState<string | null>('folder_files');
+  const [activeFolderId, setActiveFolderId] = useState<string | null>('folder_default');
   const [anchorItemId, setAnchorItemId] = useState<string | null>(DEFAULT_SNIPPETS[0].id);
   const [focusedItemId, setFocusedItemId] = useState<string | null>(DEFAULT_SNIPPETS[0].id);
 
@@ -194,6 +357,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
   // Tree Drag & Drop state
   const [dragOverFolderId, setDragOverFolderId] = useState<string | 'ROOT' | null>(null);
+  const [draggingScriptIds, setDraggingScriptIds] = useState<string[] | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   // Tree Context Menu state
   const [treeContextMenu, setTreeContextMenu] = useState<{
@@ -219,6 +384,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [title, setTitle] = useState<string>(DEFAULT_SNIPPETS[0].title);
   const [description, setDescription] = useState<string>(DEFAULT_SNIPPETS[0].description);
   const [code, setCode] = useState<string>(DEFAULT_SNIPPETS[0].code);
+  const [scriptType, setScriptType] = useState<PowerShellScriptTypeOption>(DEFAULT_SNIPPETS[0].scriptType || 'auto');
+  const [snippetFolderId, setSnippetFolderId] = useState<string | null>(DEFAULT_SNIPPETS[0].parentId ?? null);
   const [isDirty, setIsDirty] = useState<boolean>(false);
 
   // Explorer context
@@ -226,8 +393,26 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [showSelectedFilesModal, setShowSelectedFilesModal] = useState<boolean>(false);
 
-  // Filter in sidebar
+  // Filter in sidebar (Search & Read/Modify Type)
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [scriptTypeFilter, setScriptTypeFilter] = useState<'all' | 'readonly' | 'modify'>('all');
+
+  // Effective script type for the actively edited code
+  const currentEffectiveType = useMemo<PowerShellScriptType>(() => {
+    if (scriptType === 'readonly' || scriptType === 'modify') return scriptType;
+    return detectScriptType(code);
+  }, [scriptType, code]);
+
+  // Total script counts by type for sidebar filter chips
+  const scriptTypeCounts = useMemo(() => {
+    let readCount = 0;
+    let modCount = 0;
+    for (const s of snippets) {
+      if (getEffectiveScriptType(s) === 'modify') modCount++;
+      else readCount++;
+    }
+    return { all: snippets.length, readonly: readCount, modify: modCount };
+  }, [snippets]);
 
   // Resizable Splitters (Left/Right and Top/Bottom)
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -367,9 +552,16 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     const q = searchTerm.trim().toLowerCase();
     const result: VisibleTreeItem[] = [];
 
+    // Filter helper by script type (readonly vs. modify)
+    const matchesTypeFilter = (s: PowerShellSnippet) => {
+      if (scriptTypeFilter === 'all') return true;
+      return getEffectiveScriptType(s) === scriptTypeFilter;
+    };
+
     if (q) {
       // When searching, show matching scripts flat with their folder context
       for (const s of snippets) {
+        if (!matchesTypeFilter(s)) continue;
         if (
           s.title.toLowerCase().includes(q) ||
           s.description.toLowerCase().includes(q) ||
@@ -388,9 +580,20 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       return result;
     }
 
+    // Check if folder or any nested descendant folder has scripts matching type filter
+    const folderHasMatchingScript = (folderId: string): boolean => {
+      if (scriptTypeFilter === 'all') return true;
+      if (snippets.some((s) => (s.parentId ?? null) === folderId && matchesTypeFilter(s))) {
+        return true;
+      }
+      const childDirs = folders.filter((f) => (f.parentId ?? null) === folderId);
+      return childDirs.some((cd) => folderHasMatchingScript(cd.id));
+    };
+
     const traverse = (parentId: string | null, depth: number) => {
       const childFolders = folders
         .filter((f) => (f.parentId ?? null) === parentId)
+        .filter((f) => folderHasMatchingScript(f.id))
         .sort((a, b) => a.name.localeCompare(b.name));
 
       for (const folder of childFolders) {
@@ -407,7 +610,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
         }
       }
 
-      const childScripts = snippets.filter((s) => (s.parentId ?? null) === parentId);
+      const childScripts = snippets
+        .filter((s) => (s.parentId ?? null) === parentId)
+        .filter(matchesTypeFilter);
+
       for (const script of childScripts) {
         result.push({
           id: script.id,
@@ -422,7 +628,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
     traverse(null, 0);
     return result;
-  }, [folders, snippets, expandedFolderIds, searchTerm]);
+  }, [folders, snippets, expandedFolderIds, searchTerm, scriptTypeFilter]);
 
   // Marquee Selection Mouse Move / Up
   useEffect(() => {
@@ -458,6 +664,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
           setTitle(found.title);
           setDescription(found.description || '');
           setCode(found.code);
+          setScriptType(found.scriptType || 'auto');
           setIsDirty(false);
         }
       }
@@ -665,6 +872,45 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             return { ...s, parentId: newFolderId };
           });
 
+          // Migrate old multi-folder defaults (Files, Security, Analytics, Dev & Git, System, Office)
+          // into the single clean 'folder_default' ('Default')
+          const LEGACY_DEFAULT_FOLDER_IDS = new Set([
+            'folder_files',
+            'folder_office',
+            'folder_security',
+            'folder_analytics',
+            'folder_dev_git',
+            'folder_system',
+          ]);
+
+          const hasLegacy = loadedFolders.some((f) => LEGACY_DEFAULT_FOLDER_IDS.has(f.id));
+          if (hasLegacy) {
+            if (!loadedFolders.some((f) => f.id === 'folder_default')) {
+              loadedFolders.push({ id: 'folder_default', name: 'Default', parentId: null });
+            }
+            loadedSnippets = loadedSnippets.map((s) => {
+              if (s.parentId && LEGACY_DEFAULT_FOLDER_IDS.has(s.parentId)) {
+                return { ...s, parentId: 'folder_default' };
+              }
+              return s;
+            });
+            loadedFolders = loadedFolders.filter((f) => !LEGACY_DEFAULT_FOLDER_IDS.has(f.id));
+          }
+
+          // Ensure DEFAULT_FOLDERS ('Default') is present
+          for (const defFolder of DEFAULT_FOLDERS) {
+            if (!loadedFolders.some((f) => f.id === defFolder.id)) {
+              loadedFolders.push(defFolder);
+            }
+          }
+
+          // Ensure new built-in snippets are present if missing
+          for (const defSnippet of DEFAULT_SNIPPETS) {
+            if (!loadedSnippets.some((s) => s.id === defSnippet.id)) {
+              loadedSnippets.push(defSnippet);
+            }
+          }
+
           setFolders(loadedFolders);
           setExpandedFolderIds(new Set(loadedFolders.map((f) => f.id)));
           setSnippets(loadedSnippets);
@@ -679,6 +925,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             setTitle(first.title);
             setDescription(first.description || '');
             setCode(first.code || '');
+            setScriptType(first.scriptType || 'auto');
+            setSnippetFolderId(first.parentId ?? null);
           }
 
           if (Array.isArray(data.history)) {
@@ -703,6 +951,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     setTitle(item.title);
     setDescription(item.description || '');
     setCode(item.code);
+    setScriptType(item.scriptType || 'auto');
+    setSnippetFolderId(item.parentId ?? null);
     setIsDirty(false);
   };
 
@@ -743,11 +993,16 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       id: selectedSnippetId || `ps_${Date.now()}`,
       title: cleanTitle,
       category: currentObj?.category || 'General',
-      parentId: currentObj ? (currentObj.parentId ?? null) : activeFolderId,
+      parentId: snippetFolderId !== undefined ? snippetFolderId : (currentObj ? (currentObj.parentId ?? null) : activeFolderId),
       description: description.trim(),
       code,
       updatedAt: Date.now(),
+      scriptType,
     };
+
+    if (updatedItem.parentId) {
+      setExpandedFolderIds((prev) => new Set([...prev, updatedItem.parentId!]));
+    }
 
     const existsIdx = snippets.findIndex((s) => s.id === updatedItem.id);
     let nextSnippets: PowerShellSnippet[];
@@ -764,6 +1019,31 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     persistData(folders, nextSnippets, history);
     setSaveFeedback('💾 Saved!');
     setTimeout(() => setSaveFeedback(''), 1800);
+  };
+
+  const handleResetDefaults = () => {
+    if (
+      !window.confirm(
+        '기본 폴더 및 기본 스크립트 세트를 복원하시겠습니까?\n(사용자가 새로 작성한 스크립트는 유지되며, 누락된 기본 항목이 다시 추가됩니다)'
+      )
+    ) {
+      return;
+    }
+
+    const existingSnippetIds = new Set(snippets.map((s) => s.id));
+    const toAddSnippets = DEFAULT_SNIPPETS.filter((d) => !existingSnippetIds.has(d.id));
+    const nextSnippets = [...snippets, ...toAddSnippets];
+
+    const existingFolderIds = new Set(folders.map((f) => f.id));
+    const toAddFolders = DEFAULT_FOLDERS.filter((df) => !existingFolderIds.has(df.id));
+    const nextFolders = [...folders, ...toAddFolders];
+
+    setFolders(nextFolders);
+    setSnippets(nextSnippets);
+    setExpandedFolderIds(new Set(nextFolders.map((f) => f.id)));
+    persistData(nextFolders, nextSnippets, history);
+    setSaveFeedback('🔄 Defaults Restored!');
+    setTimeout(() => setSaveFeedback(''), 2000);
   };
 
   const handleCreateNewSnippet = (targetParentId: string | null = activeFolderId) => {
@@ -890,7 +1170,20 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
         const nextFolders = folders.filter((f) => !toDeleteFolders.has(f.id));
         // Move scripts inside deleted folder to root (or delete? Wait: let's delete scripts or move to root? Moving scripts inside or deleting: let's delete scripts inside if user deletes folder, or keep at least 1 default)
         const nextSnippets = snippets.filter((s) => !s.parentId || !toDeleteFolders.has(s.parentId));
-        const finalSnippets = nextSnippets.length > 0 ? nextSnippets : DEFAULT_SNIPPETS;
+        const finalSnippets =
+          nextSnippets.length > 0
+            ? nextSnippets
+            : [
+                {
+                  id: `ps_${Date.now()}`,
+                  title: 'Untitled Script',
+                  category: 'Custom',
+                  parentId: null,
+                  description: '',
+                  code: '# Write your PowerShell script here\n',
+                  updatedAt: Date.now(),
+                },
+              ];
         setFolders(nextFolders);
         setSnippets(finalSnippets);
         if (!finalSnippets.some((s) => s.id === selectedSnippetId)) {
@@ -909,13 +1202,28 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       if (idsToRemove.size === 0) return;
 
       const next = snippets.filter((s) => !idsToRemove.has(s.id));
-      const finalSnippets = next.length > 0 ? next : DEFAULT_SNIPPETS;
+      const finalSnippets =
+        next.length > 0
+          ? next
+          : [
+              {
+                id: `ps_${Date.now()}`,
+                title: 'Untitled Script',
+                category: 'Custom',
+                parentId: null,
+                description: '',
+                code: '# Write your PowerShell script here\n',
+                updatedAt: Date.now(),
+              },
+            ];
       setSnippets(finalSnippets);
       if (idsToRemove.has(selectedSnippetId)) {
         activateSnippetInEditor(finalSnippets[0]);
       }
       setSelectedScriptIds(new Set([finalSnippets[0].id]));
       persistData(folders, finalSnippets, history);
+      setSaveFeedback(`🗑️ Deleted ${idsToRemove.size} script(s)`);
+      setTimeout(() => setSaveFeedback(''), 1500);
     },
     [folders, snippets, selectedScriptIds, selectedSnippetId, history, persistData]
   );
@@ -1106,8 +1414,17 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       setAnchorItemId(script.id);
       activateSnippetInEditor(script);
     }
+    setDraggingScriptIds(dragIds);
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('application/x-mhz-ps-scripts', JSON.stringify(dragIds));
+    try {
+      e.dataTransfer.setData('application/x-mhz-ps-scripts', JSON.stringify(dragIds));
+      e.dataTransfer.setData('text/plain', dragIds.join(','));
+    } catch {}
+  };
+
+  const handleScriptDragEnd = () => {
+    setDraggingScriptIds(null);
+    setDragOverFolderId(null);
   };
 
   const handleDropOnFolder = (e: React.DragEvent, targetFolderId: string | null) => {
@@ -1115,24 +1432,40 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     e.stopPropagation();
     setDragOverFolderId(null);
 
-    const raw = e.dataTransfer.getData('application/x-mhz-ps-scripts');
-    if (!raw) return;
-    try {
-      const dragIds: string[] = JSON.parse(raw);
-      if (!Array.isArray(dragIds) || dragIds.length === 0) return;
-      const dragSet = new Set(dragIds);
-      const nextSnippets = snippets.map((s) =>
-        dragSet.has(s.id) ? { ...s, parentId: targetFolderId, updatedAt: Date.now() } : s
-      );
-      setSnippets(nextSnippets);
-      if (targetFolderId) {
-        setExpandedFolderIds((prev) => new Set([...prev, targetFolderId]));
+    let dragIds = draggingScriptIds ? [...draggingScriptIds] : [];
+    if (dragIds.length === 0) {
+      const raw = e.dataTransfer.getData('application/x-mhz-ps-scripts');
+      if (raw) {
+        try {
+          dragIds = JSON.parse(raw);
+        } catch {}
       }
-      setActiveFolderId(targetFolderId);
-      persistData(folders, nextSnippets, history);
-      setSaveFeedback(`📁 Moved ${dragSet.size} script(s)`);
-      setTimeout(() => setSaveFeedback(''), 1500);
-    } catch {}
+      if (dragIds.length === 0) {
+        const plain = e.dataTransfer.getData('text/plain');
+        if (plain) {
+          dragIds = plain.split(',').map((s) => s.trim()).filter(Boolean);
+        }
+      }
+    }
+
+    setDraggingScriptIds(null);
+    if (!dragIds || dragIds.length === 0) return;
+
+    const dragSet = new Set(dragIds);
+    const nextSnippets = snippets.map((s) =>
+      dragSet.has(s.id) ? { ...s, parentId: targetFolderId, updatedAt: Date.now() } : s
+    );
+    setSnippets(nextSnippets);
+    if (targetFolderId) {
+      setExpandedFolderIds((prev) => new Set([...prev, targetFolderId]));
+    }
+    setActiveFolderId(targetFolderId);
+    if (dragSet.has(selectedSnippetId)) {
+      setSnippetFolderId(targetFolderId);
+    }
+    persistData(folders, nextSnippets, history);
+    setSaveFeedback(`📁 Moved ${dragSet.size} script(s)`);
+    setTimeout(() => setSaveFeedback(''), 1500);
   };
 
   const handleImportPs1 = async () => {
@@ -1465,6 +1798,22 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 >
                   💾
                 </button>
+                <button
+                  type="button"
+                  onClick={handleResetDefaults}
+                  title="기본 폴더 및 기본 스크립트 복원 (Restore Defaults)"
+                  style={{
+                    padding: '5px 7px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(148, 163, 184, 0.25)',
+                    backgroundColor: '#1e293b',
+                    color: '#94a3b8',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🔄
+                </button>
               </div>
 
               <input
@@ -1482,6 +1831,64 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   outline: 'none',
                 }}
               />
+
+              {/* Type Filter Chips (All / Read-Only / Modify) */}
+              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setScriptTypeFilter('all')}
+                  title="Show all scripts"
+                  style={{
+                    flex: 1,
+                    padding: '3px 0',
+                    borderRadius: '5px',
+                    fontSize: '0.69rem',
+                    fontWeight: scriptTypeFilter === 'all' ? 700 : 500,
+                    backgroundColor: scriptTypeFilter === 'all' ? '#334155' : 'rgba(30, 41, 59, 0.5)',
+                    color: scriptTypeFilter === 'all' ? '#f8fafc' : '#94a3b8',
+                    border: scriptTypeFilter === 'all' ? '1px solid #475569' : '1px solid rgba(148, 163, 184, 0.15)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  All ({scriptTypeCounts.all})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScriptTypeFilter('readonly')}
+                  title="Filter Read-Only / Inspection scripts"
+                  style={{
+                    flex: 1,
+                    padding: '3px 0',
+                    borderRadius: '5px',
+                    fontSize: '0.69rem',
+                    fontWeight: scriptTypeFilter === 'readonly' ? 700 : 500,
+                    backgroundColor: scriptTypeFilter === 'readonly' ? 'rgba(2, 132, 199, 0.28)' : 'rgba(30, 41, 59, 0.5)',
+                    color: scriptTypeFilter === 'readonly' ? '#38bdf8' : '#94a3b8',
+                    border: scriptTypeFilter === 'readonly' ? '1px solid #38bdf8' : '1px solid rgba(148, 163, 184, 0.15)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🔍 Read ({scriptTypeCounts.readonly})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScriptTypeFilter('modify')}
+                  title="Filter Mutating / File action scripts"
+                  style={{
+                    flex: 1,
+                    padding: '3px 0',
+                    borderRadius: '5px',
+                    fontSize: '0.69rem',
+                    fontWeight: scriptTypeFilter === 'modify' ? 700 : 500,
+                    backgroundColor: scriptTypeFilter === 'modify' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(30, 41, 59, 0.5)',
+                    color: scriptTypeFilter === 'modify' ? '#fbbf24' : '#94a3b8',
+                    border: scriptTypeFilter === 'modify' ? '1px solid #f59e0b' : '1px solid rgba(148, 163, 184, 0.15)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ⚡ Action ({scriptTypeCounts.modify})
+                </button>
+              </div>
 
               {/* Multi-Selection & Clipboard Status Strip */}
               <div
@@ -1562,6 +1969,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   !isFolder &&
                   treeClipboard?.op === 'cut' &&
                   treeClipboard.scriptIds.includes(item.id);
+                const isDragging = !isFolder && !!draggingScriptIds?.includes(item.id);
                 const isDragOver = isFolder && dragOverFolderId === item.id;
 
                 return (
@@ -1578,13 +1986,23 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                         handleScriptDragStart(e, item.snippet);
                       }
                     }}
+                    onDragEnd={handleScriptDragEnd}
                     onDragOver={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      const dropFolder = isFolder ? item.id : item.parentId;
-                      setDragOverFolderId(dropFolder ?? 'ROOT');
+                      e.dataTransfer.dropEffect = 'move';
+                      const dropFolder = isFolder ? item.id : (item.parentId ?? 'ROOT');
+                      setDragOverFolderId(dropFolder);
+                    }}
+                    onDragLeave={(e) => {
+                      e.stopPropagation();
+                      if (isFolder && dragOverFolderId === item.id) {
+                        setDragOverFolderId(null);
+                      }
                     }}
                     onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
                       const dropFolder = isFolder ? item.id : item.parentId;
                       handleDropOnFolder(e, dropFolder ?? null);
                     }}
@@ -1618,6 +2036,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                         });
                       }
                     }}
+                    onMouseEnter={() => setHoveredNodeId(item.id)}
+                    onMouseLeave={() => setHoveredNodeId(null)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -1625,22 +2045,23 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       padding: `5px 8px 5px ${item.depth * 16 + 8}px`,
                       marginBottom: '2px',
                       borderRadius: '6px',
-                      cursor: 'pointer',
-                      opacity: isCut ? 0.45 : 1,
+                      cursor: !isFolder ? 'grab' : 'pointer',
+                      opacity: isDragging ? 0.35 : isCut ? 0.45 : 1,
                       backgroundColor: isDragOver
-                        ? 'rgba(56, 189, 248, 0.28)'
+                        ? 'rgba(56, 189, 248, 0.35)'
                         : isSelectedScript
                           ? 'rgba(2, 132, 199, 0.34)'
                           : isActiveFolder
                             ? 'rgba(30, 41, 59, 0.85)'
                             : 'transparent',
                       border: isDragOver
-                        ? '1px dashed #38bdf8'
+                        ? '2px dashed #38bdf8'
                         : isSelectedScript
                           ? '1px solid rgba(56, 189, 248, 0.6)'
                           : isActiveFolder
                             ? '1px solid rgba(148, 163, 184, 0.25)'
                             : '1px solid transparent',
+                      transition: 'background-color 0.12s, border-color 0.12s, opacity 0.12s',
                     }}
                   >
                     <span style={{ fontSize: '0.82rem', flexShrink: 0 }}>
@@ -1691,6 +2112,45 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       </span>
                     )}
 
+                    {!isFolder && item.snippet && (() => {
+                      const eff = getEffectiveScriptType(item.snippet);
+                      return eff === 'modify' ? (
+                        <span
+                          title="파일 시스템 또는 데이터 변경/실행형 스크립트"
+                          style={{
+                            fontSize: '0.61rem',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                            color: '#fbbf24',
+                            border: '1px solid rgba(245, 158, 11, 0.4)',
+                            fontWeight: 700,
+                            flexShrink: 0,
+                            letterSpacing: '0.2px',
+                          }}
+                        >
+                          ⚡ Action
+                        </span>
+                      ) : (
+                        <span
+                          title="안전한 조회/열람형 스크립트"
+                          style={{
+                            fontSize: '0.61rem',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                            color: '#38bdf8',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            fontWeight: 600,
+                            flexShrink: 0,
+                            letterSpacing: '0.2px',
+                          }}
+                        >
+                          🔍 Read
+                        </span>
+                      );
+                    })()}
+
                     {!isFolder && (
                       <span
                         style={{
@@ -1702,6 +2162,41 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       >
                         .ps1
                       </span>
+                    )}
+
+                    {hoveredNodeId === item.id && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const label = isFolder ? `폴더 "${item.name}" 및 하위 스크립트` : `스크립트 "${item.name}"`;
+                          if (window.confirm(`${label}를 삭제하시겠습니까?`)) {
+                            if (isFolder) {
+                              handleDeleteTreeItems('folder', item.id);
+                            } else {
+                              handleDeleteTreeItems('script', item.id);
+                            }
+                          }
+                        }}
+                        title={isFolder ? 'Delete folder' : 'Delete script'}
+                        style={{
+                          marginLeft: 'auto',
+                          padding: '0 4px',
+                          height: '18px',
+                          border: 'none',
+                          borderRadius: '3px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                          color: '#fca5a5',
+                          fontSize: '0.68rem',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        ✕
+                      </button>
                     )}
                   </div>
                 );
@@ -1813,6 +2308,65 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       outline: 'none',
                     }}
                   />
+                  <select
+                    value={snippetFolderId ?? ''}
+                    onChange={(e) => {
+                      const nextId = e.target.value ? e.target.value : null;
+                      setSnippetFolderId(nextId);
+                      setIsDirty(true);
+                    }}
+                    title="Change parent folder for this script"
+                    style={{
+                      padding: '6px 9px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(148, 163, 184, 0.25)',
+                      backgroundColor: '#1e293b',
+                      color: '#7dd3fc',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      outline: 'none',
+                      maxWidth: '140px',
+                    }}
+                  >
+                    <option value="">📁 (Root / No Folder)</option>
+                    {folders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        📁 {f.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={scriptType}
+                    onChange={(e) => {
+                      setScriptType(e.target.value as PowerShellScriptTypeOption);
+                      setIsDirty(true);
+                    }}
+                    title={`Script Mode Setting. Current effective: ${currentEffectiveType === 'modify' ? '⚡ Action (File/System Mutating)' : '🔍 Read-Only (Safe Inspection)'}`}
+                    style={{
+                      padding: '6px 9px',
+                      borderRadius: '6px',
+                      border:
+                        currentEffectiveType === 'modify'
+                          ? '1px solid #f59e0b'
+                          : '1px solid rgba(56, 189, 248, 0.4)',
+                      backgroundColor:
+                        currentEffectiveType === 'modify'
+                          ? 'rgba(245, 158, 11, 0.16)'
+                          : '#0f172a',
+                      color: currentEffectiveType === 'modify' ? '#fcd34d' : '#7dd3fc',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      outline: 'none',
+                    }}
+                  >
+                    <option value="auto">
+                      🪄 Auto ({currentEffectiveType === 'modify' ? '⚡ Action' : '🔍 Read'})
+                    </option>
+                    <option value="readonly">🔍 Read-Only</option>
+                    <option value="modify">⚡ Action / Modify</option>
+                  </select>
                   <button
                     type="button"
                     onClick={handleSaveCurrentSnippet}
@@ -1830,6 +2384,28 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   >
                     {saveFeedback || (isDirty ? '💾 Save *' : '💾 Save')}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`"${title}" 스크립트를 삭제하시겠습니까?`)) {
+                        handleDeleteTreeItems('script', selectedSnippetId);
+                      }
+                    }}
+                    title="Delete active script (Del key)"
+                    style={{
+                      padding: '6px 9px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(248, 113, 113, 0.35)',
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      color: '#fca5a5',
+                      fontWeight: 600,
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    🗑️
+                  </button>
                 </>
               )}
 
@@ -1839,21 +2415,33 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   type="button"
                   disabled={isRunning}
                   onClick={handleRunInCurrentWindow}
-                  title="Re-run PowerShell Script (Ctrl+Enter or F5)"
+                  title={`${currentEffectiveType === 'modify' ? '[주의: 파일/시스템 변경형] ' : ''}Re-run PowerShell Script (Ctrl+Enter or F5)`}
                   style={{
                     padding: '6px 16px',
                     borderRadius: '6px',
-                    border: '1px solid #22c55e',
-                    backgroundColor: isRunning ? '#15803d' : '#16a34a',
+                    border: currentEffectiveType === 'modify' ? '1px solid #f59e0b' : '1px solid #22c55e',
+                    backgroundColor: isRunning
+                      ? currentEffectiveType === 'modify'
+                        ? '#b45309'
+                        : '#15803d'
+                      : currentEffectiveType === 'modify'
+                        ? '#d97706'
+                        : '#16a34a',
                     color: '#ffffff',
                     fontWeight: 700,
                     fontSize: '0.84rem',
                     cursor: isRunning ? 'wait' : 'pointer',
                     whiteSpace: 'nowrap',
-                    boxShadow: '0 2px 10px rgba(22, 163, 74, 0.35)',
+                    boxShadow: currentEffectiveType === 'modify'
+                      ? '0 2px 10px rgba(217, 119, 6, 0.35)'
+                      : '0 2px 10px rgba(22, 163, 74, 0.35)',
                   }}
                 >
-                  {isRunning ? '⏳ Running...' : '▶ Re-run (Ctrl+Enter)'}
+                  {isRunning
+                    ? '⏳ Running...'
+                    : currentEffectiveType === 'modify'
+                      ? '⚡ Re-run Action (Ctrl+Enter)'
+                      : '▶ Re-run (Ctrl+Enter)'}
                 </button>
               ) : (
                 <div ref={runMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
@@ -1862,9 +2450,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     disabled={isRunning && runMode === 'inline'}
                     onClick={handlePrimaryRunAction}
                     title={
-                      runMode === 'inline'
+                      `${currentEffectiveType === 'modify' ? '[주의: 파일/시스템 변경형 스크립트] ' : ''}` +
+                      (runMode === 'inline'
                         ? 'Run in Current Studio Window (Ctrl+Enter or F5)'
-                        : 'Open Separate Runner Window & Execute (Ctrl+Enter or F5)'
+                        : 'Open Separate Runner Window & Execute (Ctrl+Enter or F5)')
                     }
                     style={{
                       padding: '6px 13px',
@@ -1872,26 +2461,44 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       borderBottomLeftRadius: '6px',
                       borderTopRightRadius: 0,
                       borderBottomRightRadius: 0,
-                      border: runMode === 'inline' ? '1px solid #22c55e' : '1px solid #38bdf8',
+                      border:
+                        currentEffectiveType === 'modify'
+                          ? '1px solid #f59e0b'
+                          : runMode === 'inline'
+                            ? '1px solid #22c55e'
+                            : '1px solid #38bdf8',
                       borderRight: 'none',
                       backgroundColor:
-                        runMode === 'inline'
+                        currentEffectiveType === 'modify'
                           ? isRunning
-                            ? '#15803d'
-                            : '#16a34a'
-                          : '#0284c7',
+                            ? '#b45309'
+                            : '#d97706'
+                          : runMode === 'inline'
+                            ? isRunning
+                              ? '#15803d'
+                              : '#16a34a'
+                            : '#0284c7',
                       color: '#ffffff',
                       fontWeight: 700,
                       fontSize: '0.82rem',
                       cursor: isRunning && runMode === 'inline' ? 'wait' : 'pointer',
                       whiteSpace: 'nowrap',
+                      boxShadow: currentEffectiveType === 'modify'
+                        ? '0 2px 8px rgba(217, 119, 6, 0.3)'
+                        : 'none',
                     }}
                   >
                     {runMode === 'inline'
                       ? isRunning
                         ? '⏳ Running...'
-                        : '▶ Run Here'
-                      : '🚀 Run in Window'}
+                        : currentEffectiveType === 'modify'
+                          ? '⚡ Run Action'
+                          : '▶ Run Here'
+                      : isRunning
+                        ? '⏳ Running...'
+                        : currentEffectiveType === 'modify'
+                          ? '⚡ Run in Window'
+                          : '🚀 Run in Window'}
                   </button>
                   <button
                     type="button"
@@ -1903,8 +2510,18 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       borderBottomRightRadius: '6px',
                       borderTopLeftRadius: 0,
                       borderBottomLeftRadius: 0,
-                      border: runMode === 'inline' ? '1px solid #22c55e' : '1px solid #38bdf8',
-                      backgroundColor: runMode === 'inline' ? '#15803d' : '#0369a1',
+                      border:
+                        currentEffectiveType === 'modify'
+                          ? '1px solid #f59e0b'
+                          : runMode === 'inline'
+                            ? '1px solid #22c55e'
+                            : '1px solid #38bdf8',
+                      backgroundColor:
+                        currentEffectiveType === 'modify'
+                          ? '#b45309'
+                          : runMode === 'inline'
+                            ? '#15803d'
+                            : '#0369a1',
                       color: '#ffffff',
                       fontWeight: 700,
                       fontSize: '0.78rem',

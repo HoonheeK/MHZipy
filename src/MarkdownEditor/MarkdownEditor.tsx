@@ -38,12 +38,27 @@ import {
   Minimize2,
   Folder,
   Edit3,
-  Sparkles
+  Sparkles,
+  Sliders
 } from 'lucide-react';
 import './MarkdownEditor.css';
 
 import { Block, BlockType, generateId, parseMarkdownToBlocks, serializeBlocksToMarkdown } from './markdownBlockUtils';
 import { TreeEditableCell } from './TreeEditableCell';
+import {
+  MdToTextRules,
+  loadSavedRules,
+  convertBlocksToPlainText,
+  convertMarkdownToPlainText
+} from './mdToTextConverter';
+import { MdToTextRulesModal } from './MdToTextRulesModal';
+import {
+  PatternRule,
+  loadStoredReverseRules,
+  shouldShowIngestionModal,
+  parseTextToBlocksWithRules,
+} from './textToMdScanner';
+import { TextToMdIngestionModal } from './TextToMdIngestionModal';
 
 interface MarkdownEditorProps {
   initialFilePath?: string;
@@ -153,6 +168,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
   const [fileContextMenu, setFileContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [isRenamingHeader, setIsRenamingHeader] = useState<boolean>(false);
   const [renameInputVal, setRenameInputVal] = useState<string>('');
+
+  // MD to Plain Text Formatting Rules & Modal
+  const [rulesModalOpen, setRulesModalOpen] = useState<boolean>(false);
+  const [textRules, setTextRules] = useState<MdToTextRules>(() => loadSavedRules());
+
+  // Text to MD Reverse Ingestion Modal & Rules
+  const [ingestionModalOpen, setIngestionModalOpen] = useState<boolean>(false);
+  const [reverseRules, setReverseRules] = useState<PatternRule[]>(() => loadStoredReverseRules());
 
   // WYSIWYG Block/Cell Editing states (Inspired by TreeDiadev's EditableCell)
   const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdownToBlocks(''));
@@ -453,33 +476,74 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     }
   }, [pushHistory]);
 
-  // Sync Blocks when switching to WYSIWYG mode
-  const handleSwitchToWysiwyg = () => {
-    if (isTextFile) return;
-    const newBlocks = parseMarkdownToBlocks(content);
+  // Revert / Convert current WYSIWYG blocks or Markdown text to formatted Plain Text according to rules
+  const handleRevertToPlainText = useCallback((customRules?: MdToTextRules) => {
+    const rulesToUse = customRules || textRules;
+    let converted = '';
+    if (viewMode === 'wysiwyg') {
+      converted = convertBlocksToPlainText(blocks, rulesToUse);
+    } else {
+      converted = convertMarkdownToPlainText(content, rulesToUse);
+    }
+    setContent(converted);
+    const newBlocks = parseMarkdownToBlocks(converted);
+    blocksRef.current = newBlocks;
+    setBlocks(newBlocks);
+    setViewMode('edit');
+    pushHistory({ content: converted, blocks: newBlocks.map(b => ({ ...b })) });
+    setSaveNotification(`Reverted to Text (${rulesToUse.name.split('(')[0].trim()})`);
+    setTimeout(() => setSaveNotification(null), 3500);
+  }, [viewMode, blocks, content, textRules, pushHistory]);
+
+  // Switch to WYSIWYG Mode (with option to review reverse ingestion)
+  const handleSwitchToWysiwyg = useCallback((forceReviewModal = false) => {
+    if (forceReviewModal || shouldShowIngestionModal()) {
+      setIngestionModalOpen(true);
+      return;
+    }
+    const newBlocks = parseTextToBlocksWithRules(content, reverseRules);
     blocksRef.current = newBlocks;
     setBlocks(newBlocks);
     setViewMode('wysiwyg');
-  };
+    pushHistory({ content, blocks: newBlocks.map(b => ({ ...b })) });
+    setSaveNotification('Switched to Markdown (WYSIWYG) Mode');
+    setTimeout(() => setSaveNotification(null), 2500);
+  }, [content, reverseRules, pushHistory]);
+
+  const handleApplyIngestion = useCallback((newBlocks: Block[], updatedRules: PatternRule[]) => {
+    setReverseRules(updatedRules);
+    blocksRef.current = newBlocks;
+    setBlocks(newBlocks);
+    setViewMode('wysiwyg');
+    pushHistory({ content, blocks: newBlocks.map(b => ({ ...b })) });
+    setSaveNotification('Converted & Switched to Markdown Mode');
+    setTimeout(() => setSaveNotification(null), 3000);
+  }, [content, pushHistory]);
 
   // Sync Raw Content when switching from WYSIWYG mode
-  const handleSwitchFromWysiwyg = (targetMode: 'split' | 'edit' | 'preview') => {
-    if (isTextFile) return;
+  const handleSwitchFromWysiwyg = useCallback((targetMode: 'split' | 'edit' | 'preview') => {
     if (viewMode === 'wysiwyg') {
-      const newContent = serializeBlocksToMarkdown(blocks);
+      const newContent = isTextFile
+        ? convertBlocksToPlainText(blocks, textRules)
+        : serializeBlocksToMarkdown(blocks);
       setContent(newContent);
     }
     setViewMode(targetMode);
-  };
+  }, [viewMode, isTextFile, blocks, textRules]);
+
+  const handleApplyRules = useCallback((rules: MdToTextRules) => {
+    setTextRules(rules);
+    handleRevertToPlainText(rules);
+  }, [handleRevertToPlainText]);
 
   // Update history on content changes (Source mode)
   const updateContentWithHistory = useCallback((newText: string) => {
     setContent(newText);
-    const parsedBlocks = !isTextFile ? parseMarkdownToBlocks(newText) : [];
+    const parsedBlocks = parseTextToBlocksWithRules(newText, reverseRules);
     blocksRef.current = parsedBlocks;
     setBlocks(parsedBlocks);
     pushHistory({ content: newText, blocks: parsedBlocks.map(b => ({ ...b })) });
-  }, [pushHistory, isTextFile]);
+  }, [pushHistory, reverseRules]);
 
   // Undo / Redo
   const handleUndo = useCallback(() => {
@@ -527,7 +591,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     if (!filePath) return;
     setIsSaving(true);
     try {
-      const textToSave = (!isTextFile && viewMode === 'wysiwyg') ? serializeBlocksToMarkdown(blocks) : content;
+      const textToSave = viewMode === 'wysiwyg'
+        ? (isTextFile ? convertBlocksToPlainText(blocks, textRules) : serializeBlocksToMarkdown(blocks))
+        : content;
       await invoke('save_text_file_content', { path: filePath, content: textToSave, encoding: currentEncoding });
       setSavedContent(textToSave);
       setContent(textToSave);
@@ -544,7 +610,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     } finally {
       setIsSaving(false);
     }
-  }, [filePath, content, viewMode, blocks, currentEncoding]);
+  }, [filePath, content, viewMode, blocks, currentEncoding, isTextFile, textRules]);
 
   // Reopen file with a specific encoding
   const handleReopenWithEncoding = async (encName: string) => {
@@ -555,7 +621,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         path: filePath,
         encoding: encName,
       });
-      const reopenedBlocks = !isTextFile ? parseMarkdownToBlocks(res.content) : [];
+      const reopenedBlocks = parseMarkdownToBlocks(res.content);
       setContent(res.content);
       setSavedContent(res.content);
       setCurrentEncoding(res.encoding || encName);
@@ -582,7 +648,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     if (!filePath) return;
     setIsSaving(true);
     try {
-      const textToSave = (!isTextFile && viewMode === 'wysiwyg') ? serializeBlocksToMarkdown(blocks) : content;
+      const textToSave = viewMode === 'wysiwyg'
+        ? (isTextFile ? convertBlocksToPlainText(blocks, textRules) : serializeBlocksToMarkdown(blocks))
+        : content;
       await invoke('save_text_file_content', {
         path: filePath,
         content: textToSave,
@@ -651,7 +719,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
   // Clean Blank Lines ( 줄 제거 클렌징)
   const handleCleanBlankLines = useCallback(() => {
-    if (viewMode === 'wysiwyg' && !isTextFile) {
+    if (viewMode === 'wysiwyg') {
       const current = blocksRef.current;
       const isBlankBlock = (b: Block) => {
         if (b.type !== 'paragraph') return false;
@@ -671,7 +739,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       blocksRef.current = finalBlocks;
       setBlocks(finalBlocks);
 
-      const newContent = serializeBlocksToMarkdown(finalBlocks);
+      const newContent = isTextFile
+        ? convertBlocksToPlainText(finalBlocks, textRules)
+        : serializeBlocksToMarkdown(finalBlocks);
       setContent(newContent);
       pushHistory({ content: newContent, blocks: finalBlocks.map(b => ({ ...b })) });
 
@@ -692,7 +762,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       setSaveNotification(removedCount > 0 ? `Cleaned ${removedCount} blank line(s)` : 'No blank lines found');
       setTimeout(() => setSaveNotification(null), 2500);
     }
-  }, [viewMode, isTextFile, content, pushHistory]);
+  }, [viewMode, isTextFile, content, pushHistory, textRules]);
 
   // Heading dropdown state and handlers
   const [headingMenuOpen, setHeadingMenuOpen] = useState<boolean>(false);
@@ -717,11 +787,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
   // Copy all content helper (used in Titlebar copy button)
   const handleCopyAll = useCallback(() => {
-    const textToCopy = (!isTextFile && viewMode === 'wysiwyg') ? serializeBlocksToMarkdown(blocks) : content;
+    const textToCopy = viewMode === 'wysiwyg'
+      ? (isTextFile ? convertBlocksToPlainText(blocks, textRules) : serializeBlocksToMarkdown(blocks))
+      : content;
     navigator.clipboard.writeText(textToCopy);
     setSaveNotification(isTextFile ? 'Text copied' : 'Markdown copied');
     setTimeout(() => setSaveNotification(null), 2000);
-  }, [isTextFile, viewMode, blocks, content]);
+  }, [isTextFile, viewMode, blocks, content, textRules]);
 
   // Global Keydown Handler (Save shortcut, Undo/Redo, Zoom shortcuts)
   useEffect(() => {
@@ -942,16 +1014,17 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
   // Statistics
   const stats = useMemo(() => {
-    const text = (!isTextFile && viewMode === 'wysiwyg') ? serializeBlocksToMarkdown(blocks) : content;
+    const text = viewMode === 'wysiwyg'
+      ? (isTextFile ? convertBlocksToPlainText(blocks, textRules) : serializeBlocksToMarkdown(blocks))
+      : content;
     const lines = text.split('\n').length;
     const chars = text.length;
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     return { lines, chars, words };
-  }, [content, blocks, viewMode, isTextFile]);
+  }, [content, blocks, viewMode, isTextFile, textRules]);
 
   // Rendered preview HTML for Split or Preview mode
   const renderedFullHtml = useMemo(() => {
-    if (isTextFile) return '';
     const text = viewMode === 'wysiwyg' ? serializeBlocksToMarkdown(blocks) : content;
     if (!text.trim()) {
       return '';
@@ -1115,8 +1188,75 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
 
       {/* 2. Top Action Toolbar (Centered & Compact) */}
       <div className="mhz-md-toolbar">
-        {/* Markdown & Cell Formatting Tools (Hidden for plain Text files) */}
-        {!isTextFile && (
+        {/* Converter & Rules Group */}
+        <div className="mhz-md-toolbar-group">
+          {viewMode === 'wysiwyg' ? (
+            <button
+              type="button"
+              className="mhz-md-tool-btn primary"
+              onClick={() => handleRevertToPlainText()}
+              title="Convert current Markdown blocks to Plain Text format using defined rules and return to Source/Text editor"
+            >
+              <FileText size={14} />
+              <span>Revert to Plain Text</span>
+            </button>
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="mhz-md-tool-btn primary"
+                onClick={() => handleSwitchToWysiwyg(false)}
+                title="Switch to Markdown / WYSIWYG Block mode (역파싱 검토)"
+                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+              >
+                <Sparkles size={14} />
+                <span>Switch to MD Mode</span>
+              </button>
+              <button
+                type="button"
+                className="mhz-md-tool-btn primary"
+                onClick={() => handleSwitchToWysiwyg(true)}
+                title="역파싱 규칙 검토 및 커스텀 패턴 매핑 다이얼로그 열기"
+                style={{
+                  borderTopLeftRadius: 0,
+                  borderBottomLeftRadius: 0,
+                  borderLeft: '1px solid rgba(255,255,255,0.25)',
+                  paddingLeft: '5px',
+                  paddingRight: '5px',
+                }}
+              >
+                <Sliders size={12} />
+              </button>
+            </div>
+          )}
+
+          {viewMode !== 'wysiwyg' && (
+            <button
+              type="button"
+              className="mhz-md-tool-btn"
+              onClick={() => handleRevertToPlainText()}
+              title="Apply formatting rules to clean and format current text"
+            >
+              <FileText size={14} />
+              <span>Format as Plain Text</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            className="mhz-md-tool-btn"
+            onClick={() => setRulesModalOpen(true)}
+            title="Configure MD → Plain Text Formatting Rules (내보내기 서식 규칙)"
+          >
+            <Sliders size={14} />
+            <span>Text Export Rules</span>
+          </button>
+        </div>
+
+        <div className="mhz-md-toolbar-sep" />
+
+        {/* Markdown & Cell Formatting Tools (Shown when in WYSIWYG mode or when editing Markdown file) */}
+        {(viewMode === 'wysiwyg' || !isTextFile) && (
           <>
             <div className="mhz-md-toolbar-group">
               {/* Single Unified Heading Button (H1~H6) */}
@@ -1386,18 +1526,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
                 if (mode === 'wysiwyg') handleSwitchToWysiwyg();
                 else handleSwitchFromWysiwyg(mode);
               }}
-              disabled={isTextFile}
             >
-              {!isTextFile ? (
-                <>
-                  <option value="wysiwyg">WYSIWYG</option>
-                  <option value="split">Split</option>
-                  <option value="edit">Source</option>
-                  <option value="preview">Preview</option>
-                </>
-              ) : (
-                <option value="edit">Source (Text)</option>
-              )}
+              <option value="wysiwyg">WYSIWYG (MD Blocks)</option>
+              <option value="split">Split</option>
+              <option value="edit">{isTextFile ? 'Source (Plain Text)' : 'Source (Markdown)'}</option>
+              <option value="preview">Preview</option>
             </select>
           </label>
 
@@ -1680,6 +1813,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           <span>Exit Reading Mode (Alt+F / ESC)</span>
         </button>
       )}
+
+      {/* 9. Markdown to Plain Text Conversion Rules Modal */}
+      <MdToTextRulesModal
+        isOpen={rulesModalOpen}
+        onClose={() => setRulesModalOpen(false)}
+        currentRules={textRules}
+        onApplyRules={handleApplyRules}
+      />
+
+      {/* 10. Text to Markdown Reverse Ingestion Modal */}
+      <TextToMdIngestionModal
+        isOpen={ingestionModalOpen}
+        onClose={() => setIngestionModalOpen(false)}
+        documentText={content}
+        initialRules={reverseRules}
+        onApplyIngestion={handleApplyIngestion}
+      />
     </div>
   );
 };

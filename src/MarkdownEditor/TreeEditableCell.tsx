@@ -1965,6 +1965,25 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       newBlocks[index] = { ...block, html: contentBefore };
       newBlocks.splice(index + 1, 0, newBlock);
 
+      // If the current block or its parent heading was folded, unfold it so the newly created block is visible
+      setCollapsedHeadingIds(prev => {
+        if (prev.size === 0) return prev;
+        const next = new Set(prev);
+        let changed = false;
+        if (next.has(block.id)) {
+          next.delete(block.id);
+          changed = true;
+        }
+        for (let i = index; i >= 0; i--) {
+          const b = currentBlocks[i];
+          if (/^h[1-6]$/.test(b.type) && next.has(b.id)) {
+            next.delete(b.id);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+
       onUpdateBlocks(newBlocks);
       focusBlock(newBlock.id, 0);
       return;

@@ -38,7 +38,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<'General' | 'Folder'>('General');
   const [path, setPath] = useState(initialDefaultPath || '');
-  const [quickAccess, setQuickAccess] = useState<string[]>(initialQuickAccessFolders || []);
   const [editable, setEditable] = useState<string[]>(initialEditableFolders || []);
   const [readonly, setReadonly] = useState<string[]>(initialReadonlyFolders || []);
   const [columnSettings, setColumnSettings] = useState<{ key: string; visible: boolean }[]>(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
@@ -66,7 +65,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     if (isOpen) {
       setActiveTab('General');
       setPath(initialDefaultPath || '');
-      setQuickAccess(initialQuickAccessFolders || []);
       setEditable(initialEditableFolders || []);
       setReadonly(initialReadonlyFolders || []);
       setColumnSettings(initialColumnSettings && initialColumnSettings.length > 0 ? initialColumnSettings : DEFAULT_COLUMN_SETTINGS);
@@ -134,27 +132,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     }
   };
 
-  const handleAddQuickAccess = async () => {
-    try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: t('preferences.quickAccessFolders'),
-      });
-      if (selected && typeof selected === 'string') {
-        if (!quickAccess.includes(selected)) {
-          setQuickAccess([...quickAccess, selected]);
-        }
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const handleRemoveQuickAccess = (folder: string) => {
-    setQuickAccess(quickAccess.filter((f) => f !== folder));
-  };
-
   const handleAddEditableFolder = async () => {
     try {
       const selected = await open({ directory: true, multiple: false, title: t('preferences.editableFolders') });
@@ -193,7 +170,7 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
     // Ensure editable/readonly do not contain the same paths: editable takes precedence
     const finalEditable = Array.from(new Set(editable));
     const finalReadonly = Array.from(new Set(readonly.filter(r => !finalEditable.includes(r))));
-    onSave(path, quickAccess, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath, useImageViewer, useVideoPlayer);
+    onSave(path, initialQuickAccessFolders, finalEditable, finalReadonly, columnSettings, language, usePdfWorker, licenseEmail, licenseCode, disableUpdateCheck, pdfExportPath, useImageViewer, useVideoPlayer);
     onClose();
   };
 
@@ -411,7 +388,6 @@ export default function PreferenceDialog({ isOpen, onClose, initialDefaultPath, 
                 </div>
               </div>
 
-              {renderFolderList(t('preferences.quickAccessFolders'), quickAccess, handleAddQuickAccess, handleRemoveQuickAccess)}
               {renderFolderList(t('preferences.editableFolders'), editable, handleAddEditableFolder, (f) => handleRemoveFolderList(f, editable, setEditable))}
               {renderFolderList(t('preferences.readonlyFolders'), readonly, handleAddReadonlyFolder, (f) => handleRemoveFolderList(f, readonly, setReadonly))}
             </>
