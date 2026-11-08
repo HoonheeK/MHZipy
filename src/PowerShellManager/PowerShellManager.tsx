@@ -34,7 +34,7 @@ export interface PowerShellSnippet {
  * - 'modify': file system / system state mutating actions (write, delete, move, create, process termination, git push, etc.)
  */
 export const detectScriptType = (code: string): PowerShellScriptType => {
-  if (!code || !code.trim()) return 'readonly';
+  if (!code || typeof code !== 'string' || !code.trim()) return 'readonly';
 
   // 1. Strip multi-line comments <# ... #> and single-line comments # ...
   const stripped = code
@@ -443,6 +443,13 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [saveFeedback, setSaveFeedback] = useState<string>('');
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
 
+  // Responsive layout state to shrink buttons and labels when width is constrained
+  const [rightPaneWidth, setRightPaneWidth] = useState<number>(800);
+  const [windowWidth, setWindowWidth] = useState<number>(typeof window !== 'undefined' ? window.innerWidth : 1000);
+  const isCompact = rightPaneWidth < 760 || windowWidth < 900;
+  const isUltraCompact = rightPaneWidth < 540 || windowWidth < 680;
+  const isNarrowSidebar = sidebarWidth < 240;
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const rightPaneRef = useRef<HTMLElement>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -450,6 +457,9 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const nodeElementsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const runMenuRef = useRef<HTMLDivElement>(null);
   const storageLoadedRef = useRef<boolean>(false);
+  const draggingScriptIdsRef = useRef<string[] | null>(null);
+  const isDraggingRef = useRef<boolean>(false);
+  const pendingSingleSelectRef = useRef<string | null>(null);
 
   const foldersRef = useRef<PowerShellFolder[]>(folders);
   const snippetsRef = useRef<PowerShellSnippet[]>(snippets);
@@ -464,6 +474,35 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   useEffect(() => {
     historyRef.current = history;
   }, [history]);
+
+  // Track window and right pane width dynamically for responsive compact buttons
+  useEffect(() => {
+    const updateSizes = () => {
+      setWindowWidth(window.innerWidth);
+      if (rightPaneRef.current) {
+        setRightPaneWidth(rightPaneRef.current.clientWidth);
+      }
+    };
+    updateSizes();
+    window.addEventListener('resize', updateSizes);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && rightPaneRef.current) {
+      ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.contentRect) {
+            setRightPaneWidth(entry.contentRect.width);
+          }
+        }
+      });
+      ro.observe(rightPaneRef.current);
+    }
+
+    return () => {
+      window.removeEventListener('resize', updateSizes);
+      if (ro) ro.disconnect();
+    };
+  }, []);
 
   // Close menus on outside click
   useEffect(() => {
@@ -562,10 +601,13 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       // When searching, show matching scripts flat with their folder context
       for (const s of snippets) {
         if (!matchesTypeFilter(s)) continue;
+        const sTitle = typeof s.title === 'string' ? s.title : String(s.title || '');
+        const sDesc = typeof s.description === 'string' ? s.description : String(s.description || '');
+        const sCode = typeof s.code === 'string' ? s.code : (s.code && typeof s.code === 'object' && 'content' in (s.code as any) ? (s.code as any).content || '' : String(s.code || ''));
         if (
-          s.title.toLowerCase().includes(q) ||
-          s.description.toLowerCase().includes(q) ||
-          s.code.toLowerCase().includes(q)
+          sTitle.toLowerCase().includes(q) ||
+          sDesc.toLowerCase().includes(q) ||
+          sCode.toLowerCase().includes(q)
         ) {
           result.push({
             id: s.id,
@@ -911,6 +953,25 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             }
           }
 
+          // Sanitize snippets to ensure 'code' is always a valid string
+          // (fixes crashes when code was accidentally stored as an object or undefined)
+          loadedSnippets = loadedSnippets.map((s) => {
+            let cleanCode = s.code;
+            if (typeof cleanCode !== 'string') {
+              if (cleanCode && typeof cleanCode === 'object' && 'content' in (cleanCode as any)) {
+                cleanCode = (cleanCode as any).content || '';
+              } else {
+                cleanCode = String(cleanCode || '');
+              }
+            }
+            return {
+              ...s,
+              title: typeof s.title === 'string' ? s.title : String(s.title || 'Untitled Script'),
+              description: typeof s.description === 'string' ? s.description : String(s.description || ''),
+              code: cleanCode,
+            };
+          });
+
           setFolders(loadedFolders);
           setExpandedFolderIds(new Set(loadedFolders.map((f) => f.id)));
           setSnippets(loadedSnippets);
@@ -948,9 +1009,15 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const activateSnippetInEditor = (item: PowerShellSnippet) => {
     setSelectedSnippetId(item.id);
     setActiveFolderId(item.parentId ?? null);
-    setTitle(item.title);
-    setDescription(item.description || '');
-    setCode(item.code);
+    setTitle(typeof item.title === 'string' ? item.title : String(item.title || ''));
+    setDescription(typeof item.description === 'string' ? item.description : String(item.description || ''));
+    const cleanCode =
+      typeof item.code === 'string'
+        ? item.code
+        : item.code && typeof item.code === 'object' && 'content' in (item.code as any)
+          ? (item.code as any).content || ''
+          : String(item.code || '');
+    setCode(cleanCode);
     setScriptType(item.scriptType || 'auto');
     setSnippetFolderId(item.parentId ?? null);
     setIsDirty(false);
@@ -958,16 +1025,18 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
   const loadExternalPs1File = async (filePath: string) => {
     try {
-      const content = await invoke<string>('read_text_file_content', { path: filePath });
+      const res = await invoke<{ content: string; encoding: string } | string>('read_text_file_content', { path: filePath });
+      const content = typeof res === 'string' ? res : (res?.content ?? '');
       const fileName = filePath.split(/[\\/]/).pop() || 'Script.ps1';
       const parentDir = filePath.replace(/[\\/][^\\/]+$/, '');
       if (parentDir) setWorkingDir(parentDir);
 
+      const targetFolder = activeFolderId;
       const newSnippet: PowerShellSnippet = {
-        id: `ps_${Date.now()}`,
+        id: `ps_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         title: fileName.replace(/\.ps1$/i, ''),
         category: 'Imported',
-        parentId: activeFolderId,
+        parentId: targetFolder,
         description: `Imported from ${filePath}`,
         code: content,
         updatedAt: Date.now(),
@@ -977,10 +1046,15 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
         persistData(foldersRef.current, next, historyRef.current);
         return next;
       });
+      if (targetFolder) {
+        setExpandedFolderIds((prev) => new Set([...prev, targetFolder]));
+      }
       setSelectedScriptIds(new Set([newSnippet.id]));
       setAnchorItemId(newSnippet.id);
       setFocusedItemId(newSnippet.id);
       activateSnippetInEditor(newSnippet);
+      setSaveFeedback(`📥 Imported "${newSnippet.title}"`);
+      setTimeout(() => setSaveFeedback(''), 2000);
     } catch (err) {
       console.error('Failed to read external .ps1 file:', err);
     }
@@ -1019,31 +1093,6 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     persistData(folders, nextSnippets, history);
     setSaveFeedback('💾 Saved!');
     setTimeout(() => setSaveFeedback(''), 1800);
-  };
-
-  const handleResetDefaults = () => {
-    if (
-      !window.confirm(
-        '기본 폴더 및 기본 스크립트 세트를 복원하시겠습니까?\n(사용자가 새로 작성한 스크립트는 유지되며, 누락된 기본 항목이 다시 추가됩니다)'
-      )
-    ) {
-      return;
-    }
-
-    const existingSnippetIds = new Set(snippets.map((s) => s.id));
-    const toAddSnippets = DEFAULT_SNIPPETS.filter((d) => !existingSnippetIds.has(d.id));
-    const nextSnippets = [...snippets, ...toAddSnippets];
-
-    const existingFolderIds = new Set(folders.map((f) => f.id));
-    const toAddFolders = DEFAULT_FOLDERS.filter((df) => !existingFolderIds.has(df.id));
-    const nextFolders = [...folders, ...toAddFolders];
-
-    setFolders(nextFolders);
-    setSnippets(nextSnippets);
-    setExpandedFolderIds(new Set(nextFolders.map((f) => f.id)));
-    persistData(nextFolders, nextSnippets, history);
-    setSaveFeedback('🔄 Defaults Restored!');
-    setTimeout(() => setSaveFeedback(''), 2000);
   };
 
   const handleCreateNewSnippet = (targetParentId: string | null = activeFolderId) => {
@@ -1261,6 +1310,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
   // Click / Shift+Click / Ctrl+Click selection on tree items
   const handleTreeItemClick = (e: React.MouseEvent, item: VisibleTreeItem) => {
+    if (isDraggingRef.current) return;
     e.stopPropagation();
     treeContainerRef.current?.focus();
 
@@ -1405,8 +1455,39 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     }
   };
 
+  // Helper to move one or multiple scripts to a target folder
+  const handleMoveScriptsToFolder = (scriptIds: string[], targetFolderId: string | null) => {
+    if (!scriptIds || scriptIds.length === 0) return;
+    const moveSet = new Set(scriptIds);
+    const targetFolder = foldersRef.current.find((f) => f.id === targetFolderId);
+    const targetFolderName = targetFolder ? targetFolder.name : 'Root';
+
+    setSnippets((prev) => {
+      const nextSnippets = prev.map((s) =>
+        moveSet.has(s.id) ? { ...s, parentId: targetFolderId, updatedAt: Date.now() } : s
+      );
+      persistData(foldersRef.current, nextSnippets, historyRef.current);
+      return nextSnippets;
+    });
+
+    if (targetFolderId) {
+      setExpandedFolderIds((prev) => new Set([...prev, targetFolderId]));
+    }
+    setActiveFolderId(targetFolderId);
+
+    // Keep the moved scripts selected so user clearly sees them in the target folder
+    setSelectedScriptIds(moveSet);
+
+    if (moveSet.has(selectedSnippetId)) {
+      setSnippetFolderId(targetFolderId);
+    }
+    setSaveFeedback(`📁 Moved ${moveSet.size} script(s) to "${targetFolderName}"`);
+    setTimeout(() => setSaveFeedback(''), 2500);
+  };
+
   // Drag & Drop Handlers for placing .ps1 scripts into Tree Folders
   const handleScriptDragStart = (e: React.DragEvent, script: PowerShellSnippet) => {
+    isDraggingRef.current = true;
     let dragIds = Array.from(selectedScriptIds);
     if (!selectedScriptIds.has(script.id)) {
       dragIds = [script.id];
@@ -1414,8 +1495,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       setAnchorItemId(script.id);
       activateSnippetInEditor(script);
     }
+    draggingScriptIdsRef.current = dragIds;
     setDraggingScriptIds(dragIds);
     e.dataTransfer.effectAllowed = 'move';
+
     try {
       e.dataTransfer.setData('application/x-mhz-ps-scripts', JSON.stringify(dragIds));
       e.dataTransfer.setData('text/plain', dragIds.join(','));
@@ -1423,8 +1506,13 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   };
 
   const handleScriptDragEnd = () => {
-    setDraggingScriptIds(null);
     setDragOverFolderId(null);
+    // Delay clearing drag IDs so onDrop can read them reliably even if dragEnd fires first
+    setTimeout(() => {
+      draggingScriptIdsRef.current = null;
+      setDraggingScriptIds(null);
+      isDraggingRef.current = false;
+    }, 350);
   };
 
   const handleDropOnFolder = (e: React.DragEvent, targetFolderId: string | null) => {
@@ -1432,7 +1520,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     e.stopPropagation();
     setDragOverFolderId(null);
 
-    let dragIds = draggingScriptIds ? [...draggingScriptIds] : [];
+    let dragIds = draggingScriptIdsRef.current && draggingScriptIdsRef.current.length > 0
+      ? [...draggingScriptIdsRef.current]
+      : (draggingScriptIds ? [...draggingScriptIds] : []);
+
     if (dragIds.length === 0) {
       const raw = e.dataTransfer.getData('application/x-mhz-ps-scripts');
       if (raw) {
@@ -1448,33 +1539,72 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       }
     }
 
-    setDraggingScriptIds(null);
     if (!dragIds || dragIds.length === 0) return;
+    handleMoveScriptsToFolder(dragIds, targetFolderId);
 
-    const dragSet = new Set(dragIds);
-    const nextSnippets = snippets.map((s) =>
-      dragSet.has(s.id) ? { ...s, parentId: targetFolderId, updatedAt: Date.now() } : s
-    );
-    setSnippets(nextSnippets);
-    if (targetFolderId) {
-      setExpandedFolderIds((prev) => new Set([...prev, targetFolderId]));
-    }
-    setActiveFolderId(targetFolderId);
-    if (dragSet.has(selectedSnippetId)) {
-      setSnippetFolderId(targetFolderId);
-    }
-    persistData(folders, nextSnippets, history);
-    setSaveFeedback(`📁 Moved ${dragSet.size} script(s)`);
-    setTimeout(() => setSaveFeedback(''), 1500);
+    // After successful drop, clear drag references
+    draggingScriptIdsRef.current = null;
+    setDraggingScriptIds(null);
+    setTimeout(() => {
+      isDraggingRef.current = false;
+    }, 150);
   };
 
   const handleImportPs1 = async () => {
-    const picked = await open({
-      multiple: false,
-      filters: [{ name: 'PowerShell Script', extensions: ['ps1', 'txt'] }],
-    });
-    if (picked && typeof picked === 'string') {
-      await loadExternalPs1File(picked);
+    try {
+      const picked = await open({
+        multiple: true,
+        filters: [{ name: 'PowerShell Script', extensions: ['ps1', 'txt'] }],
+      });
+      if (!picked) return;
+      const filePaths: string[] = Array.isArray(picked) ? picked : [picked];
+      if (filePaths.length === 0) return;
+
+      const newSnippets: PowerShellSnippet[] = [];
+      const targetFolder = activeFolderId;
+
+      for (let i = 0; i < filePaths.length; i++) {
+        const filePath = filePaths[i];
+        try {
+          const res = await invoke<{ content: string; encoding: string } | string>('read_text_file_content', { path: filePath });
+          const content = typeof res === 'string' ? res : (res?.content ?? '');
+          const fileName = filePath.split(/[\\/]/).pop() || `Script_${i + 1}.ps1`;
+          const parentDir = filePath.replace(/[\\/][^\\/]+$/, '');
+          if (i === 0 && parentDir) setWorkingDir(parentDir);
+
+          newSnippets.push({
+            id: `ps_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+            title: fileName.replace(/\.ps1$/i, ''),
+            category: 'Imported',
+            parentId: targetFolder,
+            description: `Imported from ${filePath}`,
+            code: content,
+            updatedAt: Date.now(),
+          });
+        } catch (err) {
+          console.error(`Failed to import ${filePath}:`, err);
+        }
+      }
+
+      if (newSnippets.length > 0) {
+        setSnippets((prev) => {
+          const next = [...newSnippets, ...prev];
+          persistData(foldersRef.current, next, historyRef.current);
+          return next;
+        });
+        if (targetFolder) {
+          setExpandedFolderIds((prev) => new Set([...prev, targetFolder]));
+        }
+        const importedIds = new Set(newSnippets.map((s) => s.id));
+        setSelectedScriptIds(importedIds);
+        setAnchorItemId(newSnippets[0].id);
+        setFocusedItemId(newSnippets[0].id);
+        activateSnippetInEditor(newSnippets[0]);
+        setSaveFeedback(`📥 Imported ${newSnippets.length} script(s)`);
+        setTimeout(() => setSaveFeedback(''), 2200);
+      }
+    } catch (err) {
+      console.error('Failed to open file picker for import:', err);
     }
   };
 
@@ -1640,15 +1770,17 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       >
         <div
           data-tauri-drag-region
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '0.88rem' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '0.88rem', overflow: 'hidden' }}
         >
-          <span style={{ fontSize: '1.05rem' }}>{runnerMode ? '🚀' : '⚡'}</span>
-          <span style={{ color: '#38bdf8' }}>
-            {runnerMode ? `PowerShell Runner — ${title}` : 'MHZipy PowerShell Studio'}
+          <span style={{ fontSize: '1.05rem', flexShrink: 0 }}>{runnerMode ? '🚀' : '⚡'}</span>
+          <span style={{ color: '#38bdf8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {runnerMode ? (isCompact ? title : `PowerShell Runner — ${title}`) : (isCompact ? 'PS Studio' : 'MHZipy PowerShell Studio')}
           </span>
-          <span style={{ color: '#64748b', fontWeight: 400, fontSize: '0.78rem' }}>
-            {runnerMode ? '(Code & Result View)' : '— Script Tree & Output Manager'}
-          </span>
+          {!isCompact && (
+            <span style={{ color: '#64748b', fontWeight: 400, fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
+              {runnerMode ? '(Code & Result View)' : '— Script Tree & Output Manager'}
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1735,36 +1867,36 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   title="New PowerShell Script in active folder (Ctrl+N)"
                   style={{
                     flex: 1,
-                    padding: '5px 8px',
+                    padding: isNarrowSidebar ? '5px 5px' : '5px 8px',
                     borderRadius: '6px',
                     border: '1px solid #0284c7',
                     backgroundColor: '#0369a1',
                     color: '#f8fafc',
                     fontWeight: 700,
-                    fontSize: '0.76rem',
+                    fontSize: isNarrowSidebar ? '0.72rem' : '0.76rem',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  + Script
+                  {isNarrowSidebar ? '+📜' : '+ Script'}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleCreateNewFolder(null)}
                   title="Create New Folder in Tree (Ctrl+Shift+N)"
                   style={{
-                    padding: '5px 8px',
+                    padding: isNarrowSidebar ? '5px 5px' : '5px 8px',
                     borderRadius: '6px',
                     border: '1px solid rgba(56, 189, 248, 0.35)',
                     backgroundColor: 'rgba(30, 41, 59, 0.9)',
                     color: '#7dd3fc',
                     fontWeight: 600,
-                    fontSize: '0.76rem',
+                    fontSize: isNarrowSidebar ? '0.72rem' : '0.76rem',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  + Folder
+                  {isNarrowSidebar ? '+📁' : '+ Folder'}
                 </button>
                 <button
                   type="button"
@@ -1797,22 +1929,6 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   }}
                 >
                   💾
-                </button>
-                <button
-                  type="button"
-                  onClick={handleResetDefaults}
-                  title="기본 폴더 및 기본 스크립트 복원 (Restore Defaults)"
-                  style={{
-                    padding: '5px 7px',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(148, 163, 184, 0.25)',
-                    backgroundColor: '#1e293b',
-                    color: '#94a3b8',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  🔄
                 </button>
               </div>
 
@@ -1850,7 +1966,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  All ({scriptTypeCounts.all})
+                  {isNarrowSidebar ? `${scriptTypeCounts.all}` : `All (${scriptTypeCounts.all})`}
                 </button>
                 <button
                   type="button"
@@ -1868,7 +1984,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  🔍 Read ({scriptTypeCounts.readonly})
+                  {isNarrowSidebar ? `🔍${scriptTypeCounts.readonly}` : `🔍 Read (${scriptTypeCounts.readonly})`}
                 </button>
                 <button
                   type="button"
@@ -1886,31 +2002,94 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  ⚡ Action ({scriptTypeCounts.modify})
+                  {isNarrowSidebar ? `⚡${scriptTypeCounts.modify}` : `⚡ Action (${scriptTypeCounts.modify})`}
                 </button>
               </div>
 
               {/* Multi-Selection & Clipboard Status Strip */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: '0.69rem',
-                  color: '#64748b',
-                }}
-              >
-                <span>
-                  {selectedScriptIds.size > 1
-                    ? `${selectedScriptIds.size} scripts selected`
-                    : 'Drag to move or range-select'}
-                </span>
-                {treeClipboard && (
-                  <span style={{ color: '#38bdf8', fontWeight: 600 }}>
-                    {treeClipboard.op === 'cut' ? '✂️' : '📋'} {treeClipboard.scriptIds.length} in clipboard
+              {selectedScriptIds.size > 1 ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '4px 8px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(2, 132, 199, 0.15)',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                    fontSize: '0.72rem',
+                    color: '#7dd3fc',
+                  }}
+                >
+                  <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    📁 {selectedScriptIds.size} selected (Drag to folder)
                   </span>
-                )}
-              </div>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexShrink: 0 }}>
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const targetId = e.target.value === '__ROOT__' ? null : e.target.value;
+                        handleMoveScriptsToFolder(Array.from(selectedScriptIds), targetId);
+                      }}
+                      title="Move selected scripts to folder"
+                      style={{
+                        padding: '2px 5px',
+                        borderRadius: '4px',
+                        backgroundColor: '#0f172a',
+                        border: '1px solid #38bdf8',
+                        color: '#f8fafc',
+                        fontSize: '0.68rem',
+                        outline: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <option value="" disabled>Move to...</option>
+                      <option value="__ROOT__">📁 [Root / Top-level]</option>
+                      {folders.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          📁 {f.name}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedSnippetId) {
+                          setSelectedScriptIds(new Set([selectedSnippetId]));
+                        }
+                      }}
+                      title="Clear multi-selection"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#94a3b8',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem',
+                        padding: '0 2px',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '0.69rem',
+                    color: '#64748b',
+                  }}
+                >
+                  <span>Drag .ps1 into folders to organize</span>
+                  {treeClipboard && (
+                    <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                      {treeClipboard.op === 'cut' ? '✂️' : '📋'} {treeClipboard.scriptIds.length} in clipboard
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Hierarchical Script Tree Container */}
@@ -1931,8 +2110,13 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   curY: e.clientY,
                 });
               }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                setDragOverFolderId('ROOT');
+              }}
               onDragOver={(e) => {
                 e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
                 setDragOverFolderId('ROOT');
               }}
               onDragLeave={(e) => {
@@ -1956,6 +2140,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 padding: '6px 8px 28px 8px',
                 outline: 'none',
                 position: 'relative',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
                 backgroundColor:
                   dragOverFolderId === 'ROOT' ? 'rgba(56, 189, 248, 0.06)' : 'transparent',
               }}
@@ -1981,22 +2167,43 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       else nodeElementsRef.current.delete(item.id);
                     }}
                     draggable={!isFolder && renamingNodeId !== item.id}
+                    onMouseDown={(e) => {
+                      if (e.button !== 0) return;
+                      // When clicking on an already selected script in a multi-selection,
+                      // do not immediately clear selection on mouse down, preserving drag for the group!
+                      if (!isFolder && selectedScriptIds.size > 1 && selectedScriptIds.has(item.id)) {
+                        pendingSingleSelectRef.current = item.id;
+                      } else {
+                        pendingSingleSelectRef.current = null;
+                      }
+                    }}
                     onDragStart={(e) => {
                       if (!isFolder && item.snippet) {
+                        pendingSingleSelectRef.current = null;
                         handleScriptDragStart(e, item.snippet);
                       }
                     }}
                     onDragEnd={handleScriptDragEnd}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const dropFolder = isFolder ? item.id : (item.parentId ?? 'ROOT');
+                      setDragOverFolderId(dropFolder);
+                    }}
                     onDragOver={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
                       e.dataTransfer.dropEffect = 'move';
                       const dropFolder = isFolder ? item.id : (item.parentId ?? 'ROOT');
-                      setDragOverFolderId(dropFolder);
+                      if (dragOverFolderId !== dropFolder) {
+                        setDragOverFolderId(dropFolder);
+                      }
                     }}
                     onDragLeave={(e) => {
                       e.stopPropagation();
-                      if (isFolder && dragOverFolderId === item.id) {
+                      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                      const dropFolder = isFolder ? item.id : (item.parentId ?? 'ROOT');
+                      if (dragOverFolderId === dropFolder) {
                         setDragOverFolderId(null);
                       }
                     }}
@@ -2006,7 +2213,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       const dropFolder = isFolder ? item.id : item.parentId;
                       handleDropOnFolder(e, dropFolder ?? null);
                     }}
-                    onClick={(e) => handleTreeItemClick(e, item)}
+                    onClick={(e) => {
+                      if (isDraggingRef.current) return;
+                      handleTreeItemClick(e, item);
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -2041,14 +2251,16 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '5px',
                       padding: `5px 8px 5px ${item.depth * 16 + 8}px`,
                       marginBottom: '2px',
                       borderRadius: '6px',
                       cursor: !isFolder ? 'grab' : 'pointer',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none',
                       opacity: isDragging ? 0.35 : isCut ? 0.45 : 1,
                       backgroundColor: isDragOver
-                        ? 'rgba(56, 189, 248, 0.35)'
+                        ? 'rgba(56, 189, 248, 0.45)'
                         : isSelectedScript
                           ? 'rgba(2, 132, 199, 0.34)'
                           : isActiveFolder
@@ -2061,10 +2273,44 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                           : isActiveFolder
                             ? '1px solid rgba(148, 163, 184, 0.25)'
                             : '1px solid transparent',
+                      boxShadow: isDragOver ? '0 0 10px rgba(56, 189, 248, 0.4)' : 'none',
                       transition: 'background-color 0.12s, border-color 0.12s, opacity 0.12s',
                     }}
                   >
-                    <span style={{ fontSize: '0.82rem', flexShrink: 0 }}>
+                    {/* Multi-select Checkbox for PS1 Scripts */}
+                    {!isFolder && item.snippet && (
+                      <input
+                        type="checkbox"
+                        checked={selectedScriptIds.has(item.id)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          const checked = e.target.checked;
+                          setSelectedScriptIds((prev) => {
+                            const next = new Set(prev);
+                            if (checked) next.add(item.id);
+                            else if (next.size > 1) next.delete(item.id);
+                            return next;
+                          });
+                          setAnchorItemId(item.id);
+                          if (checked && item.snippet) {
+                            activateSnippetInEditor(item.snippet);
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        title="Multi-select script (Ctrl+click also works)"
+                        style={{
+                          cursor: 'pointer',
+                          accentColor: '#0284c7',
+                          margin: 0,
+                          marginRight: '2px',
+                          width: '13px',
+                          height: '13px',
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+
+                    <span style={{ fontSize: '0.82rem', flexShrink: 0, pointerEvents: 'none' }}>
                       {isFolder ? (isExpanded ? '📂' : '📁') : '📜'}
                     </span>
 
@@ -2106,6 +2352,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
+                          pointerEvents: 'none',
                         }}
                       >
                         {item.name}
@@ -2116,7 +2363,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       const eff = getEffectiveScriptType(item.snippet);
                       return eff === 'modify' ? (
                         <span
-                          title="파일 시스템 또는 데이터 변경/실행형 스크립트"
+                          title="Modifying Action / File-System Mutating Script"
                           style={{
                             fontSize: '0.61rem',
                             padding: '1px 5px',
@@ -2127,13 +2374,14 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                             fontWeight: 700,
                             flexShrink: 0,
                             letterSpacing: '0.2px',
+                            pointerEvents: 'none',
                           }}
                         >
                           ⚡ Action
                         </span>
                       ) : (
                         <span
-                          title="안전한 조회/열람형 스크립트"
+                          title="Safe Read-Only Inspection Script"
                           style={{
                             fontSize: '0.61rem',
                             padding: '1px 5px',
@@ -2144,6 +2392,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                             fontWeight: 600,
                             flexShrink: 0,
                             letterSpacing: '0.2px',
+                            pointerEvents: 'none',
                           }}
                         >
                           🔍 Read
@@ -2158,6 +2407,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                           color: '#64748b',
                           fontFamily: 'Consolas, monospace',
                           flexShrink: 0,
+                          pointerEvents: 'none',
                         }}
                       >
                         .ps1
@@ -2169,8 +2419,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          const label = isFolder ? `폴더 "${item.name}" 및 하위 스크립트` : `스크립트 "${item.name}"`;
-                          if (window.confirm(`${label}를 삭제하시겠습니까?`)) {
+                          const label = isFolder ? `folder "${item.name}" and all its scripts` : `script "${item.name}"`;
+                          if (window.confirm(`Are you sure you want to delete ${label}?`)) {
                             if (isFolder) {
                               handleDeleteTreeItems('folder', item.id);
                             } else {
@@ -2193,6 +2443,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
+                          pointerEvents: 'auto',
                         }}
                       >
                         ✕
@@ -2266,7 +2517,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             }}
           >
             {/* Title, Description, Save & Selectable Run Row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '32px' }}>
               <input
                 type="text"
                 value={title}
@@ -2276,38 +2527,48 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 }}
                 placeholder="Script Title..."
                 style={{
-                  flex: 2,
-                  padding: '6px 10px',
+                  flex: 3,
+                  height: '32px',
+                  boxSizing: 'border-box',
+                  margin: 0,
+                  minWidth: isUltraCompact ? '110px' : isCompact ? '140px' : '180px',
+                  padding: '4px 10px',
                   borderRadius: '6px',
                   border: '1px solid rgba(148, 163, 184, 0.25)',
                   backgroundColor: '#1e293b',
                   color: '#f8fafc',
                   fontWeight: 700,
-                  fontSize: '0.86rem',
+                  fontSize: '0.84rem',
                   outline: 'none',
                 }}
               />
               {!runnerMode && (
                 <>
-                  <input
-                    type="text"
-                    value={description}
-                    onChange={(e) => {
-                      setDescription(e.target.value);
-                      setIsDirty(true);
-                    }}
-                    placeholder="Short description..."
-                    style={{
-                      flex: 2,
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(148, 163, 184, 0.25)',
-                      backgroundColor: '#1e293b',
-                      color: '#cbd5e1',
-                      fontSize: '0.8rem',
-                      outline: 'none',
-                    }}
-                  />
+                  {!isUltraCompact && (
+                    <input
+                      type="text"
+                      value={description}
+                      onChange={(e) => {
+                        setDescription(e.target.value);
+                        setIsDirty(true);
+                      }}
+                      placeholder="Short description..."
+                      style={{
+                        flex: 2,
+                        height: '32px',
+                        boxSizing: 'border-box',
+                        margin: 0,
+                        minWidth: '80px',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(148, 163, 184, 0.25)',
+                        backgroundColor: '#1e293b',
+                        color: '#cbd5e1',
+                        fontSize: '0.78rem',
+                        outline: 'none',
+                      }}
+                    />
+                  )}
                   <select
                     value={snippetFolderId ?? ''}
                     onChange={(e) => {
@@ -2317,7 +2578,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     }}
                     title="Change parent folder for this script"
                     style={{
-                      padding: '6px 9px',
+                      height: '32px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      padding: isUltraCompact ? '0 5px' : '0 8px',
                       borderRadius: '6px',
                       border: '1px solid rgba(148, 163, 184, 0.25)',
                       backgroundColor: '#1e293b',
@@ -2326,10 +2590,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       fontWeight: 600,
                       cursor: 'pointer',
                       outline: 'none',
-                      maxWidth: '140px',
+                      maxWidth: isUltraCompact ? '85px' : isCompact ? '110px' : '140px',
                     }}
                   >
-                    <option value="">📁 (Root / No Folder)</option>
+                    <option value="">{isUltraCompact ? '📁 Root' : '📁 (Root / No Folder)'}</option>
                     {folders.map((f) => (
                       <option key={f.id} value={f.id}>
                         📁 {f.name}
@@ -2344,7 +2608,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     }}
                     title={`Script Mode Setting. Current effective: ${currentEffectiveType === 'modify' ? '⚡ Action (File/System Mutating)' : '🔍 Read-Only (Safe Inspection)'}`}
                     style={{
-                      padding: '6px 9px',
+                      height: '32px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      padding: isUltraCompact ? '0 5px' : '0 8px',
                       borderRadius: '6px',
                       border:
                         currentEffectiveType === 'modify'
@@ -2359,41 +2626,65 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       fontWeight: 600,
                       cursor: 'pointer',
                       outline: 'none',
+                      maxWidth: isUltraCompact ? '80px' : isCompact ? '95px' : '130px',
                     }}
                   >
                     <option value="auto">
-                      🪄 Auto ({currentEffectiveType === 'modify' ? '⚡ Action' : '🔍 Read'})
+                      {isUltraCompact
+                        ? '🪄 Auto'
+                        : isCompact
+                          ? `🪄 Auto (${currentEffectiveType === 'modify' ? '⚡' : '🔍'})`
+                          : `🪄 Auto (${currentEffectiveType === 'modify' ? '⚡ Action' : '🔍 Read'})`}
                     </option>
-                    <option value="readonly">🔍 Read-Only</option>
-                    <option value="modify">⚡ Action / Modify</option>
+                    <option value="readonly">{isUltraCompact ? '🔍 Read' : '🔍 Read-Only'}</option>
+                    <option value="modify">{isUltraCompact ? '⚡ Action' : '⚡ Action / Modify'}</option>
                   </select>
                   <button
                     type="button"
                     onClick={handleSaveCurrentSnippet}
+                    title={saveFeedback || (isDirty ? 'Save Changes (Ctrl+S)' : 'Save Script')}
                     style={{
-                      padding: '6px 12px',
+                      height: '32px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      lineHeight: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: isUltraCompact ? '0 8px' : isCompact ? '0 10px' : '0 12px',
                       borderRadius: '6px',
                       border: isDirty ? '1px solid #38bdf8' : '1px solid rgba(148, 163, 184, 0.25)',
                       backgroundColor: isDirty ? 'rgba(2, 132, 199, 0.35)' : '#1e293b',
                       color: '#f8fafc',
                       fontWeight: 600,
-                      fontSize: '0.8rem',
+                      fontSize: isUltraCompact ? '0.76rem' : '0.8rem',
                       cursor: 'pointer',
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {saveFeedback || (isDirty ? '💾 Save *' : '💾 Save')}
+                    {saveFeedback
+                      ? (isUltraCompact ? '💾' : saveFeedback)
+                      : isUltraCompact
+                        ? (isDirty ? '💾*' : '💾')
+                        : (isDirty ? '💾 Save *' : '💾 Save')}
                   </button>
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm(`"${title}" 스크립트를 삭제하시겠습니까?`)) {
+                      if (window.confirm(`Are you sure you want to delete script "${title}"?`)) {
                         handleDeleteTreeItems('script', selectedSnippetId);
                       }
                     }}
                     title="Delete active script (Del key)"
                     style={{
-                      padding: '6px 9px',
+                      height: '32px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      lineHeight: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: isUltraCompact ? '0 7px' : '0 9px',
                       borderRadius: '6px',
                       border: '1px solid rgba(248, 113, 113, 0.35)',
                       backgroundColor: 'rgba(239, 68, 68, 0.12)',
@@ -2415,9 +2706,16 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   type="button"
                   disabled={isRunning}
                   onClick={handleRunInCurrentWindow}
-                  title={`${currentEffectiveType === 'modify' ? '[주의: 파일/시스템 변경형] ' : ''}Re-run PowerShell Script (Ctrl+Enter or F5)`}
+                  title={`${currentEffectiveType === 'modify' ? '[Caution: Mutating Script] ' : ''}Re-run PowerShell Script (Ctrl+Enter or F5)`}
                   style={{
-                    padding: '6px 16px',
+                    height: '32px',
+                    boxSizing: 'border-box',
+                    margin: 0,
+                    lineHeight: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: isUltraCompact ? '0 8px' : isCompact ? '0 11px' : '0 16px',
                     borderRadius: '6px',
                     border: currentEffectiveType === 'modify' ? '1px solid #f59e0b' : '1px solid #22c55e',
                     backgroundColor: isRunning
@@ -2429,7 +2727,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                         : '#16a34a',
                     color: '#ffffff',
                     fontWeight: 700,
-                    fontSize: '0.84rem',
+                    fontSize: isUltraCompact ? '0.78rem' : '0.84rem',
                     cursor: isRunning ? 'wait' : 'pointer',
                     whiteSpace: 'nowrap',
                     boxShadow: currentEffectiveType === 'modify'
@@ -2438,35 +2736,39 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   }}
                 >
                   {isRunning
-                    ? '⏳ Running...'
+                    ? (isUltraCompact ? '⏳' : isCompact ? '⏳ Running' : '⏳ Running...')
                     : currentEffectiveType === 'modify'
-                      ? '⚡ Re-run Action (Ctrl+Enter)'
-                      : '▶ Re-run (Ctrl+Enter)'}
+                      ? (isUltraCompact ? '⚡' : isCompact ? '⚡ Re-run' : '⚡ Re-run Action (Ctrl+Enter)')
+                      : (isUltraCompact ? '▶' : isCompact ? '▶ Re-run' : '▶ Re-run (Ctrl+Enter)')}
                 </button>
               ) : (
-                <div ref={runMenuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                <div ref={runMenuRef} style={{ height: '32px', position: 'relative', display: 'inline-flex', alignItems: 'stretch' }}>
                   <button
                     type="button"
                     disabled={isRunning && runMode === 'inline'}
                     onClick={handlePrimaryRunAction}
                     title={
-                      `${currentEffectiveType === 'modify' ? '[주의: 파일/시스템 변경형 스크립트] ' : ''}` +
+                      `${currentEffectiveType === 'modify' ? '[Caution: Mutating Script] ' : ''}` +
                       (runMode === 'inline'
                         ? 'Run in Current Studio Window (Ctrl+Enter or F5)'
                         : 'Open Separate Runner Window & Execute (Ctrl+Enter or F5)')
                     }
                     style={{
-                      padding: '6px 13px',
+                      height: '32px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      lineHeight: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: isUltraCompact ? '0 8px' : isCompact ? '0 10px' : '0 13px',
                       borderTopLeftRadius: '6px',
                       borderBottomLeftRadius: '6px',
                       borderTopRightRadius: 0,
                       borderBottomRightRadius: 0,
-                      border:
-                        currentEffectiveType === 'modify'
-                          ? '1px solid #f59e0b'
-                          : runMode === 'inline'
-                            ? '1px solid #22c55e'
-                            : '1px solid #38bdf8',
+                      borderTop: `1px solid ${currentEffectiveType === 'modify' ? '#f59e0b' : runMode === 'inline' ? '#22c55e' : '#38bdf8'}`,
+                      borderBottom: `1px solid ${currentEffectiveType === 'modify' ? '#f59e0b' : runMode === 'inline' ? '#22c55e' : '#38bdf8'}`,
+                      borderLeft: `1px solid ${currentEffectiveType === 'modify' ? '#f59e0b' : runMode === 'inline' ? '#22c55e' : '#38bdf8'}`,
                       borderRight: 'none',
                       backgroundColor:
                         currentEffectiveType === 'modify'
@@ -2480,7 +2782,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                             : '#0284c7',
                       color: '#ffffff',
                       fontWeight: 700,
-                      fontSize: '0.82rem',
+                      fontSize: isUltraCompact ? '0.78rem' : '0.82rem',
                       cursor: isRunning && runMode === 'inline' ? 'wait' : 'pointer',
                       whiteSpace: 'nowrap',
                       boxShadow: currentEffectiveType === 'modify'
@@ -2490,22 +2792,29 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   >
                     {runMode === 'inline'
                       ? isRunning
-                        ? '⏳ Running...'
+                        ? (isUltraCompact ? '⏳' : isCompact ? '⏳ Running' : '⏳ Running...')
                         : currentEffectiveType === 'modify'
-                          ? '⚡ Run Action'
-                          : '▶ Run Here'
+                          ? (isUltraCompact ? '⚡' : isCompact ? '⚡ Run' : '⚡ Run Action')
+                          : (isUltraCompact ? '▶' : isCompact ? '▶ Run' : '▶ Run Here')
                       : isRunning
-                        ? '⏳ Running...'
+                        ? (isUltraCompact ? '⏳' : isCompact ? '⏳ Running' : '⏳ Running...')
                         : currentEffectiveType === 'modify'
-                          ? '⚡ Run in Window'
-                          : '🚀 Run in Window'}
+                          ? (isUltraCompact ? '⚡' : isCompact ? '⚡ Window' : '⚡ Run in Window')
+                          : (isUltraCompact ? '🚀' : isCompact ? '🚀 Window' : '🚀 Run in Window')}
                   </button>
                   <button
                     type="button"
                     onClick={() => setRunMenuOpen((prev) => !prev)}
                     title="Select Run Mode (Run Here vs. Run in Separate Window)"
                     style={{
-                      padding: '6px 8px',
+                      height: '32px',
+                      boxSizing: 'border-box',
+                      margin: 0,
+                      lineHeight: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: isUltraCompact ? '0 6px' : '0 8px',
                       borderTopRightRadius: '6px',
                       borderBottomRightRadius: '6px',
                       borderTopLeftRadius: 0,
@@ -2618,14 +2927,16 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 flexWrap: 'wrap',
               }}
             >
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>📁 Working Dir ($CurrentDir):</span>
+              <span style={{ color: '#94a3b8', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                {isUltraCompact ? '📁' : isCompact ? '📁 Dir:' : '📁 Working Dir ($CurrentDir):'}
+              </span>
               <input
                 type="text"
                 value={workingDir}
                 onChange={(e) => setWorkingDir(e.target.value)}
                 style={{
                   flex: 1,
-                  minWidth: '180px',
+                  minWidth: isUltraCompact ? '100px' : isCompact ? '130px' : '180px',
                   padding: '3px 8px',
                   borderRadius: '4px',
                   border: '1px solid rgba(148, 163, 184, 0.22)',
@@ -2638,24 +2949,26 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
               <button
                 type="button"
                 onClick={handleBrowseWorkingDir}
+                title="Browse Working Directory"
                 style={{
-                  padding: '3px 8px',
+                  padding: isUltraCompact ? '3px 6px' : '3px 8px',
                   borderRadius: '4px',
                   border: '1px solid rgba(148, 163, 184, 0.25)',
                   backgroundColor: '#334155',
                   color: '#f8fafc',
-                  fontSize: '0.73rem',
+                  fontSize: isUltraCompact ? '0.7rem' : '0.73rem',
                   cursor: 'pointer',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                Browse...
+                {isUltraCompact ? '📂' : isCompact ? 'Browse' : 'Browse...'}
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowSelectedFilesModal(true)}
                 style={{
-                  padding: '3px 8px',
+                  padding: isUltraCompact ? '3px 6px' : '3px 8px',
                   borderRadius: '4px',
                   border:
                     selectedFiles.length > 0
@@ -2664,48 +2977,57 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   backgroundColor:
                     selectedFiles.length > 0 ? 'rgba(56, 189, 248, 0.16)' : 'rgba(30, 41, 59, 0.8)',
                   color: selectedFiles.length > 0 ? '#7dd3fc' : '#94a3b8',
-                  fontSize: '0.73rem',
+                  fontSize: isUltraCompact ? '0.7rem' : '0.73rem',
                   cursor: 'pointer',
                   fontWeight: 600,
+                  whiteSpace: 'nowrap',
                 }}
                 title="View or edit $SelectedFiles passed from FileExplorer"
               >
-                📄 $SelectedFiles ({selectedFiles.length})
+                {isUltraCompact
+                  ? `📄 (${selectedFiles.length})`
+                  : isCompact
+                    ? `📄 Files (${selectedFiles.length})`
+                    : `📄 $SelectedFiles (${selectedFiles.length})`}
               </button>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
-                <span style={{ color: '#64748b', fontSize: '0.72rem' }}>Insert:</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', flexShrink: 0 }}>
+                {!isCompact && <span style={{ color: '#64748b', fontSize: '0.72rem' }}>Insert:</span>}
                 <button
                   type="button"
                   onClick={() => insertVariableAtCursor('$CurrentDir')}
+                  title="Insert $CurrentDir variable at cursor"
                   style={{
-                    padding: '2px 6px',
+                    padding: isUltraCompact ? '2px 4px' : '2px 6px',
                     borderRadius: '4px',
                     border: '1px solid rgba(148, 163, 184, 0.25)',
                     backgroundColor: '#1e293b',
                     color: '#38bdf8',
-                    fontSize: '0.72rem',
+                    fontSize: isUltraCompact ? '0.68rem' : '0.72rem',
                     fontFamily: 'Consolas, monospace',
                     cursor: 'pointer',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  $CurrentDir
+                  {isUltraCompact ? '+$Dir' : '$CurrentDir'}
                 </button>
                 <button
                   type="button"
                   onClick={() => insertVariableAtCursor('$SelectedFiles')}
+                  title="Insert $SelectedFiles variable at cursor"
                   style={{
-                    padding: '2px 6px',
+                    padding: isUltraCompact ? '2px 4px' : '2px 6px',
                     borderRadius: '4px',
                     border: '1px solid rgba(148, 163, 184, 0.25)',
                     backgroundColor: '#1e293b',
                     color: '#38bdf8',
-                    fontSize: '0.72rem',
+                    fontSize: isUltraCompact ? '0.68rem' : '0.72rem',
                     fontFamily: 'Consolas, monospace',
                     cursor: 'pointer',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  $SelectedFiles
+                  {isUltraCompact ? '+$Files' : '$SelectedFiles'}
                 </button>
               </div>
             </div>
@@ -2796,42 +3118,50 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   type="button"
                   onClick={() => setActiveBottomTab('output')}
                   style={{
-                    padding: '4px 10px',
+                    padding: isUltraCompact ? '4px 6px' : '4px 10px',
                     borderRadius: '5px',
                     border: 'none',
                     backgroundColor: activeBottomTab === 'output' ? '#0284c7' : 'transparent',
                     color: activeBottomTab === 'output' ? '#ffffff' : '#94a3b8',
                     fontWeight: 700,
-                    fontSize: '0.78rem',
+                    fontSize: isUltraCompact ? '0.74rem' : '0.78rem',
                     cursor: 'pointer',
+                    whiteSpace: 'nowrap',
                   }}
+                  title="Output Console"
                 >
-                  📟 Output Console
+                  {isUltraCompact ? '📟' : isCompact ? '📟 Output' : '📟 Output Console'}
                 </button>
                 {!runnerMode && (
                   <button
                     type="button"
                     onClick={() => setActiveBottomTab('history')}
                     style={{
-                      padding: '4px 10px',
+                      padding: isUltraCompact ? '4px 6px' : '4px 10px',
                       borderRadius: '5px',
                       border: 'none',
                       backgroundColor: activeBottomTab === 'history' ? '#0284c7' : 'transparent',
                       color: activeBottomTab === 'history' ? '#ffffff' : '#94a3b8',
                       fontWeight: 700,
-                      fontSize: '0.78rem',
+                      fontSize: isUltraCompact ? '0.74rem' : '0.78rem',
                       cursor: 'pointer',
+                      whiteSpace: 'nowrap',
                     }}
+                    title="Execution Run History"
                   >
-                    📜 Run History ({history.length})
+                    {isUltraCompact
+                      ? `📜 (${history.length})`
+                      : isCompact
+                        ? `📜 History (${history.length})`
+                        : `📜 Run History (${history.length})`}
                   </button>
                 )}
 
                 {currentResult && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '8px', fontSize: '0.74rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px', fontSize: '0.72rem' }}>
                     <span
                       style={{
-                        padding: '1px 6px',
+                        padding: '1px 5px',
                         borderRadius: '4px',
                         fontWeight: 700,
                         backgroundColor:
@@ -2839,55 +3169,64 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                             ? 'rgba(34, 197, 94, 0.18)'
                             : 'rgba(239, 68, 68, 0.2)',
                         color: currentResult.exitCode === 0 ? '#4ade80' : '#f87171',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      {currentResult.exitCode === 0 ? '✅ Exit 0' : `❌ Exit ${currentResult.exitCode}`}
+                      {currentResult.exitCode === 0
+                        ? isUltraCompact
+                          ? '✅ 0'
+                          : '✅ Exit 0'
+                        : `❌ ${currentResult.exitCode}`}
                     </span>
-                    <span style={{ color: '#94a3b8' }}>⏱️ {currentResult.durationMs} ms</span>
-                    <span style={{ color: '#64748b' }}>({currentResult.shellUsed})</span>
+                    <span style={{ color: '#94a3b8', whiteSpace: 'nowrap' }}>⏱️ {currentResult.durationMs}ms</span>
+                    {!isCompact && <span style={{ color: '#64748b', whiteSpace: 'nowrap' }}>({currentResult.shellUsed})</span>}
                   </div>
                 )}
               </div>
 
               {/* Copy & Dialog Controls */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 {copyFeedback && (
-                  <span style={{ color: '#4ade80', fontSize: '0.76rem', fontWeight: 700 }}>{copyFeedback}</span>
+                  <span style={{ color: '#4ade80', fontSize: '0.74rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{copyFeedback}</span>
                 )}
                 <button
                   type="button"
                   disabled={!combinedOutputText}
                   onClick={() => copyTextToClipboard(combinedOutputText, 'Copied Full Output!')}
+                  title="Copy Full Output to Clipboard"
                   style={{
-                    padding: '4px 10px',
+                    padding: isUltraCompact ? '4px 6px' : isCompact ? '4px 8px' : '4px 10px',
                     borderRadius: '5px',
                     border: '1px solid rgba(56, 189, 248, 0.45)',
                     backgroundColor: 'rgba(2, 132, 199, 0.25)',
                     color: '#7dd3fc',
                     fontWeight: 700,
-                    fontSize: '0.76rem',
+                    fontSize: isUltraCompact ? '0.72rem' : '0.76rem',
                     cursor: combinedOutputText ? 'pointer' : 'not-allowed',
                     opacity: combinedOutputText ? 1 : 0.45,
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  📋 Copy Output
+                  {isUltraCompact ? '📋' : isCompact ? '📋 Output' : '📋 Copy Output'}
                 </button>
                 <button
                   type="button"
                   disabled={!combinedOutputText}
                   onClick={() => copyTextToClipboard(combinedOutputText.trim(), 'Copied Trimmed!')}
+                  title="Copy Trimmed Output to Clipboard"
                   style={{
-                    padding: '4px 9px',
+                    padding: isUltraCompact ? '4px 6px' : isCompact ? '4px 8px' : '4px 9px',
                     borderRadius: '5px',
                     border: '1px solid rgba(148, 163, 184, 0.28)',
                     backgroundColor: '#1e293b',
                     color: '#cbd5e1',
-                    fontSize: '0.75rem',
+                    fontSize: isUltraCompact ? '0.72rem' : '0.75rem',
                     cursor: combinedOutputText ? 'pointer' : 'not-allowed',
                     opacity: combinedOutputText ? 1 : 0.45,
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  📋 Copy Trimmed
+                  {isUltraCompact ? '✂️' : isCompact ? '✂️ Trim' : '📋 Copy Trimmed'}
                 </button>
                 <button
                   type="button"
@@ -2896,51 +3235,57 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     setResultFilterQuery('');
                     setResultDialogOpen(true);
                   }}
+                  title="Open Dedicated Result Inspector Dialog"
                   style={{
-                    padding: '4px 10px',
+                    padding: isUltraCompact ? '4px 6px' : isCompact ? '4px 8px' : '4px 10px',
                     borderRadius: '5px',
                     border: '1px solid rgba(168, 85, 247, 0.45)',
                     backgroundColor: 'rgba(147, 51, 234, 0.22)',
                     color: '#d8b4fe',
                     fontWeight: 700,
-                    fontSize: '0.75rem',
+                    fontSize: isUltraCompact ? '0.72rem' : '0.75rem',
                     cursor: currentResult ? 'pointer' : 'not-allowed',
                     opacity: currentResult ? '1' : 0.45,
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  🔍 Result Dialog
+                  {isUltraCompact ? '🔍' : isCompact ? '🔍 Dialog' : '🔍 Result Dialog'}
                 </button>
                 <button
                   type="button"
                   disabled={!currentResult}
                   onClick={handleSaveOutputToFile}
+                  title="Save Output to File"
                   style={{
-                    padding: '4px 9px',
+                    padding: isUltraCompact ? '4px 6px' : isCompact ? '4px 8px' : '4px 9px',
                     borderRadius: '5px',
                     border: '1px solid rgba(148, 163, 184, 0.28)',
                     backgroundColor: '#1e293b',
                     color: '#cbd5e1',
-                    fontSize: '0.75rem',
+                    fontSize: isUltraCompact ? '0.72rem' : '0.75rem',
                     cursor: currentResult ? 'pointer' : 'not-allowed',
                     opacity: currentResult ? 1 : 0.45,
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  💾 Save Output
+                  {isUltraCompact ? '💾' : isCompact ? '💾 Save' : '💾 Save Output'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setCurrentResult(null)}
+                  title="Clear Output Console"
                   style={{
-                    padding: '4px 8px',
+                    padding: isUltraCompact ? '4px 6px' : '4px 8px',
                     borderRadius: '5px',
                     border: '1px solid rgba(148, 163, 184, 0.2)',
                     backgroundColor: 'transparent',
                     color: '#94a3b8',
-                    fontSize: '0.75rem',
+                    fontSize: isUltraCompact ? '0.72rem' : '0.75rem',
                     cursor: 'pointer',
+                    whiteSpace: 'nowrap',
                   }}
                 >
-                  🧹 Clear
+                  {isUltraCompact ? '🧹' : '🧹 Clear'}
                 </button>
               </div>
             </div>
@@ -3217,6 +3562,65 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             <span>📥 Paste</span>
             <span style={{ color: '#64748b', fontSize: '0.72rem' }}>Ctrl+V</span>
           </div>
+
+          {/* Move to Folder in Context Menu */}
+          {selectedScriptIds.size > 0 && (
+            <>
+              <div style={{ height: '1px', backgroundColor: 'rgba(148, 163, 184, 0.16)', margin: '4px 0' }} />
+              <div
+                style={{
+                  padding: '3px 10px',
+                  fontSize: '0.68rem',
+                  color: '#94a3b8',
+                  fontWeight: 700,
+                  letterSpacing: '0.3px',
+                }}
+              >
+                MOVE {selectedScriptIds.size > 1 ? `(${selectedScriptIds.size}) ` : ''}TO:
+              </div>
+              <div
+                onClick={() => {
+                  setTreeContextMenu(null);
+                  handleMoveScriptsToFolder(Array.from(selectedScriptIds), null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '5px 10px 5px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  color: '#cbd5e1',
+                  fontSize: '0.75rem',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.15)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+              >
+                <span>📁 Root / Top-level</span>
+              </div>
+              {folders.map((f) => (
+                <div
+                  key={f.id}
+                  onClick={() => {
+                    setTreeContextMenu(null);
+                    handleMoveScriptsToFolder(Array.from(selectedScriptIds), f.id);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '5px 10px 5px 16px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    color: '#fcd34d',
+                    fontSize: '0.75rem',
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'rgba(56, 189, 248, 0.15)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                >
+                  <span>📁 {f.name}</span>
+                </div>
+              ))}
+            </>
+          )}
 
           <div style={{ height: '1px', backgroundColor: 'rgba(148, 163, 184, 0.16)', margin: '4px 0' }} />
 
