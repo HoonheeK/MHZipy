@@ -442,6 +442,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [copyFeedback, setCopyFeedback] = useState<string>('');
   const [saveFeedback, setSaveFeedback] = useState<string>('');
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
+  const [isReady, setIsReady] = useState<boolean>(runnerMode ? true : false);
 
   // Responsive layout state to shrink buttons and labels when width is constrained
   const [rightPaneWidth, setRightPaneWidth] = useState<number>(800);
@@ -809,28 +810,6 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     }
   }, [runnerMode, runId, executePowerShellCode]);
 
-  // Studio Mode Initialization
-  useEffect(() => {
-    if (runnerMode) return;
-    try {
-      const raw = localStorage.getItem('mhz_ps_initial_context');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.workingDir && parsed.workingDir !== 'My PC') {
-          setWorkingDir(parsed.workingDir);
-        }
-        if (Array.isArray(parsed.selectedFiles)) {
-          setSelectedFiles(parsed.selectedFiles);
-        }
-        if (parsed.scriptFilePath) {
-          loadExternalPs1File(parsed.scriptFilePath);
-        }
-      } else if (initialScriptFilePath) {
-        loadExternalPs1File(initialScriptFilePath);
-      }
-    } catch {}
-  }, [runnerMode, initialScriptFilePath]);
-
   // Listen for live context updates & runner window completions in Studio mode
   useEffect(() => {
     if (runnerMode) return;
@@ -874,139 +853,238 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     };
   }, [runnerMode, persistData]);
 
-  // Load saved folders, snippets & run history from appConfigDir/ps_manager.json
+  // Unified Studio Mode Initialization (Single-source load to prevent screen overwrite/flicker)
   useEffect(() => {
     if (runnerMode) return;
-    const loadData = async () => {
+
+    let isMounted = true;
+
+    const initializeStudio = async () => {
       try {
-        const dir = await appConfigDir();
-        const filePath = await join(dir, 'ps_manager.json');
-        if (await exists(filePath)) {
-          const text = await readTextFile(filePath);
-          const data = JSON.parse(text);
+        // 1. Read initial context (workingDir, selectedFiles, scriptFilePath)
+        let initWd = initialWorkingDir;
+        let initFiles: string[] = [];
+        let initScriptPath = initialScriptFilePath;
 
-          let loadedFolders: PowerShellFolder[] = Array.isArray(data.folders)
-            ? data.folders
-            : [...DEFAULT_FOLDERS];
-
-          let loadedSnippets: PowerShellSnippet[] =
-            Array.isArray(data.snippets) && data.snippets.length > 0
-              ? data.snippets
-              : [...DEFAULT_SNIPPETS];
-
-          // Migrate legacy category-based snippets to folder parentId if needed
-          const folderByName = new Map<string, string>();
-          for (const f of loadedFolders) {
-            folderByName.set(f.name.toLowerCase(), f.id);
+        try {
+          const raw = localStorage.getItem('mhz_ps_initial_context');
+          if (raw) {
+            localStorage.removeItem('mhz_ps_initial_context');
+            const parsed = JSON.parse(raw);
+            if (parsed.workingDir && parsed.workingDir !== 'My PC') {
+              initWd = parsed.workingDir;
+            }
+            if (Array.isArray(parsed.selectedFiles)) {
+              initFiles = parsed.selectedFiles;
+            }
+            if (parsed.scriptFilePath) {
+              initScriptPath = parsed.scriptFilePath;
+            }
           }
+        } catch {}
 
+        if (initWd && initWd !== 'My PC') {
+          setWorkingDir(initWd);
+        }
+        if (initFiles.length > 0) {
+          setSelectedFiles(initFiles);
+        }
+
+        // 2. Load ps_manager.json from appConfigDir
+        let loadedFolders: PowerShellFolder[] = [...DEFAULT_FOLDERS];
+        let loadedSnippets: PowerShellSnippet[] = [...DEFAULT_SNIPPETS];
+        let loadedHistory: PowerShellRunRecord[] = [];
+
+        try {
+          const dir = await appConfigDir();
+          const filePath = await join(dir, 'ps_manager.json');
+          if (await exists(filePath)) {
+            const text = await readTextFile(filePath);
+            const data = JSON.parse(text);
+
+            if (Array.isArray(data.folders) && data.folders.length > 0) {
+              loadedFolders = data.folders;
+            }
+            if (Array.isArray(data.snippets) && data.snippets.length > 0) {
+              loadedSnippets = data.snippets;
+            }
+            if (Array.isArray(data.history)) {
+              loadedHistory = data.history;
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to read ps_manager.json:', e);
+        }
+
+        // Migrate legacy category-based snippets to folder parentId if needed
+        const folderByName = new Map<string, string>();
+        for (const f of loadedFolders) {
+          folderByName.set(f.name.toLowerCase(), f.id);
+        }
+
+        loadedSnippets = loadedSnippets.map((s) => {
+          if (s.parentId !== undefined) return s;
+          const cat = (s.category || '').trim();
+          if (!cat) return { ...s, parentId: null };
+          const existingFolderId = folderByName.get(cat.toLowerCase());
+          if (existingFolderId) {
+            return { ...s, parentId: existingFolderId };
+          }
+          const newFolderId = `folder_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+          loadedFolders.push({ id: newFolderId, name: cat, parentId: null });
+          folderByName.set(cat.toLowerCase(), newFolderId);
+          return { ...s, parentId: newFolderId };
+        });
+
+        // Migrate old multi-folder defaults into single 'folder_default' ('Default')
+        const LEGACY_DEFAULT_FOLDER_IDS = new Set([
+          'folder_files',
+          'folder_office',
+          'folder_security',
+          'folder_analytics',
+          'folder_dev_git',
+          'folder_system',
+        ]);
+
+        const hasLegacy = loadedFolders.some((f) => LEGACY_DEFAULT_FOLDER_IDS.has(f.id));
+        if (hasLegacy) {
+          if (!loadedFolders.some((f) => f.id === 'folder_default')) {
+            loadedFolders.push({ id: 'folder_default', name: 'Default', parentId: null });
+          }
           loadedSnippets = loadedSnippets.map((s) => {
-            if (s.parentId !== undefined) return s;
-            const cat = (s.category || '').trim();
-            if (!cat) return { ...s, parentId: null };
-            const existingFolderId = folderByName.get(cat.toLowerCase());
-            if (existingFolderId) {
-              return { ...s, parentId: existingFolderId };
+            if (s.parentId && LEGACY_DEFAULT_FOLDER_IDS.has(s.parentId)) {
+              return { ...s, parentId: 'folder_default' };
             }
-            const newFolderId = `folder_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-            loadedFolders.push({ id: newFolderId, name: cat, parentId: null });
-            folderByName.set(cat.toLowerCase(), newFolderId);
-            return { ...s, parentId: newFolderId };
+            return s;
           });
+          loadedFolders = loadedFolders.filter((f) => !LEGACY_DEFAULT_FOLDER_IDS.has(f.id));
+        }
 
-          // Migrate old multi-folder defaults (Files, Security, Analytics, Dev & Git, System, Office)
-          // into the single clean 'folder_default' ('Default')
-          const LEGACY_DEFAULT_FOLDER_IDS = new Set([
-            'folder_files',
-            'folder_office',
-            'folder_security',
-            'folder_analytics',
-            'folder_dev_git',
-            'folder_system',
-          ]);
-
-          const hasLegacy = loadedFolders.some((f) => LEGACY_DEFAULT_FOLDER_IDS.has(f.id));
-          if (hasLegacy) {
-            if (!loadedFolders.some((f) => f.id === 'folder_default')) {
-              loadedFolders.push({ id: 'folder_default', name: 'Default', parentId: null });
-            }
-            loadedSnippets = loadedSnippets.map((s) => {
-              if (s.parentId && LEGACY_DEFAULT_FOLDER_IDS.has(s.parentId)) {
-                return { ...s, parentId: 'folder_default' };
-              }
-              return s;
-            });
-            loadedFolders = loadedFolders.filter((f) => !LEGACY_DEFAULT_FOLDER_IDS.has(f.id));
-          }
-
-          // Ensure DEFAULT_FOLDERS ('Default') is present
-          for (const defFolder of DEFAULT_FOLDERS) {
-            if (!loadedFolders.some((f) => f.id === defFolder.id)) {
-              loadedFolders.push(defFolder);
-            }
-          }
-
-          // Ensure new built-in snippets are present if missing
-          for (const defSnippet of DEFAULT_SNIPPETS) {
-            if (!loadedSnippets.some((s) => s.id === defSnippet.id)) {
-              loadedSnippets.push(defSnippet);
-            }
-          }
-
-          // Sanitize snippets to ensure 'code' is always a valid string
-          // (fixes crashes when code was accidentally stored as an object or undefined)
-          loadedSnippets = loadedSnippets.map((s) => {
-            let cleanCode = s.code;
-            if (typeof cleanCode !== 'string') {
-              if (cleanCode && typeof cleanCode === 'object' && 'content' in (cleanCode as any)) {
-                cleanCode = (cleanCode as any).content || '';
-              } else {
-                cleanCode = String(cleanCode || '');
-              }
-            }
-            return {
-              ...s,
-              title: typeof s.title === 'string' ? s.title : String(s.title || 'Untitled Script'),
-              description: typeof s.description === 'string' ? s.description : String(s.description || ''),
-              code: cleanCode,
-            };
-          });
-
-          setFolders(loadedFolders);
-          setExpandedFolderIds(new Set(loadedFolders.map((f) => f.id)));
-          setSnippets(loadedSnippets);
-
-          if (loadedSnippets.length > 0) {
-            const first = loadedSnippets[0];
-            setSelectedSnippetId(first.id);
-            setSelectedScriptIds(new Set([first.id]));
-            setAnchorItemId(first.id);
-            setFocusedItemId(first.id);
-            setActiveFolderId(first.parentId ?? null);
-            setTitle(first.title);
-            setDescription(first.description || '');
-            setCode(first.code || '');
-            setScriptType(first.scriptType || 'auto');
-            setSnippetFolderId(first.parentId ?? null);
-          }
-
-          if (Array.isArray(data.history)) {
-            setHistory(data.history);
-            if (data.history.length > 0) {
-              setCurrentResult(data.history[0]);
-            }
+        // Ensure DEFAULT_FOLDERS ('Default') is present
+        for (const defFolder of DEFAULT_FOLDERS) {
+          if (!loadedFolders.some((f) => f.id === defFolder.id)) {
+            loadedFolders.push(defFolder);
           }
         }
-      } catch (err) {
-        console.warn('Failed to load ps_manager.json:', err);
-      } finally {
+
+        // Ensure built-in snippets are present if missing
+        for (const defSnippet of DEFAULT_SNIPPETS) {
+          if (!loadedSnippets.some((s) => s.id === defSnippet.id)) {
+            loadedSnippets.push(defSnippet);
+          }
+        }
+
+        // Sanitize code string
+        loadedSnippets = loadedSnippets.map((s) => {
+          let cleanCode = s.code;
+          if (typeof cleanCode !== 'string') {
+            if (cleanCode && typeof cleanCode === 'object' && 'content' in (cleanCode as any)) {
+              cleanCode = (cleanCode as any).content || '';
+            } else {
+              cleanCode = String(cleanCode || '');
+            }
+          }
+          return {
+            ...s,
+            title: typeof s.title === 'string' ? s.title : String(s.title || 'Untitled Script'),
+            description: typeof s.description === 'string' ? s.description : String(s.description || ''),
+            code: cleanCode,
+          };
+        });
+
+        // 3. Handle external scriptFilePath if provided at launch
+        let activeSnippet: PowerShellSnippet | null = null;
+        if (initScriptPath) {
+          try {
+            const res = await invoke<{ content: string; encoding: string } | string>(
+              'read_text_file_content',
+              { path: initScriptPath }
+            );
+            const content = typeof res === 'string' ? res : (res?.content ?? '');
+            const fileName = initScriptPath.split(/[\\/]/).pop() || 'Script.ps1';
+            const parentDir = initScriptPath.replace(/[\\/][^\\/]+$/, '');
+            if (parentDir) setWorkingDir(parentDir);
+
+            const existing = loadedSnippets.find(
+              (s) => s.description === `Imported from ${initScriptPath}` || s.title === fileName.replace(/\.ps1$/i, '')
+            );
+            if (existing) {
+              activeSnippet = existing;
+            } else {
+              const importedSnippet: PowerShellSnippet = {
+                id: `ps_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                title: fileName.replace(/\.ps1$/i, ''),
+                category: 'Imported',
+                parentId: 'folder_default',
+                description: `Imported from ${initScriptPath}`,
+                code: content,
+                updatedAt: Date.now(),
+              };
+              loadedSnippets = [importedSnippet, ...loadedSnippets];
+              activeSnippet = importedSnippet;
+            }
+          } catch (err) {
+            console.error('Failed to read external launch script:', err);
+          }
+        }
+
+        if (!activeSnippet && loadedSnippets.length > 0) {
+          const lastActiveId = localStorage.getItem('mhz_ps_last_active_id');
+          const foundLast = lastActiveId ? loadedSnippets.find((s) => s.id === lastActiveId) : null;
+          activeSnippet = foundLast || loadedSnippets[0];
+        }
+
+        if (!isMounted) return;
+
+        // 4. Commit all states together atomically
+        foldersRef.current = loadedFolders;
+        snippetsRef.current = loadedSnippets;
+        historyRef.current = loadedHistory;
         storageLoadedRef.current = true;
+
+        setFolders(loadedFolders);
+        setExpandedFolderIds(new Set(loadedFolders.map((f) => f.id)));
+        setSnippets(loadedSnippets);
+        setHistory(loadedHistory);
+        if (loadedHistory.length > 0) {
+          setCurrentResult(loadedHistory[0]);
+        }
+
+        if (activeSnippet) {
+          setSelectedSnippetId(activeSnippet.id);
+          setSelectedScriptIds(new Set([activeSnippet.id]));
+          setAnchorItemId(activeSnippet.id);
+          setFocusedItemId(activeSnippet.id);
+          setActiveFolderId(activeSnippet.parentId ?? null);
+          setTitle(activeSnippet.title);
+          setDescription(activeSnippet.description || '');
+          setCode(activeSnippet.code || '');
+          setScriptType(activeSnippet.scriptType || 'auto');
+          setSnippetFolderId(activeSnippet.parentId ?? null);
+        }
+
+        setIsReady(true);
+
+        if (initScriptPath && activeSnippet) {
+          persistData(loadedFolders, loadedSnippets, loadedHistory);
+        }
+      } catch (err) {
+        console.error('Initialization error in Studio mode:', err);
+        if (isMounted) setIsReady(true);
       }
     };
-    loadData();
-  }, [runnerMode]);
+
+    initializeStudio();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [runnerMode, initialWorkingDir, initialScriptFilePath, persistData]);
 
   const activateSnippetInEditor = (item: PowerShellSnippet) => {
+    try {
+      localStorage.setItem('mhz_ps_last_active_id', item.id);
+    } catch {}
     setSelectedSnippetId(item.id);
     setActiveFolderId(item.parentId ?? null);
     setTitle(typeof item.title === 'string' ? item.title : String(item.title || ''));
@@ -1733,6 +1811,31 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       setIsMaximized(max);
     } catch {}
   };
+
+  if (!isReady && !runnerMode) {
+    return (
+      <div
+        style={{
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: '#020617',
+          color: '#38bdf8',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontFamily: 'Segoe UI, system-ui, sans-serif',
+          gap: '12px',
+          userSelect: 'none',
+        }}
+      >
+        <div style={{ fontSize: '1.8rem' }}>⚡</div>
+        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#94a3b8' }}>
+          Loading PowerShell Studio...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

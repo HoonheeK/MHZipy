@@ -3866,7 +3866,6 @@ async fn run_powershell_script(
     selected_files: Vec<String>,
 ) -> Result<PowerShellRunResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
         use std::process::Command;
         use std::time::Instant;
 
@@ -3889,20 +3888,56 @@ async fn run_powershell_script(
 
         let selected_json = serde_json::to_string(&selected_files).unwrap_or_else(|_| "[]".to_string());
 
+        let selected_files_ps = if selected_files.is_empty() {
+            "@()".to_string()
+        } else {
+            let items: Vec<String> = selected_files
+                .iter()
+                .map(|f| format!("'{}'", f.replace('\'', "''")))
+                .collect();
+            format!("@({})", items.join(", "))
+        };
+
+        // Construct complete script with UTF-8 encoding configuration, $CurrentDir and $SelectedFiles
         let wrapped_script = format!(
             "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\r\n\
              $OutputEncoding = [System.Text.Encoding]::UTF8\r\n\
-             $CurrentDir = $env:MHZ_CURRENT_DIR\r\n\
-             $SelectedFiles = if ($env:MHZ_SELECTED_FILES_JSON) {{ @(ConvertFrom-Json $env:MHZ_SELECTED_FILES_JSON) }} else {{ @() }}\r\n\
+             $CurrentDir = '{}'\r\n\
+             $SelectedFiles = {}\r\n\
              {}\r\n",
+            effective_wd.replace('\'', "''"),
+            selected_files_ps,
             code
         );
 
-        let utf16_bytes: Vec<u8> = wrapped_script
-            .encode_utf16()
-            .flat_map(|u| u.to_le_bytes())
-            .collect();
-        let encoded_cmd = BASE64.encode(&utf16_bytes);
+        // Execute via a temporary .ps1 script file with UTF-8 BOM to bypass Windows CreateProcess
+        // command line length limitation (32,767 chars, error 206) and support scripts of arbitrary length.
+        let temp_filename = format!(
+            "mhz_ps_run_{}_{}.ps1",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let temp_file_path = std::env::temp_dir().join(temp_filename);
+
+        let mut file_bytes = Vec::with_capacity(3 + wrapped_script.len());
+        file_bytes.extend_from_slice(b"\xEF\xBB\xBF"); // UTF-8 BOM for Windows PowerShell 5.1 compatibility
+        file_bytes.extend_from_slice(wrapped_script.as_bytes());
+
+        if let Err(e) = std::fs::write(&temp_file_path, &file_bytes) {
+            return Err(format!("Failed to create temporary script file: {}", e));
+        }
+
+        // RAII guard ensures temporary .ps1 file is deleted on function exit
+        struct TempFileGuard<'a>(&'a Path);
+        impl<'a> Drop for TempFileGuard<'a> {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(self.0);
+            }
+        }
+        let _guard = TempFileGuard(&temp_file_path);
 
         let start = Instant::now();
 
@@ -3914,14 +3949,16 @@ async fn run_powershell_script(
                 "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
-                "-EncodedCommand",
-                &encoded_cmd,
+                "-File",
             ]);
+            cmd.arg(&temp_file_path);
             if let Some(ref wd) = valid_wd {
                 cmd.current_dir(wd);
             }
             cmd.env("MHZ_CURRENT_DIR", &effective_wd);
-            cmd.env("MHZ_SELECTED_FILES_JSON", &selected_json);
+            if selected_json.len() < 30_000 {
+                cmd.env("MHZ_SELECTED_FILES_JSON", &selected_json);
+            }
             #[cfg(target_os = "windows")]
             {
                 use std::os::windows::process::CommandExt;
