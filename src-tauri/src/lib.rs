@@ -3857,6 +3857,55 @@ struct PowerShellRunResult {
     shell_used: String,
 }
 
+/// Decodes PowerShell's internal CLIXML-formatted error/warning stream into clean, human-readable text.
+fn clean_powershell_stderr(raw_stderr: &str) -> String {
+    let trimmed = raw_stderr.trim();
+    if !trimmed.starts_with("#< CLIXML") {
+        return raw_stderr.to_string();
+    }
+
+    // Extract text chunks from <S S="...">...</S> tags
+    let mut clean_text = String::new();
+    let mut rest = trimmed;
+
+    while let Some(start_idx) = rest.find("<S") {
+        let tag_end = match rest[start_idx..].find('>') {
+            Some(i) => start_idx + i,
+            None => break,
+        };
+        let close_tag = match rest[tag_end..].find("</S>") {
+            Some(i) => tag_end + i,
+            None => break,
+        };
+
+        let chunk = &rest[tag_end + 1..close_tag];
+        clean_text.push_str(chunk);
+
+        rest = &rest[close_tag + 4..];
+    }
+
+    if clean_text.is_empty() {
+        return raw_stderr.to_string();
+    }
+
+    // Decode hex escape sequences commonly used by CLIXML:
+    // _x000D_ -> \r, _x000A_ -> \n, _x0009_ -> \t, _x0020_ -> ' ', etc.
+    // Also decode standard XML entities
+    let decoded = clean_text
+        .replace("_x000D__x000A_", "\r\n")
+        .replace("_x000A_", "\n")
+        .replace("_x000D_", "\r")
+        .replace("_x0009_", "\t")
+        .replace("_x0020_", " ")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'");
+
+    decoded.trim_end().to_string()
+}
+
 /// PowerShell 스크립트를 실행하고 stdout/stderr 결과 및 소요 시간을 반환합니다.
 /// 스크립트 내에서 `$CurrentDir` (현재 작업 폴더) 및 `$SelectedFiles` (선택된 파일 경로 배열) 변수를 바로 사용할 수 있습니다.
 #[tauri::command]
@@ -3949,6 +3998,10 @@ async fn run_powershell_script(
                 "-NonInteractive",
                 "-ExecutionPolicy",
                 "Bypass",
+                "-InputFormat",
+                "None",
+                "-OutputFormat",
+                "Text",
                 "-File",
             ]);
             cmd.arg(&temp_file_path);
@@ -3977,7 +4030,8 @@ async fn run_powershell_script(
 
         let duration_ms = start.elapsed().as_millis() as u64;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let raw_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stderr = clean_powershell_stderr(&raw_stderr);
         let exit_code = output.status.code().unwrap_or(-1);
 
         Ok(PowerShellRunResult {

@@ -1792,7 +1792,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const combinedOutputText = useMemo(() => {
     if (!currentResult) return '';
     const out = currentResult.stdout || '';
-    const err = currentResult.stderr ? `${out ? '\n' : ''}[STDERR]\n${currentResult.stderr}` : '';
+    const streamLabel = currentResult.exitCode === 0 ? '[WARNING/NOTICE]' : '[STDERR]';
+    const err = currentResult.stderr ? `${out ? '\n' : ''}${streamLabel}\n${currentResult.stderr}` : '';
     return `${out}${err}`;
   }, [currentResult]);
 
@@ -3430,12 +3431,35 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                           marginTop: currentResult.stdout ? '10px' : 0,
                           padding: '8px 10px',
                           borderRadius: '6px',
-                          backgroundColor: 'rgba(127, 29, 29, 0.28)',
-                          border: '1px solid rgba(248, 113, 113, 0.35)',
-                          color: '#fca5a5',
+                          backgroundColor:
+                            currentResult.exitCode === 0
+                              ? 'rgba(245, 158, 11, 0.15)'
+                              : 'rgba(127, 29, 29, 0.28)',
+                          border:
+                            currentResult.exitCode === 0
+                              ? '1px solid rgba(245, 158, 11, 0.4)'
+                              : '1px solid rgba(248, 113, 113, 0.35)',
+                          color: currentResult.exitCode === 0 ? '#fcd34d' : '#fca5a5',
                         }}
                       >
-                        {currentResult.stderr}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            marginBottom: '4px',
+                            fontWeight: 700,
+                            fontSize: '0.74rem',
+                            color: currentResult.exitCode === 0 ? '#f59e0b' : '#f87171',
+                          }}
+                        >
+                          {currentResult.exitCode === 0
+                            ? '⚠️ Warnings / Diagnostic Stream (Exit 0)'
+                            : `❌ Error Stream (Exit ${currentResult.exitCode})`}
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', fontFamily: 'Consolas, monospace', fontSize: '0.78rem' }}>
+                          {currentResult.stderr}
+                        </div>
                       </div>
                     )}
                   </>
