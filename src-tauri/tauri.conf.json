@@ -43,6 +43,32 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "PDF Document",
+        "description": "Portable Document Format",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["md", "markdown", "mdown", "mkdn", "mdx", "txt", "text", "log"],
+        "name": "Markdown & Text Document",
+        "description": "Markdown and Text Documents",
+        "role": "Editor"
+      },
+      {
+        "ext": ["jpg", "jpeg", "png", "webp", "bmp", "ico", "tiff", "tif", "gif", "svg", "avif", "jfif"],
+        "name": "Image File",
+        "description": "Image Files",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["mp4", "mkv", "webm", "mov", "avi", "wmv", "flv", "m4v", "3gp", "ts", "asf", "rmvb", "mp3", "wav", "m4a", "flac", "ogg", "aac", "wma"],
+        "name": "Media File",
+        "description": "Audio and Video Files",
+        "role": "Viewer"
+      }
+    ],
     "windows": {
       "nsis": {
         "displayLanguageSelector": true,

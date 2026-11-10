@@ -1638,10 +1638,44 @@ fn prewarm_pdf_viewer(app: AppHandle) {
     });
 }
 
-/// CLI 인자 배열에서 PDF 경로 목록, 제목 옵션, autostart 플래그를 추출합니다.
-fn parse_cli_args(args: &[String], cwd: Option<&str>) -> (Vec<String>, Option<String>, bool) {
-    let mut pdf_paths = Vec::new();
-    let mut pdf_title: Option<String> = None;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliTargetKind {
+    Pdf,
+    Markdown,
+    Image,
+    Video,
+}
+
+#[derive(Debug, Clone)]
+pub struct CliFileTarget {
+    pub path: String,
+    pub kind: CliTargetKind,
+    pub title: Option<String>,
+}
+
+fn detect_cli_target_kind(path_str: &str) -> Option<CliTargetKind> {
+    let p = Path::new(path_str);
+    let ext = p.extension()?.to_str()?.to_lowercase();
+    match ext.as_str() {
+        "pdf" => Some(CliTargetKind::Pdf),
+        "md" | "markdown" | "mdown" | "mkdn" | "mdx" | "txt" | "text" | "log" => {
+            Some(CliTargetKind::Markdown)
+        }
+        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "ico" | "tiff" | "tif" | "gif" | "svg" | "avif" | "jfif" => {
+            Some(CliTargetKind::Image)
+        }
+        "mp4" | "mkv" | "webm" | "mov" | "avi" | "wmv" | "flv" | "m4v" | "3gp" | "ts" | "asf" | "rmvb"
+        | "mp3" | "wav" | "m4a" | "flac" | "ogg" | "aac" | "wma" => {
+            Some(CliTargetKind::Video)
+        }
+        _ => None,
+    }
+}
+
+/// CLI 인자 배열에서 대상 파일(PDF, MD, TXT, Image, Video 등) 목록과 autostart 플래그를 추출합니다.
+fn parse_cli_args(args: &[String], cwd: Option<&str>) -> (Vec<CliFileTarget>, bool) {
+    let mut targets = Vec::new();
+    let mut global_title: Option<String> = None;
     let mut is_autostart = false;
 
     let resolve_path = |raw: &str| -> String {
@@ -1667,30 +1701,78 @@ fn parse_cli_args(args: &[String], cwd: Option<&str>) -> (Vec<String>, Option<St
     let mut i = 1;
     while i < args.len() {
         let arg_trimmed = args[i].trim().trim_matches('"');
-        if arg_trimmed == "--pdf-viewer" && i + 1 < args.len() {
-            let resolved = resolve_path(&args[i + 1]);
-            if !resolved.is_empty() {
-                pdf_paths.push(resolved);
-            }
-            i += 1;
-        } else if arg_trimmed == "--pdf-title" && i + 1 < args.len() {
+        if (arg_trimmed == "--pdf-title" || arg_trimmed == "--title") && i + 1 < args.len() {
             let t = args[i + 1].trim().trim_matches('"').to_string();
             if !t.is_empty() {
-                pdf_title = Some(t);
+                global_title = Some(t);
             }
             i += 1;
         } else if arg_trimmed.eq_ignore_ascii_case("--autostart") {
             is_autostart = true;
-        } else if arg_trimmed.to_lowercase().ends_with(".pdf") {
+        } else if arg_trimmed == "--pdf-viewer" && i + 1 < args.len() {
+            let resolved = resolve_path(&args[i + 1]);
+            if !resolved.is_empty() {
+                targets.push(CliFileTarget {
+                    path: resolved,
+                    kind: CliTargetKind::Pdf,
+                    title: None,
+                });
+            }
+            i += 1;
+        } else if (arg_trimmed == "--md-editor" || arg_trimmed == "--markdown-editor") && i + 1 < args.len() {
+            let resolved = resolve_path(&args[i + 1]);
+            if !resolved.is_empty() {
+                targets.push(CliFileTarget {
+                    path: resolved,
+                    kind: CliTargetKind::Markdown,
+                    title: None,
+                });
+            }
+            i += 1;
+        } else if arg_trimmed == "--image-viewer" && i + 1 < args.len() {
+            let resolved = resolve_path(&args[i + 1]);
+            if !resolved.is_empty() {
+                targets.push(CliFileTarget {
+                    path: resolved,
+                    kind: CliTargetKind::Image,
+                    title: None,
+                });
+            }
+            i += 1;
+        } else if arg_trimmed == "--video-player" && i + 1 < args.len() {
+            let resolved = resolve_path(&args[i + 1]);
+            if !resolved.is_empty() {
+                targets.push(CliFileTarget {
+                    path: resolved,
+                    kind: CliTargetKind::Video,
+                    title: None,
+                });
+            }
+            i += 1;
+        } else if !arg_trimmed.starts_with('-') {
             let resolved = resolve_path(arg_trimmed);
             if !resolved.is_empty() {
-                pdf_paths.push(resolved);
+                if let Some(kind) = detect_cli_target_kind(&resolved) {
+                    targets.push(CliFileTarget {
+                        path: resolved,
+                        kind,
+                        title: None,
+                    });
+                }
             }
         }
         i += 1;
     }
 
-    (pdf_paths, pdf_title, is_autostart)
+    if let Some(title) = global_title {
+        for target in &mut targets {
+            if target.title.is_none() {
+                target.title = Some(title.clone());
+            }
+        }
+    }
+
+    (targets, is_autostart)
 }
 
 /// 이미 Tray에 상주 중인 MHZipy 인스턴스가 있으면 Tauri/WebView2를 초기화하기 전에
@@ -1858,6 +1940,268 @@ fn open_pdf_viewer(app: &AppHandle, pdf_path: &str, pdf_title: Option<&str>) {
         }
     });
 }
+
+fn sanitize_window_label(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn open_markdown_viewer(app: &AppHandle, file_path: &str, file_title: Option<&str>) {
+    let clean_path = file_path.trim().trim_matches('"').to_string();
+    if clean_path.is_empty() {
+        return;
+    }
+    let title = match file_title {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => Path::new(&clean_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let window_label = format!("md-editor-{}", sanitize_window_label(&clean_path));
+
+    if let Some(existing_win) = app.get_webview_window(&window_label) {
+        focus_webview_window(&existing_win);
+        return;
+    }
+
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let escaped_path = clean_path.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_title = title.replace('\\', "\\\\").replace('\'', "\\'");
+        let init_script = format!(
+            "window.__INITIAL_VIEW__ = 'markdown-editor'; window.__INITIAL_FILE_PATH__ = '{}'; window.__INITIAL_TITLE__ = '{}';",
+            escaped_path, escaped_title
+        );
+        let query = format!(
+            "index.html?view=markdown-editor&filePath={}&title={}",
+            urlencoding::encode(&clean_path),
+            urlencoding::encode(&title)
+        );
+        match tauri::WebviewWindowBuilder::new(
+            &app_clone,
+            &window_label,
+            tauri::WebviewUrl::App(std::path::PathBuf::from(query)),
+        )
+        .initialization_script(&init_script)
+        .title(format!("{} - MHZipy Markdown Editor", title))
+        .inner_size(1080.0, 760.0)
+        .min_inner_size(600.0, 400.0)
+        .decorations(false)
+        .visible(true)
+        .focused(true)
+        .build()
+        {
+            Ok(win) => {
+                focus_webview_window(&win);
+                println!("Markdown editor opened: {}", clean_path);
+            }
+            Err(e) => eprintln!("Failed to open Markdown Editor window: {}", e),
+        }
+    });
+}
+
+fn open_image_viewer(app: &AppHandle, file_path: &str, file_title: Option<&str>) {
+    let clean_path = file_path.trim().trim_matches('"').to_string();
+    if clean_path.is_empty() {
+        return;
+    }
+    let title = match file_title {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => Path::new(&clean_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let window_label = format!("image-viewer-{}", sanitize_window_label(&clean_path));
+
+    if let Some(existing_win) = app.get_webview_window(&window_label) {
+        focus_webview_window(&existing_win);
+        return;
+    }
+
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let escaped_path = clean_path.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_title = title.replace('\\', "\\\\").replace('\'', "\\'");
+        let init_script = format!(
+            "window.__INITIAL_VIEW__ = 'image-viewer'; window.__INITIAL_FILE_PATH__ = '{}'; window.__INITIAL_TITLE__ = '{}';",
+            escaped_path, escaped_title
+        );
+        let query = format!(
+            "index.html?view=image-viewer&filePath={}&title={}",
+            urlencoding::encode(&clean_path),
+            urlencoding::encode(&title)
+        );
+        match tauri::WebviewWindowBuilder::new(
+            &app_clone,
+            &window_label,
+            tauri::WebviewUrl::App(std::path::PathBuf::from(query)),
+        )
+        .initialization_script(&init_script)
+        .title(format!("{} - MHZipy Image Viewer", title))
+        .inner_size(1120.0, 820.0)
+        .min_inner_size(640.0, 480.0)
+        .decorations(false)
+        .visible(true)
+        .focused(true)
+        .build()
+        {
+            Ok(win) => {
+                focus_webview_window(&win);
+                println!("Image viewer opened: {}", clean_path);
+            }
+            Err(e) => eprintln!("Failed to open Image Viewer window: {}", e),
+        }
+    });
+}
+
+fn open_video_viewer(app: &AppHandle, file_path: &str, file_title: Option<&str>) {
+    let clean_path = file_path.trim().trim_matches('"').to_string();
+    if clean_path.is_empty() {
+        return;
+    }
+    let title = match file_title {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => Path::new(&clean_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+    };
+    let window_label = format!("video-player-{}", sanitize_window_label(&clean_path));
+
+    if let Some(existing_win) = app.get_webview_window(&window_label) {
+        focus_webview_window(&existing_win);
+        return;
+    }
+
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let escaped_path = clean_path.replace('\\', "\\\\").replace('\'', "\\'");
+        let escaped_title = title.replace('\\', "\\\\").replace('\'', "\\'");
+        let init_script = format!(
+            "window.__INITIAL_VIEW__ = 'video-player'; window.__INITIAL_FILE_PATH__ = '{}'; window.__INITIAL_TITLE__ = '{}';",
+            escaped_path, escaped_title
+        );
+        let query = format!(
+            "index.html?view=video-player&filePath={}&title={}",
+            urlencoding::encode(&clean_path),
+            urlencoding::encode(&title)
+        );
+        match tauri::WebviewWindowBuilder::new(
+            &app_clone,
+            &window_label,
+            tauri::WebviewUrl::App(std::path::PathBuf::from(query)),
+        )
+        .initialization_script(&init_script)
+        .title(format!("{} - MHZipy Video Player", title))
+        .inner_size(1060.0, 680.0)
+        .min_inner_size(540.0, 380.0)
+        .decorations(false)
+        .visible(true)
+        .focused(true)
+        .build()
+        {
+            Ok(win) => {
+                focus_webview_window(&win);
+                println!("Video player opened: {}", clean_path);
+            }
+            Err(e) => eprintln!("Failed to open Video Player window: {}", e),
+        }
+    });
+}
+
+fn open_cli_target_file(app: &AppHandle, target: &CliFileTarget) {
+    match target.kind {
+        CliTargetKind::Pdf => open_pdf_viewer(app, &target.path, target.title.as_deref()),
+        CliTargetKind::Markdown => open_markdown_viewer(app, &target.path, target.title.as_deref()),
+        CliTargetKind::Image => open_image_viewer(app, &target.path, target.title.as_deref()),
+        CliTargetKind::Video => open_video_viewer(app, &target.path, target.title.as_deref()),
+    }
+}
+
+/// Windows 탐색기의 '연결 프로그램' 및 파일 확장자 연결을 레지스트리에 자동 등록합니다.
+#[cfg(target_os = "windows")]
+fn register_windows_file_associations() {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let current_exe = match std::env::current_exe() {
+        Ok(exe) => exe.to_string_lossy().to_string(),
+        Err(_) => return,
+    };
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let classes = match hkcu.open_subkey_with_flags("Software\\Classes", KEY_ALL_ACCESS) {
+        Ok(k) => k,
+        Err(_) => match hkcu.create_subkey("Software\\Classes") {
+            Ok((k, _)) => k,
+            Err(_) => return,
+        },
+    };
+
+    let all_exts = [
+        // PDF
+        ".pdf",
+        // Markdown & Text
+        ".md", ".markdown", ".mdown", ".mkdn", ".mdx", ".txt", ".text", ".log",
+        // Images
+        ".jpg", ".jpeg", ".png", ".webp", ".bmp", ".ico", ".tiff", ".tif", ".gif", ".svg", ".avif", ".jfif",
+        // Media (Video & Audio)
+        ".mp4", ".mkv", ".webm", ".mov", ".avi", ".wmv", ".flv", ".m4v", ".3gp", ".ts", ".asf", ".rmvb",
+        ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".wma",
+    ];
+
+    let open_cmd = format!("\"{}\" \"%1\"", current_exe);
+
+    // 1. Applications\mhzipy.exe 등록
+    if let Ok((app_key, _)) = classes.create_subkey("Applications\\mhzipy.exe") {
+        let _ = app_key.set_value("FriendlyAppName", &"MHZipy");
+
+        if let Ok((cmd_key, _)) = classes.create_subkey("Applications\\mhzipy.exe\\shell\\open\\command") {
+            let _ = cmd_key.set_value("", &open_cmd);
+        }
+
+        if let Ok((supported_key, _)) = classes.create_subkey("Applications\\mhzipy.exe\\SupportedTypes") {
+            for ext in all_exts {
+                let _ = supported_key.set_value(ext, &"");
+            }
+        }
+    }
+
+    // 2. ProgID: MHZipy.AssocFile 등록
+    if let Ok((prog_key, _)) = classes.create_subkey("MHZipy.AssocFile") {
+        let _ = prog_key.set_value("", &"MHZipy Document");
+        let _ = prog_key.set_value("FriendlyTypeName", &"MHZipy Document");
+        if let Ok((cmd_key, _)) = classes.create_subkey("MHZipy.AssocFile\\shell\\open\\command") {
+            let _ = cmd_key.set_value("", &open_cmd);
+        }
+    }
+
+    // 3. 각 확장자의 OpenWithList 및 OpenWithProgids 에 등록
+    for ext in all_exts {
+        let open_with_list_path = format!("{}\\OpenWithList\\mhzipy.exe", ext);
+        let _ = classes.create_subkey(&open_with_list_path);
+
+        let open_with_progids_path = format!("{}\\OpenWithProgids", ext);
+        if let Ok((progids_key, _)) = classes.create_subkey(&open_with_progids_path) {
+            let _ = progids_key.set_value("MHZipy.AssocFile", &"");
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn register_windows_file_associations() {}
 
 /// PDF 문서에서 특정 페이지만 추출하여 새 PDF 파일로 저장
 #[tauri::command]
@@ -4058,14 +4402,14 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             println!("[single-instance] argv: {:?}, cwd: {}", argv, cwd);
 
-            let (pdf_paths, pdf_title, is_autostart) = parse_cli_args(&argv, Some(&cwd));
+            let (file_targets, is_autostart) = parse_cli_args(&argv, Some(&cwd));
 
-            if !pdf_paths.is_empty() {
-                for path in &pdf_paths {
-                    open_pdf_viewer(app, path, pdf_title.as_deref());
+            if !file_targets.is_empty() {
+                for target in &file_targets {
+                    open_cli_target_file(app, target);
                 }
             } else if !is_autostart {
-                // PDF가 아니면 기존 메인 윈도우를 보여줌
+                // 파일 타겟이 아니면 기존 메인 윈도우를 보여줌
                 if let Some(window) = app.get_webview_window("main") {
                     focus_webview_window(&window);
                 }
@@ -4091,14 +4435,17 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             allow_single_instance_uipi();
 
-            // CLI 인자 파싱 — PDF 파일 경로가 있으면 뷰어 모드로 진입
-            let args: Vec<String> = std::env::args().collect();
-            let (pdf_paths, pdf_title, is_autostart) = parse_cli_args(&args, None);
+            #[cfg(target_os = "windows")]
+            register_windows_file_associations();
 
-            // PDF 경로가 있으면 뷰어 윈도우 열기
-            if !pdf_paths.is_empty() {
-                for path in &pdf_paths {
-                    open_pdf_viewer(app.handle(), path, pdf_title.as_deref());
+            // CLI 인자 파싱 — 지원 파일 경로가 있으면 해당 전용 뷰어 모드로 진입
+            let args: Vec<String> = std::env::args().collect();
+            let (file_targets, is_autostart) = parse_cli_args(&args, None);
+
+            // 파일 타겟 경로가 있으면 해당 뷰어 윈도우 열기
+            if !file_targets.is_empty() {
+                for target in &file_targets {
+                    open_cli_target_file(app.handle(), target);
                 }
             } else {
                 // Tray 상주 상태에서 탐색기로 PDF 더블클릭 시 즉시 열리도록 대기 윈도우 예열
@@ -4108,8 +4455,8 @@ pub fn run() {
             // 항상 메인 윈도우와 Tray를 설정 (최초 실행 시)
             {
                 if let Some(main_window) = app.get_webview_window("main") {
-                    // PDF 파일을 직접 열어서 기동한 경우 메인 창은 띄우지 않고 Tray 상주 상태 유지
-                    if !is_autostart && pdf_paths.is_empty() {
+                    // 지원 파일을 직접 열어서 기동한 경우 메인 창은 띄우지 않고 Tray 상주 상태 유지
+                    if !is_autostart && file_targets.is_empty() {
                         let _ = main_window.show();
                     }
                 }
