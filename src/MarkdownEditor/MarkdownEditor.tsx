@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { emit } from '@tauri-apps/api/event';
-import { rename } from '@tauri-apps/plugin-fs';
+import { rename, writeFile, copyFile, exists } from '@tauri-apps/plugin-fs';
 import { marked } from 'marked';
 import {
   FileText,
@@ -22,7 +22,8 @@ import {
   Link as LinkIcon,
   Table,
   Minus,
-  Copy,
+  ClipboardCopy,
+  ClipboardCheck,
   WrapText,
   X,
   Square,
@@ -34,16 +35,18 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  ChevronUp,
   Maximize2,
   Minimize2,
   Folder,
   Edit3,
   Sparkles,
-  Sliders
+  Sliders,
+  ListTree
 } from 'lucide-react';
 import './MarkdownEditor.css';
 
-import { Block, BlockType, generateId, parseMarkdownToBlocks, serializeBlocksToMarkdown } from './markdownBlockUtils';
+import { Block, BlockType, generateId, parseMarkdownToBlocks, serializeBlocksToMarkdown, renderImageHtml } from './markdownBlockUtils';
 import { TreeEditableCell } from './TreeEditableCell';
 import {
   MdToTextRules,
@@ -68,7 +71,7 @@ interface MarkdownEditorProps {
  * Robust markdown renderer with GFM and formatting normalization.
  * Handles - **ABC**, **bold**, lists, and tables seamlessly.
  */
-const renderMarkdown = (text: string): string => {
+const renderMarkdown = (text: string, baseDir?: string): string => {
   if (!text || !text.trim()) return '';
   // 1. Normalize line endings (CRLF / CR -> LF) for Windows & textarea compatibility
   let normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -81,11 +84,22 @@ const renderMarkdown = (text: string): string => {
   // standard CommonMark/marked parser treats the preceding text as <h2> or <h1>.
   // Automatically insert a blank line so it renders properly as a paragraph + horizontal rule (<hr>).
   normalized = normalized.replace(/([^\n])\n\s*(-{3,}|\*{3,}|_{3,}|={3,})\s*(?=\n|$)/g, '$1\n\n$2');
+  let html = '';
   try {
-    return marked.parse(normalized, { breaks: true, gfm: true }) as string;
+    html = marked.parse(normalized, { breaks: true, gfm: true }) as string;
   } catch {
-    return marked.parse(normalized, { breaks: true, gfm: true }) as string;
+    html = marked.parse(normalized, { breaks: true, gfm: true }) as string;
   }
+  if (html.includes('<img')) {
+    html = html.replace(/<img\s+([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (_match, prefix, src, suffix) => {
+      const altMatch = (prefix + suffix).match(/alt=["']([^"']*)["']/i);
+      const titleMatch = (prefix + suffix).match(/title=["']([^"']*)["']/i);
+      const alt = altMatch ? altMatch[1] : '';
+      const title = titleMatch ? titleMatch[1] : '';
+      return renderImageHtml(src, alt, title, baseDir);
+    });
+  }
+  return html;
 };
 
 const isTextNonMarkdown = (path: string): boolean => {
@@ -118,6 +132,14 @@ export const FONT_SIZES = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 2
 export interface HistoryItem {
   content: string;
   blocks: Block[];
+}
+
+export interface TocItem {
+  id: string;
+  text: string;
+  level: number;
+  lineIndex?: number;
+  blockId?: string;
 }
 
 const isBlockStructuralChange = (prev: Block[], next: Block[]): boolean => {
@@ -157,7 +179,22 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
   const [encodingFilter, setEncodingFilter] = useState<string>('');
   const [isMaximized, setIsMaximized] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isTitlebarPeeking, setIsTitlebarPeeking] = useState<boolean>(false);
+  const titlebarHoverTimeoutRef = useRef<any>(null);
   const [fontSize, setFontSize] = useState<number>(13);
+  const [zoomLevel, setZoomLevel] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mhz_md_zoom_level');
+      if (saved) {
+        const val = parseFloat(saved);
+        if (!isNaN(val) && val >= 0.5 && val <= 2.5) return val;
+      }
+    } catch (e) {}
+    return 1.0;
+  });
+  const [showZoomHud, setShowZoomHud] = useState<boolean>(false);
+  const zoomHudTimeoutRef = useRef<any>(null);
+  const zoomSaveTimeoutRef = useRef<any>(null);
   const [wordWrap, setWordWrap] = useState<boolean>(true);
   const [splitRatio, setSplitRatio] = useState<number>(50); // percentage for editor
   const [isResizing, setIsResizing] = useState<boolean>(false);
@@ -176,6 +213,45 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
   // Text to MD Reverse Ingestion Modal & Rules
   const [ingestionModalOpen, setIngestionModalOpen] = useState<boolean>(false);
   const [reverseRules, setReverseRules] = useState<PatternRule[]>(() => loadStoredReverseRules());
+
+  // Table of Contents (TOC) state
+  const [showToc, setShowToc] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mhz_md_show_toc') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [tocFilter, setTocFilter] = useState<string>('');
+  const showTocRef = useRef<boolean>(showToc);
+  useEffect(() => {
+    showTocRef.current = showToc;
+    try {
+      localStorage.setItem('mhz_md_show_toc', showToc.toString());
+    } catch {}
+  }, [showToc]);
+
+  const isFullscreenRef = useRef<boolean>(false);
+  useEffect(() => {
+    isFullscreenRef.current = isFullscreen;
+  }, [isFullscreen]);
+
+  const modalsRef = useRef({
+    rulesModalOpen: false,
+    encodingModalOpen: false,
+    ingestionModalOpen: false,
+    showConfirmClose: false,
+    fileContextMenu: false,
+  });
+  useEffect(() => {
+    modalsRef.current = {
+      rulesModalOpen,
+      encodingModalOpen,
+      ingestionModalOpen,
+      showConfirmClose,
+      fileContextMenu: !!fileContextMenu,
+    };
+  }, [rulesModalOpen, encodingModalOpen, ingestionModalOpen, showConfirmClose, fileContextMenu]);
 
   // WYSIWYG Block/Cell Editing states (Inspired by TreeDiadev's EditableCell)
   const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdownToBlocks(''));
@@ -342,7 +418,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           setContent(res.content);
           setSavedContent(res.content);
           setCurrentEncoding(res.encoding || 'UTF-8');
-          const loadedBlocks = !isTextNonMarkdown(targetPath) ? parseMarkdownToBlocks(res.content) : [];
+          const currentDir = targetPath ? targetPath.replace(/[/\\][^/\\]+$/, '') : '';
+          const loadedBlocks = !isTextNonMarkdown(targetPath) ? parseMarkdownToBlocks(res.content, currentDir) : [];
           blocksRef.current = loadedBlocks;
           setBlocks(loadedBlocks);
           const initialSnapshot: HistoryItem = { content: res.content, blocks: loadedBlocks.map(b => ({ ...b })) };
@@ -426,27 +503,143 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
+  // Exit Fullscreen handler
+  const exitFullscreen = useCallback(async () => {
+    try {
+      const win = getCurrentWindow();
+      const isFs = await win.isFullscreen();
+      if (isFs) {
+        await win.setFullscreen(false);
+      }
+      setIsFullscreen(false);
+      isFullscreenRef.current = false;
+    } catch {
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
+        setIsFullscreen(false);
+        isFullscreenRef.current = false;
+      } catch (err) {
+        console.warn('Exit fullscreen failed:', err);
+      }
+    }
+  }, []);
+
   // Toggle Fullscreen handler
   const toggleFullscreen = useCallback(async () => {
     try {
       const win = getCurrentWindow();
       const cur = await win.isFullscreen();
-      await win.setFullscreen(!cur);
-      setIsFullscreen(!cur);
+      const next = !cur;
+      await win.setFullscreen(next);
+      setIsFullscreen(next);
+      isFullscreenRef.current = next;
+      if (next) {
+        (document.activeElement as HTMLElement)?.blur?.();
+      }
     } catch {
       try {
         if (!document.fullscreenElement) {
           await document.documentElement.requestFullscreen();
           setIsFullscreen(true);
+          isFullscreenRef.current = true;
+          (document.activeElement as HTMLElement)?.blur?.();
         } else {
           await document.exitFullscreen();
           setIsFullscreen(false);
+          isFullscreenRef.current = false;
         }
       } catch (err) {
         console.warn('Fullscreen toggle failed:', err);
       }
     }
   }, []);
+
+  // Auto-hide Titlebar peek detector for Zen Fullscreen mode (Alt+F)
+  useEffect(() => {
+    if (!isFullscreen) {
+      setIsTitlebarPeeking(false);
+      return;
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // If mouse is within top 20px of screen, peek titlebar
+      if (e.clientY <= 20) {
+        if (titlebarHoverTimeoutRef.current) {
+          clearTimeout(titlebarHoverTimeoutRef.current);
+          titlebarHoverTimeoutRef.current = null;
+        }
+        setIsTitlebarPeeking(true);
+      } else if (e.clientY > 50) {
+        // Mouse moved down towards document body
+        if (!titlebarHoverTimeoutRef.current) {
+          titlebarHoverTimeoutRef.current = setTimeout(() => {
+            setIsTitlebarPeeking(false);
+            titlebarHoverTimeoutRef.current = null;
+          }, 120);
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      if (titlebarHoverTimeoutRef.current) clearTimeout(titlebarHoverTimeoutRef.current);
+    };
+  }, [isFullscreen]);
+
+  // Helper to get active scroll container
+  const getScrollContainer = useCallback((): HTMLElement | null => {
+    if (viewMode === 'wysiwyg') {
+      const el = document.querySelector('.mhz-td-wrapper') as HTMLElement | null;
+      if (el) return el;
+    } else if (viewMode === 'preview') {
+      if (previewRef.current) return previewRef.current;
+    } else if (viewMode === 'edit') {
+      if (textareaRef.current) return textareaRef.current;
+    } else if (viewMode === 'split') {
+      if (document.activeElement === textareaRef.current) {
+        return textareaRef.current;
+      }
+      return previewRef.current || textareaRef.current;
+    }
+
+    return (
+      (document.querySelector('.mhz-td-wrapper') as HTMLElement | null) ||
+      previewRef.current ||
+      textareaRef.current ||
+      (document.querySelector('.mhz-md-body') as HTMLElement | null)
+    );
+  }, [viewMode]);
+
+  // Page flipping / smooth scrolling for keyboard navigation
+  const scrollPage = useCallback(
+    (direction: 'next' | 'prev' | 'top' | 'bottom', isFineStep = false) => {
+      const container = getScrollContainer();
+      if (!container) return;
+
+      if (direction === 'top') {
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      if (direction === 'bottom') {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        return;
+      }
+
+      // Page flip: 82% of visible height to maintain context continuity
+      const pageDistance = Math.max(Math.floor(container.clientHeight * 0.82), 240);
+      const stepDistance = isFineStep ? 140 : pageDistance;
+      const delta = direction === 'next' ? stepDistance : -stepDistance;
+
+      container.scrollBy({
+        top: delta,
+        behavior: 'smooth',
+      });
+    },
+    [getScrollContainer]
+  );
 
   // Update blocks from TreeEditableCell with structural history recording
   const handleUpdateBlocks = useCallback((newBlocks: Block[]) => {
@@ -545,6 +738,89 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     pushHistory({ content: newText, blocks: parsedBlocks.map(b => ({ ...b })) });
   }, [pushHistory, reverseRules]);
 
+  // Helper to find changed block between two block snapshots for Undo/Redo scroll
+  const findChangedBlockId = (before: Block[], after: Block[]): string | null => {
+    if (!after || !after.length) return null;
+    if (!before || !before.length) return after[0]?.id || null;
+
+    const maxLen = Math.max(before.length, after.length);
+    for (let i = 0; i < maxLen; i++) {
+      const b = before[i];
+      const a = after[i];
+      if (!b && a) return a.id;
+      if (b && !a) {
+        const targetIdx = Math.max(0, Math.min(i, after.length - 1));
+        return after[targetIdx]?.id || null;
+      }
+      if (b && a) {
+        if (
+          b.id !== a.id ||
+          b.html !== a.html ||
+          b.type !== a.type ||
+          b.checked !== a.checked ||
+          b.align !== a.align ||
+          b.indent !== a.indent ||
+          b.listType !== a.listType ||
+          b.isRaw !== a.isRaw
+        ) {
+          return a.id;
+        }
+      }
+    }
+
+    for (let i = 1; i <= maxLen; i++) {
+      const b = before[before.length - i];
+      const a = after[after.length - i];
+      if (!b && a) return a.id;
+      if (b && a && (b.id !== a.id || b.html !== a.html)) {
+        return a.id;
+      }
+    }
+
+    return after[0]?.id || null;
+  };
+
+  const findFirstDiffIndex = (str1: string, str2: string): number => {
+    const len = Math.min(str1.length, str2.length);
+    for (let i = 0; i < len; i++) {
+      if (str1[i] !== str2[i]) return i;
+    }
+    return len;
+  };
+
+  // Automatically scroll the view to the changed part on Undo/Redo
+  const scrollToChangedPart = useCallback((prev: HistoryItem, next: HistoryItem) => {
+    if (viewMode === 'wysiwyg') {
+      const changedBlockId = findChangedBlockId(prev.blocks, next.blocks);
+      if (changedBlockId) {
+        setTimeout(() => {
+          const el = document.querySelector(`.mhz-td-block-row[data-block-id="${changedBlockId}"]`) as HTMLElement | null;
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('mhz-td-undo-highlight');
+            setTimeout(() => {
+              el.classList.remove('mhz-td-undo-highlight');
+            }, 1200);
+          }
+        }, 60);
+      }
+    } else {
+      setTimeout(() => {
+        const ta = textareaRef.current;
+        if (ta) {
+          const diffIdx = findFirstDiffIndex(prev.content, next.content);
+          ta.focus();
+          ta.setSelectionRange(diffIdx, diffIdx);
+          const linesBefore = next.content.substring(0, diffIdx).split('\n');
+          const lineIndex = linesBefore.length - 1;
+          const approxLineHeight = fontSize * 1.6;
+          const targetScrollTop = Math.max(0, lineIndex * approxLineHeight - ta.clientHeight / 2);
+          ta.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+        }
+      }, 60);
+    }
+  }, [viewMode, fontSize]);
+
   // Undo / Redo
   const handleUndo = useCallback(() => {
     if (textDebounceTimerRef.current) {
@@ -555,6 +831,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     const curIdx = historyIndexRef.current;
     const curHist = historyRef.current;
     if (curIdx > 0 && curHist.length > 0) {
+      const prevTarget = curHist[curIdx];
       const newIdx = curIdx - 1;
       const target = curHist[newIdx];
       historyIndexRef.current = newIdx;
@@ -563,8 +840,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       const clonedBlocks = target.blocks.map(b => ({ ...b }));
       blocksRef.current = clonedBlocks;
       setBlocks(clonedBlocks);
+      scrollToChangedPart(prevTarget, target);
     }
-  }, []);
+  }, [scrollToChangedPart]);
 
   const handleRedo = useCallback(() => {
     if (textDebounceTimerRef.current) {
@@ -575,6 +853,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     const curIdx = historyIndexRef.current;
     const curHist = historyRef.current;
     if (curIdx < curHist.length - 1) {
+      const prevTarget = curHist[curIdx];
       const newIdx = curIdx + 1;
       const target = curHist[newIdx];
       historyIndexRef.current = newIdx;
@@ -583,8 +862,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       const clonedBlocks = target.blocks.map(b => ({ ...b }));
       blocksRef.current = clonedBlocks;
       setBlocks(clonedBlocks);
+      scrollToChangedPart(prevTarget, target);
     }
-  }, []);
+  }, [scrollToChangedPart]);
 
   // Save File
   const handleSave = useCallback(async () => {
@@ -621,7 +901,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         path: filePath,
         encoding: encName,
       });
-      const reopenedBlocks = parseMarkdownToBlocks(res.content);
+      const currentDir = filePath ? filePath.replace(/[/\\][^/\\]+$/, '') : '';
+      const reopenedBlocks = parseMarkdownToBlocks(res.content, currentDir);
       setContent(res.content);
       setSavedContent(res.content);
       setCurrentEncoding(res.encoding || encName);
@@ -717,7 +998,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     }, 0);
   }, [content, viewMode, updateContentWithHistory, pushHistory]);
 
-  // Clean Blank Lines ( 줄 제거 클렌징)
+  // Clean Blank Lines
   const handleCleanBlankLines = useCallback(() => {
     if (viewMode === 'wysiwyg') {
       const current = blocksRef.current;
@@ -764,6 +1045,182 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     }
   }, [viewMode, isTextFile, content, pushHistory, textRules]);
 
+  // Insert image markdown / HTML to document at current position
+  const insertImageToDocument = useCallback((relPath: string, _absPath: string, altText: string) => {
+    const currentDir = filePath ? filePath.replace(/[/\\][^/\\]+$/, '') : '';
+    const mdSnippet = `![${altText}](${relPath})`;
+
+    if (viewMode === 'wysiwyg') {
+      const current = blocksRef.current;
+      const focusedEl = document.querySelector('.mhz-td-block-row.focused, .mhz-td-block-row:focus-within');
+      const curFocusedId = focusedEl?.getAttribute('data-block-id');
+      const targetIdx = curFocusedId ? current.findIndex(b => b.id === curFocusedId) : -1;
+
+      const imgHtml = renderImageHtml(relPath, altText, '', currentDir);
+      const newBlock: Block = {
+        id: generateId(),
+        type: 'paragraph',
+        html: imgHtml,
+        indent: 0,
+      };
+
+      let nextBlocks: Block[];
+      if (targetIdx !== -1) {
+        const curBlock = current[targetIdx];
+        if (!curBlock.html || curBlock.html === '<br>' || curBlock.html.trim() === '') {
+          nextBlocks = [...current.slice(0, targetIdx), newBlock, ...current.slice(targetIdx + 1)];
+        } else {
+          nextBlocks = [...current.slice(0, targetIdx + 1), newBlock, ...current.slice(targetIdx + 1)];
+        }
+      } else {
+        nextBlocks = [...current, newBlock];
+      }
+
+      handleUpdateBlocks(nextBlocks);
+      setTimeout(() => {
+        const el = document.getElementById(`edit-${newBlock.id}`);
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
+    } else {
+      const ta = textareaRef.current;
+      if (ta) {
+        const start = ta.selectionStart;
+        const end = ta.selectionEnd;
+        const before = content.substring(0, start);
+        const after = content.substring(end);
+        const prefix = before.endsWith('\n') || before === '' ? '' : '\n';
+        const suffix = after.startsWith('\n') || after === '' ? '\n' : '\n';
+        const inserted = `${prefix}${mdSnippet}${suffix}`;
+        const newText = before + inserted + after;
+        updateContentWithHistory(newText);
+        setTimeout(() => {
+          ta.focus();
+          const newPos = start + inserted.length;
+          ta.setSelectionRange(newPos, newPos);
+        }, 10);
+      } else {
+        updateContentWithHistory(content + '\n' + mdSnippet + '\n');
+      }
+    }
+  }, [viewMode, content, handleUpdateBlocks, updateContentWithHistory]);
+
+  // Handle saving pasted/dropped image blob to file in the same directory as the markdown file
+  const handleProcessImageBlob = useCallback(async (blob: Blob, suggestedName?: string) => {
+    const currentDir = filePath ? filePath.replace(/[/\\][^/\\]+$/, '') : '';
+    if (!currentDir) {
+      setSaveNotification('No document folder found. Please save the markdown file first.');
+      setTimeout(() => setSaveNotification(null), 3000);
+      return;
+    }
+
+    try {
+      const now = new Date();
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      const dateStr = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+
+      let ext = 'png';
+      if (blob.type === 'image/jpeg') ext = 'jpg';
+      else if (blob.type === 'image/webp') ext = 'webp';
+      else if (blob.type === 'image/gif') ext = 'gif';
+      else if (blob.type === 'image/svg+xml') ext = 'svg';
+
+      const baseName = suggestedName ? suggestedName.replace(/\.[^.]+$/, '') : `image_${dateStr}`;
+      let targetFileName = `${baseName}.${ext}`;
+      let targetFilePath = `${currentDir}/${targetFileName}`;
+
+      let counter = 1;
+      while (await exists(targetFilePath)) {
+        targetFileName = `${baseName}_${counter}.${ext}`;
+        targetFilePath = `${currentDir}/${targetFileName}`;
+        counter++;
+      }
+
+      const buffer = await blob.arrayBuffer();
+      const uint8 = new Uint8Array(buffer);
+      await writeFile(targetFilePath, uint8);
+
+      const relPath = `./${targetFileName}`;
+      insertImageToDocument(relPath, targetFilePath, baseName);
+      setSaveNotification(`Image saved and linked: ${targetFileName}`);
+      setTimeout(() => setSaveNotification(null), 2500);
+    } catch (err) {
+      console.error('Failed to save image:', err);
+      setSaveNotification(`Failed to save image: ${String(err)}`);
+      setTimeout(() => setSaveNotification(null), 3000);
+    }
+  }, [filePath, insertImageToDocument]);
+
+  // Handle pasting local image file paths from clipboard (e.g. copied from Windows Explorer)
+  const handleProcessLocalImageFiles = useCallback(async (filePaths: string[]) => {
+    const currentDir = filePath ? filePath.replace(/[/\\][^/\\]+$/, '') : '';
+    if (!currentDir) {
+      setSaveNotification('No document folder found. Please save the markdown file first.');
+      setTimeout(() => setSaveNotification(null), 3000);
+      return;
+    }
+
+    for (const srcPath of filePaths) {
+      try {
+        const fileName = srcPath.replace(/^.*[/\\]/, '');
+        const targetFilePath = `${currentDir}/${fileName}`;
+
+        // If source is not already in the document's directory, copy it over!
+        if (srcPath.replace(/\\/g, '/').toLowerCase() !== targetFilePath.replace(/\\/g, '/').toLowerCase()) {
+          await copyFile(srcPath, targetFilePath);
+        }
+
+        const relPath = `./${fileName}`;
+        insertImageToDocument(relPath, targetFilePath, fileName.replace(/\.[^.]+$/, ''));
+        setSaveNotification(`Image linked: ${fileName}`);
+        setTimeout(() => setSaveNotification(null), 2500);
+      } catch (err) {
+        console.error('Failed to copy/link image file:', err);
+      }
+    }
+  }, [filePath, insertImageToDocument]);
+
+  // Global Paste Event Listener for images
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // 1. Check if clipboard has image bitmap data (screenshot, browser copy, etc.)
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.type.startsWith('image/')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const blob = item.getAsFile();
+            if (blob) {
+              await handleProcessImageBlob(blob);
+              return;
+            }
+          }
+        }
+      }
+
+      // 2. Check if clipboard contains copied files from Windows Explorer
+      try {
+        const clipboardFiles = await invoke<string[]>('get_files_from_clipboard');
+        if (clipboardFiles && clipboardFiles.length > 0) {
+          const imgPaths = clipboardFiles.filter(p => /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(p));
+          if (imgPaths.length > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            await handleProcessLocalImageFiles(imgPaths);
+            return;
+          }
+        }
+      } catch {}
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [handleProcessImageBlob, handleProcessLocalImageFiles]);
+
   // Heading dropdown state and handlers
   const [headingMenuOpen, setHeadingMenuOpen] = useState<boolean>(false);
   const headingMenuRef = useRef<HTMLDivElement>(null);
@@ -785,94 +1242,224 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     insertText('#'.repeat(level) + ' ', '', `Heading ${level}`);
   }, [insertText]);
 
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Copy all content helper (used in Titlebar copy button)
   const handleCopyAll = useCallback(() => {
     const textToCopy = viewMode === 'wysiwyg'
       ? (isTextFile ? convertBlocksToPlainText(blocks, textRules) : serializeBlocksToMarkdown(blocks))
       : content;
     navigator.clipboard.writeText(textToCopy);
+    setIsCopied(true);
+    if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+    copyFeedbackTimerRef.current = setTimeout(() => setIsCopied(false), 1600);
+
     setSaveNotification(isTextFile ? 'Text copied' : 'Markdown copied');
     setTimeout(() => setSaveNotification(null), 2000);
   }, [isTextFile, viewMode, blocks, content, textRules]);
 
-  // Global Keydown Handler (Save shortcut, Undo/Redo, Zoom shortcuts)
+  // Reset any global window zoom so Titlebar, Toolbar, and Statusbar stay 100% fixed
+  useEffect(() => {
+    try {
+      const webview = getCurrentWebviewWindow();
+      if (webview && typeof webview.setZoom === 'function') {
+        webview.setZoom(1.0);
+      }
+    } catch (e) {}
+    (document.documentElement.style as any).zoom = '';
+
+    return () => {
+      if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current);
+      if (zoomSaveTimeoutRef.current) clearTimeout(zoomSaveTimeoutRef.current);
+    };
+  }, []);
+
+  // MD File Content Zoom Control (Zooms only the document body)
+  const triggerZoomChange = useCallback((delta: number | 'reset') => {
+    setZoomLevel((prev) => {
+      let next: number;
+      if (delta === 'reset') {
+        next = 1.0;
+      } else {
+        next = Math.max(0.5, Math.min(2.5, Math.round((prev + delta) * 10) / 10));
+      }
+
+      setShowZoomHud(true);
+      if (zoomHudTimeoutRef.current) clearTimeout(zoomHudTimeoutRef.current);
+      zoomHudTimeoutRef.current = setTimeout(() => setShowZoomHud(false), 1600);
+
+      if (zoomSaveTimeoutRef.current) clearTimeout(zoomSaveTimeoutRef.current);
+      zoomSaveTimeoutRef.current = setTimeout(() => {
+        try {
+          localStorage.setItem('mhz_md_zoom_level', next.toString());
+        } catch (e) {}
+      }, 500);
+
+      return next;
+    });
+  }, []);
+
+  // Global Keydown Handler (Save shortcut, Undo/Redo, Zoom shortcuts, Alt+F Reading controls, Alt+T TOC)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+S / Cmd+S
+      // 1. Ctrl+S / Cmd+S (Save)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSave();
         return;
       }
-      // Ctrl+Z (Undo) - without Shift
+      // 2. Ctrl+Z (Undo) - without Shift
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         handleUndo();
         return;
       }
-      // Ctrl+Y or Ctrl+Shift+Z (Redo)
+      // 3. Ctrl+Y or Ctrl+Shift+Z (Redo)
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
         e.preventDefault();
         e.stopPropagation();
         handleRedo();
         return;
       }
-      // Alt+F (Toggle Fullscreen)
-      if (e.altKey && (e.key === 'f' || e.key === 'F')) {
+      // 4. Alt+F or F11 (Toggle Fullscreen / Reading Mode)
+      if ((e.altKey && (e.key === 'f' || e.key === 'F')) || e.key === 'F11') {
         e.preventDefault();
         e.stopPropagation();
         toggleFullscreen();
         return;
       }
-      // ESC (Exit Zen Fullscreen if active)
-      if (e.key === 'Escape' && isFullscreen) {
+      // Alt+T (Toggle Table of Contents - TOC)
+      if (e.altKey && (e.key === 't' || e.key === 'T')) {
         e.preventDefault();
         e.stopPropagation();
-        toggleFullscreen();
+        setShowToc((prev) => !prev);
         return;
       }
-      // F11 (Toggle Fullscreen)
-      if (e.key === 'F11') {
+      // 5. ESC (Exit Zen Fullscreen, Close TOC, or Close active modals)
+      if (e.key === 'Escape') {
+        if (showTocRef.current) {
+          e.preventDefault();
+          setShowToc(false);
+          return;
+        }
+        if (modalsRef.current.rulesModalOpen) {
+          e.preventDefault();
+          setRulesModalOpen(false);
+          return;
+        }
+        if (modalsRef.current.encodingModalOpen) {
+          e.preventDefault();
+          setEncodingModalOpen(false);
+          return;
+        }
+        if (modalsRef.current.ingestionModalOpen) {
+          e.preventDefault();
+          setIngestionModalOpen(false);
+          return;
+        }
+        if (modalsRef.current.fileContextMenu) {
+          e.preventDefault();
+          setFileContextMenu(null);
+          return;
+        }
+        if (modalsRef.current.showConfirmClose) {
+          e.preventDefault();
+          setShowConfirmClose(false);
+          return;
+        }
+        if (isFullscreenRef.current || !!document.fullscreenElement) {
+          e.preventDefault();
+          e.stopPropagation();
+          exitFullscreen();
+          return;
+        }
+        getCurrentWindow().isFullscreen().then((isFs) => {
+          if (isFs) {
+            exitFullscreen();
+          }
+        }).catch(() => {});
+        return;
+      }
+
+      // 6. Navigation in Fullscreen Reading Mode (Alt+F)
+      if (isFullscreenRef.current || !!document.fullscreenElement) {
+        const activeTag = document.activeElement?.tagName;
+        const isInput = activeTag === 'INPUT';
+        const isEditingRaw = activeTag === 'TEXTAREA' && viewMode === 'edit';
+
+        if (!isInput && !isEditingRaw) {
+          // Arrow Down / Arrow Right / PageDown -> Next Page
+          if (e.key === 'ArrowDown' || e.key === 'ArrowRight' || e.key === 'PageDown') {
+            e.preventDefault();
+            e.stopPropagation();
+            scrollPage('next', e.shiftKey && e.key === 'ArrowDown');
+            return;
+          }
+          // Arrow Up / Arrow Left / PageUp -> Previous Page
+          if (e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'PageUp') {
+            e.preventDefault();
+            e.stopPropagation();
+            scrollPage('prev', e.shiftKey && e.key === 'ArrowUp');
+            return;
+          }
+          // Space -> Next Page, Shift+Space -> Previous Page
+          if (e.key === ' ' || e.code === 'Space') {
+            e.preventDefault();
+            e.stopPropagation();
+            scrollPage(e.shiftKey ? 'prev' : 'next');
+            return;
+          }
+          // Home -> Jump to Top
+          if (e.key === 'Home') {
+            e.preventDefault();
+            e.stopPropagation();
+            scrollPage('top');
+            return;
+          }
+          // End -> Jump to Bottom
+          if (e.key === 'End') {
+            e.preventDefault();
+            e.stopPropagation();
+            scrollPage('bottom');
+            return;
+          }
+        }
+      }
+
+      // 7. Ctrl + '+' or '=' or 'Add' (Zoom In)
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+' || e.key === 'Add')) {
         e.preventDefault();
-        e.stopPropagation();
-        toggleFullscreen();
+        triggerZoomChange(0.1);
         return;
       }
-      // Ctrl + '+' or '=' (Zoom In)
-      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+      // 8. Ctrl + '-' or 'Subtract' (Zoom Out)
+      if ((e.ctrlKey || e.metaKey) && (e.key === '-' || e.key === 'Subtract')) {
         e.preventDefault();
-        setFontSize((prev) => Math.min(32, prev + 1));
+        triggerZoomChange(-0.1);
         return;
       }
-      // Ctrl + '-' (Zoom Out)
-      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-        e.preventDefault();
-        setFontSize((prev) => Math.max(10, prev - 1));
-        return;
-      }
-      // Ctrl + '0' (Reset Zoom)
+      // 9. Ctrl + '0' (Reset Zoom)
       if ((e.ctrlKey || e.metaKey) && e.key === '0') {
         e.preventDefault();
-        setFontSize(13);
+        triggerZoomChange('reset');
         return;
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown, true);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
-  }, [handleSave, handleUndo, handleRedo, toggleFullscreen]);
+  }, [handleSave, handleUndo, handleRedo, toggleFullscreen, exitFullscreen, scrollPage, triggerZoomChange, viewMode]);
 
   // Ctrl + Mouse Wheel Zoom Handler
   useEffect(() => {
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        if (e.deltaY < 0) {
-          setFontSize((prev) => Math.min(32, prev + 1));
-        } else if (e.deltaY > 0) {
-          setFontSize((prev) => Math.max(10, prev - 1));
-        }
+        e.stopPropagation();
+        const delta = e.deltaY < 0 ? 0.1 : -0.1;
+        triggerZoomChange(delta);
       }
     };
 
@@ -880,7 +1467,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     return () => {
       window.removeEventListener('wheel', handleWheel);
     };
-  }, []);
+  }, [triggerZoomChange]);
 
   // Textarea Shortcuts in Source mode
   const handleSourceKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1030,11 +1617,12 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
       return '';
     }
     try {
-      return renderMarkdown(text);
+      const currentDir = filePath ? filePath.replace(/[/\\][^/\\]+$/, '') : '';
+      return renderMarkdown(text, currentDir);
     } catch (e) {
       return `<p style="color: #ef4444;">Rendering Error: ${String(e)}</p>`;
     }
-  }, [content, blocks, viewMode]);
+  }, [content, blocks, viewMode, filePath]);
 
   // Line count for gutter
   const lineNumbersArray = useMemo(() => {
@@ -1042,14 +1630,123 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
     return Array.from({ length: count }, (_, i) => i + 1);
   }, [content]);
 
+  // Automatic TOC generation from document headings
+  const tocItems = useMemo<TocItem[]>(() => {
+    if (viewMode === 'wysiwyg') {
+      const items: TocItem[] = [];
+      blocks.forEach((block) => {
+        if (/^h[1-6]$/.test(block.type)) {
+          const level = parseInt(block.type[1], 10);
+          const rawText = block.html
+            ? block.html.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\u200B/g, '').trim()
+            : '';
+          items.push({
+            id: block.id,
+            blockId: block.id,
+            level,
+            text: rawText || `Heading ${level}`,
+          });
+        }
+      });
+      return items;
+    } else {
+      const items: TocItem[] = [];
+      const lines = content.split('\n');
+      let inCodeBlock = false;
+      lines.forEach((line, lineIdx) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('```')) {
+          inCodeBlock = !inCodeBlock;
+          return;
+        }
+        if (inCodeBlock) return;
+        const match = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+        if (match) {
+          const level = match[1].length;
+          const cleanText = match[2]
+            .replace(/\*\*(.*?)\*\*/g, '$1')
+            .replace(/\*(.*?)\*/g, '$1')
+            .replace(/`(.*?)`/g, '$1')
+            .trim();
+          items.push({
+            id: `line-${lineIdx}`,
+            level,
+            text: cleanText || `Heading ${level}`,
+            lineIndex: lineIdx,
+          });
+        }
+      });
+      return items;
+    }
+  }, [viewMode, blocks, content]);
+
+  const filteredTocItems = useMemo(() => {
+    if (!tocFilter.trim()) return tocItems;
+    const q = tocFilter.toLowerCase().trim();
+    return tocItems.filter((item) => item.text.toLowerCase().includes(q));
+  }, [tocItems, tocFilter]);
+
+  const handleJumpToHeading = useCallback((item: TocItem, index: number) => {
+    if (viewMode === 'wysiwyg' && item.blockId) {
+      const el = document.getElementById(`edit-${item.blockId}`) ||
+                 document.querySelector(`[data-block-id="${item.blockId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('mhz-heading-target-pulse');
+        setTimeout(() => el.classList.remove('mhz-heading-target-pulse'), 1500);
+        return;
+      }
+    }
+
+    if (viewMode === 'preview' || viewMode === 'split') {
+      if (previewRef.current) {
+        const headings = previewRef.current.querySelectorAll('h1, h2, h3, h4, h5, h6');
+        const target = headings[index] as HTMLElement | undefined;
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          target.classList.add('mhz-heading-target-pulse');
+          setTimeout(() => target.classList.remove('mhz-heading-target-pulse'), 1500);
+        }
+      }
+    }
+
+    if (viewMode === 'edit' || viewMode === 'split') {
+      if (textareaRef.current && item.lineIndex !== undefined) {
+        const lines = content.split('\n');
+        let charPos = 0;
+        for (let i = 0; i < item.lineIndex && i < lines.length; i++) {
+          charPos += lines[i].length + 1;
+        }
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(charPos, charPos);
+        const lineHeight = fontSize * 1.6;
+        textareaRef.current.scrollTo({ top: Math.max(0, item.lineIndex * lineHeight - 60), behavior: 'smooth' });
+      }
+    }
+  }, [viewMode, content, fontSize]);
+
   return (
     <div className={`mhz-md-root ${isFullscreen ? 'mhz-md-zen-fullscreen' : ''}`}>
       {/* 1. Custom Frameless Titlebar with Window Dragging */}
       <div
-        className="mhz-md-titlebar"
+        className={`mhz-md-titlebar ${isTitlebarPeeking ? 'peeking' : ''}`}
         data-tauri-drag-region
         onMouseDown={handleTitlebarMouseDown}
         onDoubleClick={handleToggleMaximize}
+        onMouseEnter={() => {
+          if (isFullscreen) {
+            if (titlebarHoverTimeoutRef.current) {
+              clearTimeout(titlebarHoverTimeoutRef.current);
+              titlebarHoverTimeoutRef.current = null;
+            }
+            setIsTitlebarPeeking(true);
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (isFullscreen && e.clientY > 45) {
+            setIsTitlebarPeeking(false);
+          }
+        }}
       >
         <div className="mhz-md-titlebar-left">
           <div className="mhz-md-app-icon">
@@ -1150,9 +1847,9 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
             type="button"
             className="mhz-md-win-btn"
             onClick={handleCopyAll}
-            title={isTextFile ? "Copy Text to Clipboard" : "Copy Markdown to Clipboard"}
+            title={isCopied ? "Copied to Clipboard!" : (isTextFile ? "Copy Text to Clipboard" : "Copy Markdown to Clipboard")}
           >
-            <Copy size={13} />
+            {isCopied ? <ClipboardCheck size={13} style={{ color: '#34d399' }} /> : <ClipboardCopy size={13} />}
           </button>
           <button
             type="button"
@@ -1206,7 +1903,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
                 type="button"
                 className="mhz-md-tool-btn primary"
                 onClick={() => handleSwitchToWysiwyg(false)}
-                title="Switch to Markdown / WYSIWYG Block mode (역파싱 검토)"
+                title="Switch to Markdown / WYSIWYG Block mode"
                 style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
               >
                 <Sparkles size={14} />
@@ -1216,7 +1913,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
                 type="button"
                 className="mhz-md-tool-btn primary"
                 onClick={() => handleSwitchToWysiwyg(true)}
-                title="역파싱 규칙 검토 및 커스텀 패턴 매핑 다이얼로그 열기"
+                title="Review parsing rules and custom pattern mapping"
                 style={{
                   borderTopLeftRadius: 0,
                   borderBottomLeftRadius: 0,
@@ -1246,7 +1943,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
             type="button"
             className="mhz-md-tool-btn"
             onClick={() => setRulesModalOpen(true)}
-            title="Configure MD → Plain Text Formatting Rules (내보내기 서식 규칙)"
+            title="Configure MD → Plain Text Formatting Rules"
           >
             <Sliders size={14} />
             <span>Text Export Rules</span>
@@ -1396,11 +2093,52 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
           >
             <WrapText size={14} />
           </button>
+          <button
+            type="button"
+            className={`mhz-md-tool-btn mhz-md-toc-toggle-btn ${showToc ? 'active' : ''}`}
+            onClick={() => setShowToc((prev) => !prev)}
+            title="Table of Contents (Alt+T)"
+          >
+            <ListTree size={14} />
+            <span style={{ fontSize: '11px', fontWeight: 500 }}>TOC</span>
+            {tocItems.length > 0 && (
+              <span className="mhz-md-toc-badge">{tocItems.length}</span>
+            )}
+          </button>
         </div>
       </div>
 
       {/* 3. Main Body */}
-      <div className="mhz-md-body">
+      <div
+        className="mhz-md-body"
+        style={{
+          zoom: zoomLevel,
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes('Files')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          }
+        }}
+        onDrop={async (e) => {
+          const files = e.dataTransfer.files;
+          if (files && files.length > 0) {
+            const imgFiles: File[] = [];
+            for (let i = 0; i < files.length; i++) {
+              if (files[i].type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(files[i].name)) {
+                imgFiles.push(files[i]);
+              }
+            }
+            if (imgFiles.length > 0) {
+              e.preventDefault();
+              e.stopPropagation();
+              for (const f of imgFiles) {
+                await handleProcessImageBlob(f, f.name);
+              }
+            }
+          }
+        }}
+      >
         {isLoading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', gap: '8px' }}>
             <FileText size={18} className="animate-spin" />
@@ -1415,6 +2153,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
                   blocks={blocks}
                   onUpdateBlocks={handleUpdateBlocks}
                   fontSize={fontSize}
+                  baseDir={filePath ? filePath.replace(/[/\\][^/\\]+$/, '') : ''}
                 />
               </div>
             )}
@@ -1560,6 +2299,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
               ))}
             </select>
           </label>
+          <button
+            type="button"
+            className="mhz-md-statusbar-btn"
+            onClick={() => triggerZoomChange('reset')}
+            title="Screen Zoom: Ctrl + Mouse Wheel / Ctrl + 0 to reset (Click to reset 100%)"
+          >
+            Zoom: <strong>{Math.round(zoomLevel * 100)}%</strong>
+          </button>
           <span className="mhz-md-statusbar-item">
             Status: <strong style={{ color: isDirty ? '#fbbf24' : '#34d399' }}>{isDirty ? 'Modified' : 'Saved'}</strong>
           </span>
@@ -1801,17 +2548,38 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         </div>
       )}
 
-      {/* 8. Zen Fullscreen Exit Floating Button */}
+      {/* 8. Zen Fullscreen Reading Navigation & Exit Bar */}
       {isFullscreen && (
-        <button
-          type="button"
-          className="mhz-md-zen-exit-pill"
-          onClick={toggleFullscreen}
-          title="Exit Fullscreen Reading Mode (Alt+F or ESC)"
-        >
-          <Minimize2 size={13} />
-          <span>Exit Reading Mode (Alt+F / ESC)</span>
-        </button>
+        <div className="mhz-md-zen-nav-bar">
+          <button
+            type="button"
+            className="mhz-md-zen-nav-btn"
+            onClick={() => scrollPage('prev')}
+            title="Previous Page (↑ / ← / PageUp)"
+          >
+            <ChevronUp size={14} />
+            <span>Prev (↑)</span>
+          </button>
+          <button
+            type="button"
+            className="mhz-md-zen-nav-btn"
+            onClick={() => scrollPage('next')}
+            title="Next Page (↓ / → / Space / PageDown)"
+          >
+            <ChevronDown size={14} />
+            <span>Next (↓)</span>
+          </button>
+          <div className="mhz-md-zen-nav-divider" />
+          <button
+            type="button"
+            className="mhz-md-zen-exit-pill"
+            onClick={exitFullscreen}
+            title="Exit Reading Mode (ESC / Alt+F)"
+          >
+            <Minimize2 size={13} />
+            <span>Exit (ESC)</span>
+          </button>
+        </div>
       )}
 
       {/* 9. Markdown to Plain Text Conversion Rules Modal */}
@@ -1830,6 +2598,108 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({ initialFilePath 
         initialRules={reverseRules}
         onApplyIngestion={handleApplyIngestion}
       />
+
+      {/* 11. Zoom HUD Overlay */}
+      {showZoomHud && (
+        <div className="zoom-hud">
+          <span className="zoom-hud-label">{Math.round(zoomLevel * 100)}%</span>
+          <button
+            type="button"
+            className="zoom-hud-btn"
+            title="Zoom Out (Ctrl -)"
+            onClick={() => triggerZoomChange(-0.1)}
+          >
+            -
+          </button>
+          <button
+            type="button"
+            className="zoom-hud-btn"
+            title="Zoom In (Ctrl +)"
+            onClick={() => triggerZoomChange(0.1)}
+          >
+            +
+          </button>
+          {zoomLevel !== 1.0 && (
+            <button
+              type="button"
+              className="zoom-hud-btn"
+              title="Reset Zoom (Ctrl 0)"
+              onClick={() => triggerZoomChange('reset')}
+            >
+              100%
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 12. Table of Contents (TOC) Floating Panel */}
+      {showToc && (
+        <div className="mhz-md-toc-panel">
+          <div className="mhz-md-toc-header">
+            <div className="mhz-md-toc-title">
+              <ListTree size={15} className="mhz-md-toc-icon" />
+              <span>Table of Contents</span>
+              <span className="mhz-md-toc-count">{tocItems.length}</span>
+            </div>
+            <button
+              type="button"
+              className="mhz-md-toc-close-btn"
+              onClick={() => setShowToc(false)}
+              title="Close TOC (Alt+T / ESC)"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {tocItems.length > 6 && (
+            <div className="mhz-md-toc-search-bar">
+              <Search size={13} className="mhz-md-toc-search-icon" />
+              <input
+                type="text"
+                className="mhz-md-toc-search-input"
+                placeholder="Filter headings..."
+                value={tocFilter}
+                onChange={(e) => setTocFilter(e.target.value)}
+              />
+              {tocFilter && (
+                <button
+                  type="button"
+                  className="mhz-md-toc-search-clear"
+                  onClick={() => setTocFilter('')}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="mhz-md-toc-body">
+            {filteredTocItems.length === 0 ? (
+              <div className="mhz-md-toc-empty">
+                {tocItems.length === 0 ? 'No headings found (# Heading)' : 'No matching headings'}
+              </div>
+            ) : (
+              filteredTocItems.map((item, idx) => (
+                <button
+                  key={item.id || idx}
+                  type="button"
+                  className={`mhz-md-toc-item level-${item.level}`}
+                  style={{ paddingLeft: `${8 + (item.level - 1) * 12}px` }}
+                  onClick={() => handleJumpToHeading(item, idx)}
+                  title={`H${item.level}: ${item.text}`}
+                >
+                  <span className={`mhz-md-toc-level-tag h${item.level}`}>H{item.level}</span>
+                  <span className="mhz-md-toc-item-text">{item.text}</span>
+                </button>
+              ))
+            )}
+          </div>
+
+          <div className="mhz-md-toc-footer">
+            <span>Shortcut: <strong>Alt+T</strong></span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

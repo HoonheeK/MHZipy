@@ -265,14 +265,15 @@ export function parseTextToBlocksWithRules(text: string, rules: PatternRule[]): 
       }
     }
 
-    // Check Setext underline headings: next line has === or ---
+    // Check Setext underline headings: next line has === (or --- only if divider rule is disabled)
     if (i + 1 < lines.length) {
       const nextLine = lines[i + 1].trim();
+      const hasDividerRule = rules.some(r => r.enabled && (r.targetType === 'divider' || r.prefix === '---'));
       if (/^={3,}$/.test(nextLine)) {
         blocks.push({ id: generateId(), type: 'h1', html: escapeHtml(trimmed), indent: 0 });
         i += 2;
         continue;
-      } else if (/^-{3,}$/.test(nextLine) && !trimmed.startsWith('-')) {
+      } else if (!hasDividerRule && /^-{3,}$/.test(nextLine) && !trimmed.startsWith('-')) {
         blocks.push({ id: generateId(), type: 'h2', html: escapeHtml(trimmed), indent: 0 });
         i += 2;
         continue;

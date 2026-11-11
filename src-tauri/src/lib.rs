@@ -1014,24 +1014,45 @@ fn open_in_explorer(path: String) -> Result<(), String> {
         use std::process::{Command, Stdio};
         println!("[DEBUG] Attempting to open in explorer: {}", path);
 
-        // explorer.exe는 GUI 애플리케이션이므로, 부모 프로세스의 stdio를 상속하면
-        // 예기치 않은 동작을 유발할 수 있습니다. stdio를 null로 리디렉션하여
-        // 자식 프로세스를 완전히 분리하는 것이 안정적입니다.
-        let result = Command::new("explorer")
-            .arg("/select,")
-            .arg(&path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
+        let clean_path = path
+            .trim_start_matches(r"\\?\")
+            .replace('/', "\\");
+        let p = std::path::Path::new(&clean_path);
+
+        let result = if p.is_file() {
+            Command::new("explorer")
+                .arg(format!("/select,{}", clean_path))
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        } else {
+            let folder = if p.is_dir() {
+                clean_path.clone()
+            } else if let Some(parent) = p.parent() {
+                if parent.exists() {
+                    parent.to_string_lossy().to_string()
+                } else {
+                    clean_path.clone()
+                }
+            } else {
+                clean_path.clone()
+            };
+            Command::new("explorer")
+                .arg(&folder)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        };
 
         if let Err(e) = result {
-            let error_message = format!("Failed to spawn explorer.exe for path '{}': {}", path, e);
+            let error_message = format!("Failed to spawn explorer.exe for path '{}': {}", clean_path, e);
             println!("[ERROR] {}", error_message);
             return Err(error_message);
         }
         
-        println!("[DEBUG] Successfully spawned explorer.exe for path: {}", path);
+        println!("[DEBUG] Successfully spawned explorer.exe for path: {}", clean_path);
     }
 
     #[cfg(not(target_os = "windows"))]

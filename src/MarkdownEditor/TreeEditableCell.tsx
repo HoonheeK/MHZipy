@@ -1,4 +1,5 @@
 import React, { useRef, useCallback, useState, useLayoutEffect, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   GripVertical,
   CheckSquare,
@@ -31,17 +32,24 @@ import {
   Underline,
   Strikethrough,
   Eraser,
-  Type
+  Type,
+  Crop,
+  FolderOpen,
+  RotateCcw
 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { writeFile, readFile } from '@tauri-apps/plugin-fs';
 import {
   Block,
   BlockType,
   generateId,
   getBlockClassName,
   htmlToMarkdown,
-  serializeBlocksToMarkdown
+  serializeBlocksToMarkdown,
+  parseMarkdownToBlocks,
+  renderImageHtml,
+  parseImageHash
 } from './markdownBlockUtils';
-import { marked } from 'marked';
 
 // --- List Marker Component (from TreeDiadev's EditableCell) ---
 export const ListMarker: React.FC<{
@@ -284,9 +292,85 @@ export const TEXT_COLORS_DARK = ['#ffffff', '#f87171', '#60a5fa', '#34d399', '#f
 export const BG_COLORS_DARK = ['#374151', '#7f1d1d', '#1e3a8a', '#064e3b', '#78350f', '#4c1d95'];
 
 // Convert a rendered Block into raw Markdown string for F2 editing
-export const toRawMarkdown = (b: Block): string => {
+export const toRawMarkdown = (b: Block, baseDir?: string): string => {
   if (b.type === 'divider') return '---';
-  const md = htmlToMarkdown(b.html);
+
+  // Special handling for image blocks to cleanly extract relative path & preserve hash parameters (#crop, #width)
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = b.html;
+  const images = tempDiv.querySelectorAll('img');
+  const hasOtherText = (tempDiv.textContent || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim() !== '';
+
+  if (images.length === 1 && !hasOtherText) {
+    const img = images[0];
+    const alt = img.getAttribute('alt') || '';
+    let originalSrc = img.getAttribute('data-original-src') || img.getAttribute('src') || '';
+    const title = img.getAttribute('title');
+
+    // Decode asset.localhost URL if needed
+    if (originalSrc.startsWith('http://asset.localhost/') || originalSrc.startsWith('https://asset.localhost/')) {
+      try {
+        const u = new URL(originalSrc);
+        let p = decodeURIComponent(u.pathname);
+        if (/^\/[a-zA-Z]:/.test(p)) p = p.substring(1);
+        originalSrc = p + (u.hash || '');
+      } catch {}
+    }
+
+    let [cleanPath, existingHash] = originalSrc.split('#');
+    let hash = existingHash ? `#${existingHash}` : '';
+
+    // Check data-crop-rect or data-custom-width
+    const cropRect = img.getAttribute('data-crop-rect') || img.closest('span[data-crop-rect]')?.getAttribute('data-crop-rect');
+    const customWidth = img.getAttribute('data-custom-width') || img.closest('span[data-custom-width]')?.getAttribute('data-custom-width');
+
+    const hashParams = new URLSearchParams(existingHash || '');
+    let hashChanged = false;
+    if (cropRect) {
+      if (hashParams.get('crop') !== cropRect) {
+        hashParams.set('crop', cropRect);
+        hashChanged = true;
+      }
+    }
+    if (customWidth) {
+      if (hashParams.get('width') !== customWidth) {
+        hashParams.set('width', customWidth);
+        hashChanged = true;
+      }
+    }
+    if (hashChanged) {
+      const rawHash = hashParams.toString();
+      hash = rawHash ? `#${decodeURIComponent(rawHash)}` : '';
+    }
+
+    let finalPath = cleanPath;
+    if (baseDir && (cleanPath.includes(':') || cleanPath.startsWith('/') || cleanPath.startsWith('\\'))) {
+      const normPath = cleanPath.replace(/\\/g, '/');
+      const normBase = baseDir.replace(/\\/g, '/');
+      if (normPath.toLowerCase().startsWith(normBase.toLowerCase())) {
+        let rel = normPath.substring(normBase.length).replace(/^\/+/, '');
+        finalPath = `./${rel}`;
+      }
+    }
+
+    const titlePart = title ? ` "${title}"` : '';
+    const mdContent = `![${alt}](${finalPath}${hash}${titlePart})`;
+
+    switch (b.type) {
+      case 'h1': return `# ${mdContent}`;
+      case 'h2': return `## ${mdContent}`;
+      case 'h3': return `### ${mdContent}`;
+      case 'h4': return `#### ${mdContent}`;
+      case 'h5': return `##### ${mdContent}`;
+      case 'h6': return `###### ${mdContent}`;
+      case 'quote': return `> ${mdContent}`;
+      case 'list': return b.listType === 'ol' ? `1. ${mdContent}` : `- ${mdContent}`;
+      case 'checkbox': return `[${b.checked ? 'x' : ' '}] ${mdContent}`;
+      default: return mdContent;
+    }
+  }
+
+  const md = htmlToMarkdown(b.html, baseDir);
   switch (b.type) {
     case 'h1': return `# ${md}`;
     case 'h2': return `## ${md}`;
@@ -309,107 +393,652 @@ export const toRawMarkdown = (b: Block): string => {
   }
 };
 
-// Convert raw Markdown text back into a Block structure
-export const fromRawMarkdown = (rawText: string, currentBlock: Block): Partial<Block> => {
+// Convert raw Markdown text back into a Block structure using full parser with baseDir
+export const fromRawMarkdown = (rawText: string, currentBlock: Block, baseDir?: string): Partial<Block> => {
   const trimmed = rawText.trim();
-
-  // Horizontal Rule / Divider
-  if (/^(\*{3,}|-{3,}|_{3,})$/.test(trimmed)) {
-    return { type: 'divider', html: '', isRaw: false };
-  }
-
-  // Table (multi-column / multi-row)
-  if (trimmed.startsWith('|') && (trimmed.includes('\n') || (trimmed.match(/\|/g)?.length || 0) >= 2)) {
-    const tableHtml = (marked.parse(trimmed) as string).trim();
+  const parsed = parseMarkdownToBlocks(trimmed, baseDir);
+  if (parsed.length > 0) {
+    const first = parsed[0];
     return {
-      type: 'table',
-      html: tableHtml,
+      type: first.type,
+      html: first.html,
+      checked: first.checked,
+      listType: first.listType,
       isRaw: false
     };
-  }
-
-  // Headings (# H1, ## H2, etc.)
-  const headerMatch = /^(#{1,6})\s*(.*)$/.exec(trimmed);
-  if (headerMatch) {
-    const level = headerMatch[1].length;
-    const content = headerMatch[2];
-    const parsed = marked.parseInline(content) as string;
-    return {
-      type: `h${level}` as BlockType,
-      html: parsed.includes('**') ? parsed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') : parsed,
-      isRaw: false
-    };
-  }
-
-  // Quote (> text)
-  const quoteMatch = /^>\s*(.*)$/.exec(trimmed);
-  if (quoteMatch) {
-    const parsed = marked.parseInline(quoteMatch[1]) as string;
-    return {
-      type: 'quote',
-      html: parsed.includes('**') ? parsed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') : parsed,
-      isRaw: false
-    };
-  }
-
-  // Checkbox ([ ] text or [x] text)
-  const checkMatch = /^\[([ xX])\]\s*(.*)$/.exec(trimmed);
-  if (checkMatch) {
-    const isChecked = checkMatch[1].toLowerCase() === 'x';
-    const parsed = marked.parseInline(checkMatch[2]) as string;
-    return {
-      type: 'checkbox',
-      checked: isChecked,
-      html: parsed.includes('**') ? parsed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') : parsed,
-      isRaw: false
-    };
-  }
-
-  // Ordered list (1. item)
-  const olMatch = /^\d+\.\s*(.*)$/.exec(trimmed);
-  if (olMatch) {
-    const parsed = marked.parseInline(olMatch[1]) as string;
-    return {
-      type: 'list',
-      listType: 'ol',
-      html: parsed.includes('**') ? parsed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') : parsed,
-      isRaw: false
-    };
-  }
-
-  // Bullet list (- item, * item, + item)
-  const ulMatch = /^[-*+]\s*(.*)$/.exec(trimmed);
-  if (ulMatch) {
-    const parsed = marked.parseInline(ulMatch[1]) as string;
-    return {
-      type: 'list',
-      listType: 'ul',
-      html: parsed.includes('**') ? parsed.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') : parsed,
-      isRaw: false
-    };
-  }
-
-  // Code block
-  const codeMatch = /^```[\w]*\n([\s\S]*?)\n```$/.exec(trimmed);
-  if (codeMatch) {
-    const escaped = codeMatch[1].replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    return {
-      type: 'code',
-      html: escaped.replace(/\n/g, '<br>'),
-      isRaw: false
-    };
-  }
-
-  // Default Paragraph / Rich text
-  let nextHtml = marked.parseInline(trimmed) as string;
-  if (nextHtml.includes('**')) {
-    nextHtml = nextHtml.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   }
   return {
     type: currentBlock.type === 'divider' ? 'paragraph' : currentBlock.type,
-    html: nextHtml,
+    html: '',
     isRaw: false
   };
+};
+
+// Helper to determine the cumulative CSS zoom of an element (handles editor zoom)
+export const getElementZoom = (el: HTMLElement | null): number => {
+  let zoom = 1;
+  let curr: HTMLElement | null = el;
+  while (curr && curr !== document.documentElement) {
+    const styleZoom = (curr.style as any)?.zoom || window.getComputedStyle(curr).zoom;
+    if (styleZoom) {
+      const z = parseFloat(styleZoom);
+      if (!isNaN(z) && z > 0) {
+        zoom *= z;
+      }
+    }
+    curr = curr.parentElement;
+  }
+  return zoom || 1;
+};
+
+// --- In-Place Image Crop Overlay Component (Directly in Editor, no modal popup) ---
+export interface CropArea {
+  unit: '%' | 'px';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type DragMode = 'new' | 'move' | 'nw' | 'ne' | 'se' | 'sw' | null;
+
+export interface InPlaceCropOverlayProps {
+  blockId: string;
+  target: HTMLImageElement;
+  src: string;
+  originalSrc: string;
+  currentScale?: number;
+  baseDir?: string;
+  onClose: () => void;
+  onResetCrop?: () => void;
+  onApplyCrop: (cropPx: { x: number; y: number; width: number; height: number }, targetWidth?: number) => void;
+  onSaveAsFile?: (newRelPath: string, targetWidth?: number) => void;
+}
+
+export const InPlaceCropOverlay: React.FC<InPlaceCropOverlayProps> = ({
+  target,
+  originalSrc,
+  currentScale,
+  baseDir,
+  onClose,
+  onResetCrop,
+  onApplyCrop,
+  onSaveAsFile
+}) => {
+  const cropWrapper = target.closest('span[data-crop-rect]') as HTMLElement | null;
+  const rectTarget = cropWrapper || target;
+
+  // Check if target is already cropped
+  const rawCropAttr = (cropWrapper || target).getAttribute('data-crop-rect')?.split(',').map(Number);
+  const isAlreadyCropped = Boolean(
+    rawCropAttr &&
+    rawCropAttr.length === 4 &&
+    !rawCropAttr.some(isNaN) &&
+    rawCropAttr[2] > 0 &&
+    rawCropAttr[3] > 0
+  );
+
+  const baseX = isAlreadyCropped ? rawCropAttr![0] : 0;
+  const baseY = isAlreadyCropped ? rawCropAttr![1] : 0;
+  const baseWidth = isAlreadyCropped ? rawCropAttr![2] : (target.naturalWidth || Math.round(rectTarget.getBoundingClientRect().width));
+  const baseHeight = isAlreadyCropped ? rawCropAttr![3] : (target.naturalHeight || Math.round(rectTarget.getBoundingClientRect().height));
+
+  // Initialize crop:
+  // If already cropped: 100% full (covering the entire currently visible cropped image)
+  // If not cropped: 80% center by default
+  const [crop, setCrop] = useState<CropArea>(() => {
+    if (isAlreadyCropped) {
+      return { unit: '%', x: 0, y: 0, width: 100, height: 100 };
+    }
+    return { unit: '%', x: 10, y: 10, width: 80, height: 80 };
+  });
+
+  const isScaled = typeof currentScale === 'number' && currentScale > 0 && Math.abs(currentScale - 1) > 0.02;
+  const [keepReducedScale, setKeepReducedScale] = useState<boolean>(isScaled);
+
+  // Position tracking state updated every frame via requestAnimationFrame
+  const [targetRect, setTargetRect] = useState<DOMRect>(() => rectTarget.getBoundingClientRect());
+
+  useEffect(() => {
+    let rafId: number;
+    let isMounted = true;
+    const updateRect = () => {
+      if (!isMounted) return;
+      if (!document.body.contains(rectTarget)) {
+        onClose();
+        return;
+      }
+      const r = rectTarget.getBoundingClientRect();
+      setTargetRect(r);
+      rafId = requestAnimationFrame(updateRect);
+    };
+    rafId = requestAnimationFrame(updateRect);
+    return () => {
+      isMounted = false;
+      cancelAnimationFrame(rafId);
+    };
+  }, [rectTarget, onClose]);
+
+  // Dragging logic
+  const [dragMode, setDragMode] = useState<DragMode>(null);
+  const dragStartRef = useRef<{
+    clientX: number;
+    clientY: number;
+    startCrop: CropArea;
+    rect: DOMRect;
+  } | null>(null);
+
+  const startDrag = (mode: DragMode, clientX: number, clientY: number) => {
+    const r = rectTarget.getBoundingClientRect();
+    dragStartRef.current = {
+      clientX,
+      clientY,
+      startCrop: { ...crop },
+      rect: r
+    };
+    setDragMode(mode);
+  };
+
+  const handleContainerMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const r = rectTarget.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const clickPctX = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+    const clickPctY = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
+    setCrop({ unit: '%', x: clickPctX, y: clickPctY, width: 0, height: 0 });
+    startDrag('new', e.clientX, e.clientY);
+  };
+
+  useEffect(() => {
+    if (!dragMode) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartRef.current) return;
+      const { clientX: startClientX, clientY: startClientY, startCrop, rect: startRect } = dragStartRef.current;
+      if (startRect.width <= 0 || startRect.height <= 0) return;
+
+      const deltaPctX = ((e.clientX - startClientX) / startRect.width) * 100;
+      const deltaPctY = ((e.clientY - startClientY) / startRect.height) * 100;
+
+      if (dragMode === 'move') {
+        const maxX = Math.max(0, 100 - startCrop.width);
+        const maxY = Math.max(0, 100 - startCrop.height);
+        const newX = Math.max(0, Math.min(maxX, startCrop.x + deltaPctX));
+        const newY = Math.max(0, Math.min(maxY, startCrop.y + deltaPctY));
+        setCrop({ ...startCrop, x: newX, y: newY });
+      } else if (dragMode === 'new') {
+        const curPctX = Math.max(0, Math.min(100, ((e.clientX - startRect.left) / startRect.width) * 100));
+        const curPctY = Math.max(0, Math.min(100, ((e.clientY - startRect.top) / startRect.height) * 100));
+        const x = Math.min(startCrop.x, curPctX);
+        const y = Math.min(startCrop.y, curPctY);
+        const width = Math.abs(curPctX - startCrop.x);
+        const height = Math.abs(curPctY - startCrop.y);
+        setCrop({ unit: '%', x, y, width, height });
+      } else if (dragMode === 'se') {
+        const newW = Math.max(2, Math.min(100 - startCrop.x, startCrop.width + deltaPctX));
+        const newH = Math.max(2, Math.min(100 - startCrop.y, startCrop.height + deltaPctY));
+        setCrop({ ...startCrop, width: newW, height: newH });
+      } else if (dragMode === 'sw') {
+        const rightEdge = startCrop.x + startCrop.width;
+        const newX = Math.max(0, Math.min(rightEdge - 2, startCrop.x + deltaPctX));
+        const newW = rightEdge - newX;
+        const newH = Math.max(2, Math.min(100 - startCrop.y, startCrop.height + deltaPctY));
+        setCrop({ ...startCrop, x: newX, width: newW, height: newH });
+      } else if (dragMode === 'ne') {
+        const bottomEdge = startCrop.y + startCrop.height;
+        const newY = Math.max(0, Math.min(bottomEdge - 2, startCrop.y + deltaPctY));
+        const newH = bottomEdge - newY;
+        const newW = Math.max(2, Math.min(100 - startCrop.x, startCrop.width + deltaPctX));
+        setCrop({ ...startCrop, y: newY, width: newW, height: newH });
+      } else if (dragMode === 'nw') {
+        const rightEdge = startCrop.x + startCrop.width;
+        const bottomEdge = startCrop.y + startCrop.height;
+        const newX = Math.max(0, Math.min(rightEdge - 2, startCrop.x + deltaPctX));
+        const newY = Math.max(0, Math.min(bottomEdge - 2, startCrop.y + deltaPctY));
+        const newW = rightEdge - newX;
+        const newH = bottomEdge - newY;
+        setCrop({ ...startCrop, x: newX, y: newY, width: newW, height: newH });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setDragMode(null);
+      dragStartRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragMode]);
+
+  const handleApplyTrim = () => {
+    if (baseWidth > 0 && baseHeight > 0 && crop.width > 0 && crop.height > 0) {
+      const finalCropX = Math.max(0, Math.round(baseX + (crop.x / 100) * baseWidth));
+      const finalCropY = Math.max(0, Math.round(baseY + (crop.y / 100) * baseHeight));
+      const finalCropW = Math.max(1, Math.round((crop.width / 100) * baseWidth));
+      const finalCropH = Math.max(1, Math.round((crop.height / 100) * baseHeight));
+
+      const finalCropPx = {
+        x: finalCropX,
+        y: finalCropY,
+        width: finalCropW,
+        height: finalCropH
+      };
+      const targetWidth = keepReducedScale && currentScale && Math.abs(currentScale - 1) > 0.02
+        ? Math.round(finalCropPx.width * currentScale)
+        : undefined;
+      onApplyCrop(finalCropPx, targetWidth);
+    }
+    onClose();
+  };
+
+  const handleSaveCroppedFile = async () => {
+    if (!baseDir || crop.width <= 0 || crop.height <= 0 || baseWidth <= 0 || baseHeight <= 0) {
+      handleApplyTrim();
+      return;
+    }
+    try {
+      const cropX = Math.max(0, Math.round(baseX + (crop.x / 100) * baseWidth));
+      const cropY = Math.max(0, Math.round(baseY + (crop.y / 100) * baseHeight));
+      const cropW = Math.max(1, Math.round((crop.width / 100) * baseWidth));
+      const cropH = Math.max(1, Math.round((crop.height / 100) * baseHeight));
+
+      if (cropW <= 0 || cropH <= 0) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = cropW;
+      canvas.height = cropH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      let cleanSrc = originalSrc.split('#')[0].split('?')[0];
+      if (cleanSrc.startsWith('http://asset.localhost') || cleanSrc.startsWith('https://asset.localhost') || cleanSrc.startsWith('asset://')) {
+        try {
+          const u = new URL(cleanSrc);
+          let p = decodeURIComponent(u.pathname);
+          p = p.replace(/^\/+([a-zA-Z]:)/, '$1');
+          cleanSrc = p;
+        } catch {}
+      }
+      cleanSrc = cleanSrc.replace(/^[/\\]*\?+[/\\]+/, '').replace(/^\\\\\?\\/, '');
+      if (/^\/[a-zA-Z]:/.test(cleanSrc)) cleanSrc = cleanSrc.substring(1);
+
+      let absSrcPath = cleanSrc;
+      const isAbs = /^[a-zA-Z]:[/\\]/.test(cleanSrc) || cleanSrc.startsWith('\\\\');
+      if (!isAbs && baseDir) {
+        const cleanRel = cleanSrc.replace(/^\.[/\\]/, '');
+        const cleanBase = baseDir.replace(/[/\\]+$/, '');
+        absSrcPath = `${cleanBase}/${cleanRel}`;
+      }
+      absSrcPath = absSrcPath.replace(/\//g, '\\');
+
+      let sourceImg: CanvasImageSource = target;
+      let blobUrlToRevoke: string | null = null;
+
+      try {
+        const bytes = await readFile(absSrcPath);
+        const ext = absSrcPath.split('.').pop()?.toLowerCase() || 'png';
+        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : 'image/png';
+        const fileBlob = new Blob([bytes], { type: mime });
+        blobUrlToRevoke = URL.createObjectURL(fileBlob);
+        const tempImg = new Image();
+        await new Promise<void>((resolve, reject) => {
+          tempImg.onload = () => resolve();
+          tempImg.onerror = () => reject(new Error('Failed to load blob image'));
+          tempImg.src = blobUrlToRevoke!;
+        });
+        sourceImg = tempImg;
+      } catch (readErr) {
+        console.warn('Could not read image file directly for canvas, using fallback element:', readErr);
+      }
+
+      ctx.drawImage(sourceImg, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      if (blobUrlToRevoke) {
+        URL.revokeObjectURL(blobUrlToRevoke);
+      }
+
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) return;
+
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8 = new Uint8Array(arrayBuffer);
+
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const newFileName = `image_crop_${timestamp}.png`;
+      const cleanBase = baseDir.replace(/[/\\]+$/, '');
+      const newAbsPath = `${cleanBase}/${newFileName}`;
+
+      await writeFile(newAbsPath, uint8);
+      const targetWidth = keepReducedScale && currentScale && Math.abs(currentScale - 1) > 0.02
+        ? Math.round(cropW * currentScale)
+        : undefined;
+      if (onSaveAsFile) {
+        onSaveAsFile(`./${newFileName}`, targetWidth);
+      }
+      onClose();
+    } catch (err) {
+      console.error('Failed to save cropped image file:', err);
+      handleApplyTrim();
+    }
+  };
+
+  // Keyboard navigation (Escape to cancel, Enter to apply)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        handleApplyTrim();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  });
+
+  // Calculate toolbar placement directly below image
+  let toolbarTop = targetRect.bottom + 6;
+  if (toolbarTop + 45 > window.innerHeight && targetRect.top > 50) {
+    toolbarTop = Math.max(8, targetRect.top - 44);
+  }
+  const toolbarLeft = Math.max(16, Math.min(targetRect.left, window.innerWidth - 720));
+
+  return createPortal(
+    <>
+      {/* In-Place Crop Box directly overlaying the image in editor */}
+      <div
+        style={{
+          position: 'fixed',
+          top: `${targetRect.top}px`,
+          left: `${targetRect.left}px`,
+          width: `${targetRect.width}px`,
+          height: `${targetRect.height}px`,
+          zIndex: 99998,
+          pointerEvents: 'auto',
+          cursor: 'crosshair',
+          userSelect: 'none',
+          boxSizing: 'border-box'
+        }}
+        onMouseDown={handleContainerMouseDown}
+      >
+        {/* Darkened mask outside crop selection */}
+        {crop.width > 0 && crop.height > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              backgroundColor: 'rgba(0, 0, 0, 0.55)',
+              clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${crop.x}% ${crop.y}%, ${crop.x}% ${crop.y + crop.height}%, ${crop.x + crop.width}% ${crop.y + crop.height}%, ${crop.x + crop.width}% ${crop.y}%, ${crop.x}% ${crop.y}%)`,
+              pointerEvents: 'none'
+            }}
+          />
+        )}
+
+        {/* Active Crop Box with Handles */}
+        {crop.width > 0 && crop.height > 0 && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${crop.x}%`,
+              top: `${crop.y}%`,
+              width: `${crop.width}%`,
+              height: `${crop.height}%`,
+              border: '2px dashed #3b82f6',
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.85)',
+              backgroundColor: 'rgba(59, 130, 246, 0.12)',
+              cursor: 'move',
+              pointerEvents: 'auto',
+              boxSizing: 'border-box'
+            }}
+            onMouseDown={(e) => {
+              if (e.button !== 0) return;
+              e.preventDefault();
+              e.stopPropagation();
+              startDrag('move', e.clientX, e.clientY);
+            }}
+          >
+            {/* Dimensions Badge */}
+            <div
+              style={{
+                position: 'absolute',
+                top: -24,
+                left: 0,
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                color: '#fff',
+                fontSize: '11px',
+                padding: '2px 6px',
+                borderRadius: '3px',
+                whiteSpace: 'nowrap',
+                fontWeight: 600,
+                pointerEvents: 'none',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}
+            >
+              {Math.max(1, Math.round((crop.width / 100) * baseWidth))} × {Math.max(1, Math.round((crop.height / 100) * baseHeight))} px{currentScale && Math.abs(currentScale - 1) > 0.02 ? ` (${Math.round(currentScale * 100)}%)` : ''}
+            </div>
+
+            {/* Corner Handles */}
+            <div
+              style={{
+                position: 'absolute',
+                top: -5,
+                left: -5,
+                width: 10,
+                height: 10,
+                background: '#ffffff',
+                border: '2px solid #2563eb',
+                borderRadius: 2,
+                cursor: 'nwse-resize',
+                pointerEvents: 'auto'
+              }}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                startDrag('nw', e.clientX, e.clientY);
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                top: -5,
+                right: -5,
+                width: 10,
+                height: 10,
+                background: '#ffffff',
+                border: '2px solid #2563eb',
+                borderRadius: 2,
+                cursor: 'nesw-resize',
+                pointerEvents: 'auto'
+              }}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                startDrag('ne', e.clientX, e.clientY);
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                bottom: -5,
+                right: -5,
+                width: 10,
+                height: 10,
+                background: '#ffffff',
+                border: '2px solid #2563eb',
+                borderRadius: 2,
+                cursor: 'nwse-resize',
+                pointerEvents: 'auto'
+              }}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                startDrag('se', e.clientX, e.clientY);
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                bottom: -5,
+                left: -5,
+                width: 10,
+                height: 10,
+                background: '#ffffff',
+                border: '2px solid #2563eb',
+                borderRadius: 2,
+                cursor: 'nesw-resize',
+                pointerEvents: 'auto'
+              }}
+              onMouseDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                e.stopPropagation();
+                startDrag('sw', e.clientX, e.clientY);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* In-Place Crop Action Toolbar directly below image */}
+      <div
+        className="mhz-td-image-toolbar mhz-td-in-place-crop-toolbar"
+        style={{
+          position: 'fixed',
+          top: `${toolbarTop}px`,
+          left: `${toolbarLeft}px`,
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px'
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <span className="text-[10px] font-bold text-blue-400 uppercase tracking-wider px-1">CROP</span>
+        <div className="mhz-td-image-toolbar-sep" />
+
+        {/* Presets */}
+        <button
+          type="button"
+          className="mhz-td-image-toolbar-btn text-[11px]"
+          onClick={() => setCrop({ unit: '%', x: 0, y: 0, width: 100, height: 100 })}
+          title="Reset to 100% full image"
+        >
+          100% Full
+        </button>
+        <button
+          type="button"
+          className="mhz-td-image-toolbar-btn text-[11px]"
+          onClick={() => setCrop({ unit: '%', x: 10, y: 10, width: 80, height: 80 })}
+          title="Center 80%"
+        >
+          80% Center
+        </button>
+        <button
+          type="button"
+          className="mhz-td-image-toolbar-btn text-[11px]"
+          onClick={() => {
+            if (baseWidth > 0 && baseHeight > 0) {
+              const minSide = Math.min(baseWidth, baseHeight);
+              const wPct = (minSide / baseWidth) * 80;
+              const hPct = (minSide / baseHeight) * 80;
+              setCrop({ unit: '%', x: (100 - wPct) / 2, y: (100 - hPct) / 2, width: wPct, height: hPct });
+            } else {
+              setCrop({ unit: '%', x: 10, y: 10, width: 80, height: 80 });
+            }
+          }}
+          title="1:1 Square"
+        >
+          1:1 Square
+        </button>
+
+        {/* Reset Crop (if already cropped) */}
+        {isAlreadyCropped && onResetCrop && (
+          <button
+            type="button"
+            className="mhz-td-image-toolbar-btn text-amber-400 hover:text-amber-300"
+            onClick={() => {
+              onResetCrop();
+              onClose();
+            }}
+            title="Reset crop to full original image"
+          >
+            <RotateCcw size={13} />
+            <span>Reset Crop</span>
+          </button>
+        )}
+
+        {/* Keep Scale Checkbox (if image was scaled) */}
+        {isScaled && (
+          <>
+            <div className="mhz-td-image-toolbar-sep" />
+            <label className="flex items-center gap-1.5 text-[11px] text-blue-300 font-medium cursor-pointer select-none px-1">
+              <input
+                type="checkbox"
+                checked={keepReducedScale}
+                onChange={(e) => setKeepReducedScale(e.target.checked)}
+                className="rounded border-slate-600 text-blue-500 focus:ring-0 cursor-pointer"
+              />
+              <span>Keep Scale ({Math.round(currentScale! * 100)}%)</span>
+            </label>
+          </>
+        )}
+
+        <div className="mhz-td-image-toolbar-sep" />
+
+        {/* Cancel button */}
+        <button
+          type="button"
+          className="mhz-td-image-toolbar-btn"
+          onClick={onClose}
+          title="Cancel Crop (Esc)"
+        >
+          Cancel
+        </button>
+
+        {/* Save as File button */}
+        {baseDir && (
+          <button
+            type="button"
+            className="mhz-td-image-toolbar-btn text-emerald-400 hover:text-emerald-300"
+            onClick={handleSaveCroppedFile}
+            title="Save cropped area as new PNG file"
+          >
+            <FolderOpen size={13} />
+            <span>Save as File</span>
+          </button>
+        )}
+
+        {/* Apply Crop button */}
+        <button
+          type="button"
+          className="mhz-td-image-toolbar-btn bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5"
+          onClick={handleApplyTrim}
+          title="Apply non-destructive Crop (Enter)"
+        >
+          <Crop size={13} />
+          <span>Apply Crop</span>
+        </button>
+      </div>
+    </>,
+    document.body
+  );
 };
 
 export interface SlashCommand {
@@ -609,23 +1238,50 @@ export interface TreeEditableCellProps {
   blocks: Block[];
   onUpdateBlocks: (newBlocks: Block[]) => void;
   fontSize: number;
+  baseDir?: string;
 }
 
 /**
  * TreeDiadev-inspired EditableCell WYSIWYG Editor Component.
  * Supports typed blocks, contentEditable in-place editing, F2 markdown raw toggling,
  * ESC to exit edit mode, rich Slash ('/') menu with formatting, block conversion,
- * and text/background color palettes.
+ * text/background color palettes, and image resizing & cropping.
  */
 export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
   blocks,
   onUpdateBlocks,
-  fontSize
+  fontSize,
+  baseDir
 }) => {
   const [focusedBlockId, setFocusedBlockId] = useState<string | null>(null);
   const [selectedBlockIds, setSelectedBlockIds] = useState<Set<string>>(new Set());
   const [lastAnchorBlockId, setLastAnchorBlockId] = useState<string | null>(null);
   const [collapsedHeadingIds, setCollapsedHeadingIds] = useState<Set<string>>(new Set());
+
+  // Image interaction states (Selection toolbar, Resizing, and Cropping dialog)
+  const [selectedImageInfo, setSelectedImageInfo] = useState<{
+    blockId: string;
+    target: HTMLImageElement;
+    src: string;
+    originalSrc: string;
+  } | null>(null);
+
+  const [trimmingImage, setTrimmingImage] = useState<{
+    src: string;
+    originalSrc: string;
+    blockId: string;
+    target: HTMLImageElement;
+    currentScale?: number;
+  } | null>(null);
+
+  const [isResizingImage, setIsResizingImage] = useState(false);
+  const resizeDragRef = useRef<{
+    startX: number;
+    startWidth: number;
+    blockId: string;
+    imgEl: HTMLImageElement;
+    zoom?: number;
+  } | null>(null);
   const lastAltArrowRef = useRef<{ key: 'ArrowLeft' | 'ArrowRight'; time: number; type: BlockType; blockId: string } | null>(null);
   const lastCtrlATimeRef = useRef<number>(0);
   const [gripMenuState, setGripMenuState] = useState<{ x: number; y: number; blockId: string } | null>(null);
@@ -636,6 +1292,24 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
   const [tableMenuState, setTableMenuState] = useState<TableMenuState | null>(null);
   const savedSelectionRef = useRef<{ range: Range; blockId: string } | null>(null);
   const isShiftSelectingRef = useRef<boolean>(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  // Block drag & drop states (supports single & multiple blocks via pointer events)
+  const [draggedBlockIds, setDraggedBlockIds] = useState<Set<string> | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ blockId: string; placement: 'before' | 'after' } | null>(null);
+  const [activeDragGhost, setActiveDragGhost] = useState<{
+    x: number;
+    y: number;
+    count: number;
+    label: string;
+  } | null>(null);
+  const pointerDragInfoRef = useRef<{
+    sourceBlockId: string;
+    blockIds: Set<string>;
+    startX: number;
+    startY: number;
+    started: boolean;
+  } | null>(null);
 
   const blocksRef = useRef<Block[]>(blocks);
   blocksRef.current = blocks;
@@ -1173,7 +1847,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     }
   }, [selectedBlockIds]);
 
-  // Click outside to dismiss menus
+  // Click outside to dismiss menus and image toolbar
   useEffect(() => {
     const handleDocClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
@@ -1185,10 +1859,243 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         setGripMenuState(null);
         setTableMenuState(null);
       }
+      if (
+        !target.closest('.mhz-td-image-toolbar') &&
+        target.tagName !== 'IMG' &&
+        !target.closest('.mhz-td-crop-wrapper') &&
+        !target.closest('.mhz-td-image-resize-handle') &&
+        !target.closest('.mhz-td-crop-modal')
+      ) {
+        setSelectedImageInfo(null);
+      }
     };
     document.addEventListener('mousedown', handleDocClick);
     return () => document.removeEventListener('mousedown', handleDocClick);
   }, []);
+
+  // Image Block update helper (crop, resize, reset)
+  const handleUpdateImageBlock = useCallback((
+    blockId: string,
+    imgEl: HTMLImageElement,
+    newHashProps: { crop?: string; width?: number; clearCrop?: boolean; clearWidth?: boolean }
+  ) => {
+    const currentBlocks = blocksRef.current;
+    const idx = currentBlocks.findIndex(b => b.id === blockId);
+    if (idx === -1) return;
+    const block = currentBlocks[idx];
+
+    let originalSrc = imgEl.getAttribute('data-original-src') || imgEl.getAttribute('src') || '';
+    if (originalSrc.startsWith('http://asset.localhost/') || originalSrc.startsWith('https://asset.localhost/') || originalSrc.startsWith('asset://')) {
+      try {
+        const u = new URL(originalSrc);
+        let p = decodeURIComponent(u.pathname);
+        if (/^\/[a-zA-Z]:/.test(p)) p = p.substring(1);
+        originalSrc = p + (u.hash || '');
+      } catch {}
+    }
+
+    const [cleanPath, existingHash] = originalSrc.split('#');
+    const hashParams = new URLSearchParams(existingHash || '');
+
+    if (newHashProps.clearCrop) {
+      hashParams.delete('crop');
+    } else if (newHashProps.crop !== undefined) {
+      hashParams.set('crop', newHashProps.crop);
+    }
+
+    if (newHashProps.clearWidth) {
+      hashParams.delete('width');
+    } else if (newHashProps.width !== undefined) {
+      hashParams.set('width', String(Math.round(newHashProps.width)));
+    }
+
+    // Decode URI component so commas in crop=x,y,w,h aren't converted to %2C
+    const rawHashString = hashParams.toString();
+    const newHash = rawHashString ? `#${decodeURIComponent(rawHashString)}` : '';
+
+    let finalPath = cleanPath;
+    if (baseDir && (cleanPath.includes(':') || cleanPath.startsWith('/') || cleanPath.startsWith('\\'))) {
+      const normPath = cleanPath.replace(/\\/g, '/');
+      const normBase = baseDir.replace(/\\/g, '/');
+      if (normPath.toLowerCase().startsWith(normBase.toLowerCase())) {
+        let rel = normPath.substring(normBase.length).replace(/^\/+/, '');
+        finalPath = `./${rel}`;
+      }
+    }
+
+    const finalSrcWithHash = `${finalPath}${newHash}`;
+    const alt = imgEl.getAttribute('alt') || '';
+    const title = imgEl.getAttribute('title') || '';
+
+    const newHtml = renderImageHtml(finalSrcWithHash, alt, title, baseDir);
+
+    const newBlocks = [...currentBlocks];
+    newBlocks[idx] = {
+      ...block,
+      html: newHtml,
+      isRaw: false
+    };
+
+    onUpdateBlocks(newBlocks);
+
+    // Keep selectedImageInfo bound to the new image element after DOM update
+    setTimeout(() => {
+      const blockEl = document.getElementById(`edit-${blockId}`);
+      const newImg = blockEl?.querySelector('img') as HTMLImageElement | null;
+      if (newImg) {
+        setSelectedImageInfo({
+          blockId,
+          target: newImg,
+          src: newImg.src,
+          originalSrc: newImg.getAttribute('data-original-src') || newImg.src
+        });
+      }
+    }, 40);
+  }, [baseDir, onUpdateBlocks]);
+
+  const handleSetImageWidthPercent = useCallback((blockId: string, imgEl: HTMLImageElement, percent: number) => {
+    const cropWrapper = imgEl.closest('span[data-crop-rect]') as HTMLElement | null;
+    let baseWidth = imgEl.naturalWidth || 600;
+    if (cropWrapper) {
+      const cropRect = cropWrapper.getAttribute('data-crop-rect')?.split(',').map(Number);
+      if (cropRect && cropRect[2] > 0) {
+        baseWidth = cropRect[2];
+      }
+    }
+    const targetWidth = Math.round(baseWidth * percent);
+    handleUpdateImageBlock(blockId, imgEl, { width: targetWidth });
+  }, [handleUpdateImageBlock]);
+
+  const handleResetImage = useCallback((blockId: string, imgEl: HTMLImageElement) => {
+    handleUpdateImageBlock(blockId, imgEl, { clearCrop: true, clearWidth: true });
+  }, [handleUpdateImageBlock]);
+
+  const handleOpenImageFolder = useCallback(async (originalSrc: string) => {
+    let cleanSrc = originalSrc.split('#')[0].split('?')[0];
+    if (cleanSrc.startsWith('http://asset.localhost') || cleanSrc.startsWith('https://asset.localhost') || cleanSrc.startsWith('asset://')) {
+      try {
+        const u = new URL(cleanSrc);
+        let p = decodeURIComponent(u.pathname);
+        p = p.replace(/^\/+([a-zA-Z]:)/, '$1');
+        cleanSrc = p;
+      } catch {}
+    }
+    cleanSrc = cleanSrc.replace(/^[/\\]*\?+[/\\]+/, '').replace(/^\\\\\?\\/, '');
+    if (/^\/[a-zA-Z]:/.test(cleanSrc)) {
+      cleanSrc = cleanSrc.substring(1);
+    }
+
+    let absPath = cleanSrc;
+    const isAbs = /^[a-zA-Z]:[/\\]/.test(cleanSrc) || cleanSrc.startsWith('\\\\');
+    if (!isAbs && baseDir) {
+      const cleanRel = cleanSrc.replace(/^\.[/\\]/, '');
+      const cleanBase = baseDir.replace(/[/\\]+$/, '');
+      absPath = `${cleanBase}/${cleanRel}`;
+    }
+    absPath = absPath.replace(/\//g, '\\');
+
+    try {
+      await invoke('open_in_explorer', { path: absPath });
+    } catch (err) {
+      console.error('Failed to open image in explorer:', err);
+    }
+  }, [baseDir]);
+
+  // Window listeners for corner dragging to resize image
+  useEffect(() => {
+    if (!isResizingImage) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeDragRef.current) return;
+      const { startX, startWidth, imgEl, zoom } = resizeDragRef.current;
+      const deltaX = (e.clientX - startX) / (zoom || 1);
+      const newWidth = Math.max(50, Math.round(startWidth + deltaX));
+
+      const cropWrapper = imgEl.closest('span[data-crop-rect]') as HTMLElement | null;
+      if (cropWrapper) {
+        const cropRect = cropWrapper.getAttribute('data-crop-rect')?.split(',').map(Number);
+        if (cropRect && cropRect.length === 4) {
+          const [, , cw] = cropRect;
+          const scale = newWidth / cw;
+          (cropWrapper.style as any).zoom = `${scale}`;
+          cropWrapper.setAttribute('data-custom-width', `${newWidth}`);
+        }
+      } else {
+        imgEl.style.width = `${newWidth}px`;
+        imgEl.setAttribute('data-custom-width', `${newWidth}`);
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (resizeDragRef.current) {
+        const { startX, startWidth, blockId, imgEl, zoom } = resizeDragRef.current;
+        const deltaX = (e.clientX - startX) / (zoom || 1);
+        const newWidth = Math.max(50, Math.round(startWidth + deltaX));
+        handleUpdateImageBlock(blockId, imgEl, { width: newWidth });
+      }
+      setIsResizingImage(false);
+      resizeDragRef.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingImage, handleUpdateImageBlock]);
+
+  // Visual outline on selected image
+  useEffect(() => {
+    document.querySelectorAll('.selected-image-outline').forEach(el => {
+      el.classList.remove('selected-image-outline');
+    });
+    if (selectedImageInfo?.target) {
+      const wrapper = selectedImageInfo.target.closest('span[data-crop-rect]') || selectedImageInfo.target;
+      wrapper.classList.add('selected-image-outline');
+    }
+  }, [selectedImageInfo]);
+
+  // Keyboard listener when image is selected (F2 to raw, Esc to deselect)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F2' && selectedImageInfo) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleToggleRawMarkdown(selectedImageInfo.blockId);
+        setSelectedImageInfo(null);
+      } else if (e.key === 'Escape' && selectedImageInfo) {
+        setSelectedImageInfo(null);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, [selectedImageInfo]);
+
+  // Real-time synchronization of floating toolbar position while image is selected
+  // Handles document zoom (Ctrl+Wheel / Ctrl+-/+), scrolling, resizing, and layout changes
+  const [, setFloatingPosTick] = useState(0);
+  useEffect(() => {
+    if (!selectedImageInfo) return;
+    let rafId: number;
+    let isMounted = true;
+
+    const tick = () => {
+      if (!isMounted) return;
+      if (!document.body.contains(selectedImageInfo.target)) {
+        setSelectedImageInfo(null);
+        return;
+      }
+      setFloatingPosTick(t => (t + 1) % 100000);
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      isMounted = false;
+      cancelAnimationFrame(rafId);
+    };
+  }, [selectedImageInfo]);
 
   // Execute a slash command to convert block type
   const executeSlashCommand = useCallback((cmd: SlashCommand, blockId: string) => {
@@ -1643,8 +2550,15 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       e.preventDefault();
       e.stopPropagation();
 
-      const rawText = (e.currentTarget.innerText || '').trim();
-      const converted = fromRawMarkdown(rawText, block);
+      const currentHtml = (e.currentTarget as HTMLElement)?.innerHTML || block.html || '';
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = currentHtml;
+      tempDiv.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+      tempDiv.querySelectorAll('div, p').forEach(el => el.before('\n'));
+      let rawMd = (tempDiv.textContent || tempDiv.innerText || '').trim();
+      rawMd = rawMd.replace(/\u00A0/g, ' ');
+
+      const converted = fromRawMarkdown(rawMd, block, baseDir);
       const newBlocks = [...currentBlocks];
       newBlocks[index] = {
         ...block,
@@ -1665,8 +2579,15 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
       const newBlocks = [...currentBlocks];
       if (block.isRaw) {
         // Toggle back from raw markdown to rendered HTML
-        const rawText = (e.currentTarget.innerText || '').trim();
-        const converted = fromRawMarkdown(rawText, block);
+        const currentHtml = (e.currentTarget as HTMLElement)?.innerHTML || block.html || '';
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = currentHtml;
+        tempDiv.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+        tempDiv.querySelectorAll('div, p').forEach(el => el.before('\n'));
+        let rawMd = (tempDiv.textContent || tempDiv.innerText || '').trim();
+        rawMd = rawMd.replace(/\u00A0/g, ' ');
+
+        const converted = fromRawMarkdown(rawMd, block, baseDir);
         newBlocks[index] = {
           ...block,
           ...converted,
@@ -1674,7 +2595,7 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         };
       } else {
         // Toggle to raw markdown text
-        const rawMd = toRawMarkdown(block);
+        const rawMd = toRawMarkdown(block, baseDir);
         newBlocks[index] = { ...block, html: rawMd, isRaw: true };
       }
 
@@ -2309,16 +3230,24 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     const block = current[idx];
     const newBlocks = [...current];
     if (block.isRaw) {
-      const rawText = (block.html || '').trim();
-      const converted = fromRawMarkdown(rawText, block);
+      const el = document.getElementById(`edit-${block.id}`);
+      const currentHtml = el?.innerHTML || block.html || '';
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = currentHtml;
+      tempDiv.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+      tempDiv.querySelectorAll('div, p').forEach(el => el.before('\n'));
+      let rawMd = (tempDiv.textContent || tempDiv.innerText || '').trim();
+      rawMd = rawMd.replace(/\u00A0/g, ' ');
+
+      const converted = fromRawMarkdown(rawMd, block, baseDir);
       newBlocks[idx] = { ...block, ...converted, isRaw: false };
     } else {
-      const rawMd = toRawMarkdown(block);
+      const rawMd = toRawMarkdown(block, baseDir);
       newBlocks[idx] = { ...block, html: rawMd, isRaw: true };
     }
     onUpdateBlocks(newBlocks);
     focusBlock(block.id, 0);
-  }, [onUpdateBlocks]);
+  }, [baseDir, onUpdateBlocks]);
 
   // Right-click context menu on Grip handle
   const handleGripContextMenu = useCallback((e: React.MouseEvent, blockId: string) => {
@@ -2335,8 +3264,147 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
     setGripMenuState({ x, y, blockId });
   }, []);
 
+  // Pointer-based Drag & Drop for grip handles (Bypasses WebView2 HTML5 DnD limitations)
+  const handleGripPointerDown = useCallback((e: React.PointerEvent, blockId: string) => {
+    // Only handle primary (left) button
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    const currentSelected = selectedBlockIds;
+    const idsToDrag = (currentSelected.size > 1 && currentSelected.has(blockId))
+      ? new Set(currentSelected)
+      : new Set([blockId]);
+
+    const sourceBlock = blocksRef.current.find(b => b.id === blockId);
+    const snippet = (sourceBlock?.html || sourceBlock?.type || '')
+      .replace(/<[^>]*>/g, '')
+      .trim()
+      .slice(0, 24);
+
+    pointerDragInfoRef.current = {
+      sourceBlockId: blockId,
+      blockIds: idsToDrag,
+      startX: e.clientX,
+      startY: e.clientY,
+      started: false,
+    };
+
+    const handlePointerMove = (moveEv: PointerEvent) => {
+      const info = pointerDragInfoRef.current;
+      if (!info) return;
+
+      const dist = Math.hypot(moveEv.clientX - info.startX, moveEv.clientY - info.startY);
+      if (!info.started) {
+        if (dist > 3) {
+          info.started = true;
+          document.body.classList.add('mhz-dragging-active');
+          window.getSelection()?.removeAllRanges();
+
+          if (!currentSelected.has(info.sourceBlockId)) {
+            setSelectedBlockIds(new Set([info.sourceBlockId]));
+            setFocusedBlockId(info.sourceBlockId);
+          }
+          setDraggedBlockIds(info.blockIds);
+        } else {
+          return;
+        }
+      }
+
+      // Update ghost badge position
+      setActiveDragGhost({
+        x: moveEv.clientX,
+        y: moveEv.clientY,
+        count: info.blockIds.size,
+        label: info.blockIds.size > 1 ? `Move ${info.blockIds.size} blocks` : (snippet || 'Move block'),
+      });
+
+      // Find element under cursor
+      const el = document.elementFromPoint(moveEv.clientX, moveEv.clientY);
+      const row = el?.closest('.mhz-td-block-row') as HTMLElement | null;
+
+      if (row) {
+        const targetId = row.getAttribute('data-block-id');
+        if (targetId && !info.blockIds.has(targetId)) {
+          const rect = row.getBoundingClientRect();
+          const placement: 'before' | 'after' = moveEv.clientY > (rect.top + rect.height / 2) ? 'after' : 'before';
+          setDropTarget(prev => {
+            if (prev?.blockId === targetId && prev?.placement === placement) return prev;
+            return { blockId: targetId, placement };
+          });
+          return;
+        }
+      }
+
+      // If hovering near the bottom of wrapper below last block
+      const wrapper = wrapperRef.current;
+      if (wrapper) {
+        const wrapperRect = wrapper.getBoundingClientRect();
+        if (moveEv.clientY >= wrapperRect.bottom - 80) {
+          const currentBlocks = blocksRef.current;
+          if (currentBlocks.length > 0) {
+            const last = currentBlocks[currentBlocks.length - 1];
+            if (!info.blockIds.has(last.id)) {
+              setDropTarget({ blockId: last.id, placement: 'after' });
+              return;
+            }
+          }
+        }
+      }
+    };
+
+    const handlePointerUp = (upEv: PointerEvent) => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+      document.body.classList.remove('mhz-dragging-active');
+
+      const info = pointerDragInfoRef.current;
+      pointerDragInfoRef.current = null;
+      setActiveDragGhost(null);
+
+      if (!info || !info.started) {
+        // Was just a click!
+        handleSelectBlock(blockId, upEv as unknown as React.MouseEvent);
+        focusBlock(blockId);
+        setDraggedBlockIds(null);
+        setDropTarget(null);
+        return;
+      }
+
+      // Execute drop reordering
+      setDropTarget(target => {
+        if (target && info.blockIds && !info.blockIds.has(target.blockId)) {
+          const current = [...blocksRef.current];
+          const dragged = current.filter(b => info.blockIds.has(b.id));
+          const remaining = current.filter(b => !info.blockIds.has(b.id));
+          const targetIdx = remaining.findIndex(b => b.id === target.blockId);
+
+          if (targetIdx !== -1) {
+            const insertIdx = target.placement === 'after' ? targetIdx + 1 : targetIdx;
+            const reordered = [
+              ...remaining.slice(0, insertIdx),
+              ...dragged,
+              ...remaining.slice(insertIdx)
+            ];
+            onUpdateBlocks(reordered);
+            setSelectedBlockIds(new Set(info.blockIds));
+            setFocusedBlockId(target.blockId);
+          }
+        }
+        return null;
+      });
+
+      setDraggedBlockIds(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  }, [selectedBlockIds, handleSelectBlock, focusBlock, onUpdateBlocks]);
+
   return (
     <div
+      ref={wrapperRef}
       className="mhz-td-wrapper"
       style={{ fontSize: `${fontSize}px` }}
       tabIndex={0}
@@ -2369,11 +3437,15 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
         const isCollapsed = collapsedHeadingIds.has(block.id);
         const isFocused = focusedBlockId === block.id;
         const isSelected = selectedBlockIds.has(block.id);
+        const isBeingDragged = draggedBlockIds?.has(block.id);
+        const isDropTargetBefore = dropTarget?.blockId === block.id && dropTarget.placement === 'before';
+        const isDropTargetAfter = dropTarget?.blockId === block.id && dropTarget.placement === 'after';
 
         return (
           <div
             key={block.id}
-            className={`mhz-td-block-row mhz-td-row-${block.type} ${isFocused ? 'focused' : ''} ${isSelected ? 'selected' : ''} ${block.isRaw ? 'editing' : ''}`}
+            data-block-id={block.id}
+            className={`mhz-td-block-row mhz-td-row-${block.type} ${isFocused ? 'focused' : ''} ${isSelected ? 'selected' : ''} ${block.isRaw ? 'editing' : ''} ${isBeingDragged ? 'is-dragging' : ''} ${isDropTargetBefore ? 'drop-target-before' : ''} ${isDropTargetAfter ? 'drop-target-after' : ''}`}
             style={{ display: isHidden ? 'none' : undefined }}
             onMouseDown={(e) => {
               if (e.shiftKey) {
@@ -2400,15 +3472,22 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
                   {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                 </div>
               )}
-              <span className="mhz-td-line-number">{idx + 1}</span>
-              <div
-                className="mhz-td-grip"
-                title="Click or drag to select; Right-click for block menu"
+              <span
+                className="mhz-td-line-number"
+                title="Click to select block (Shift: range select, Ctrl: multi-select)"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleSelectBlock(block.id, e);
-                  focusBlock(block.id);
                 }}
+              >
+                {idx + 1}
+              </span>
+              <div
+                className={`mhz-td-grip ${isBeingDragged ? 'grabbing' : ''}`}
+                title={selectedBlockIds.size > 1 && selectedBlockIds.has(block.id)
+                  ? `Drag to move ${selectedBlockIds.size} selected blocks (Right-click: menu)`
+                  : "Drag to move block (Shift/Ctrl click: multi-select, Right-click: menu)"}
+                onPointerDown={(e) => handleGripPointerDown(e, block.id)}
                 onContextMenu={(e) => handleGripContextMenu(e, block.id)}
               >
                 <GripVertical size={13} />
@@ -2546,6 +3625,22 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
                     onClick={(e) => {
                       setFocusedBlockId(block.id);
                       handleSelectBlock(block.id, e);
+                      const target = e.target as HTMLElement;
+                      const cropWrapper = target.closest('.mhz-td-crop-wrapper');
+                      const img = target.tagName === 'IMG' 
+                        ? (target as HTMLImageElement) 
+                        : (cropWrapper?.querySelector('img') as HTMLImageElement | null);
+
+                      if (img) {
+                        setSelectedImageInfo({
+                          blockId: block.id,
+                          target: img,
+                          src: img.src,
+                          originalSrc: img.getAttribute('data-original-src') || img.src
+                        });
+                      } else if (!cropWrapper && !target.closest('.mhz-td-image-toolbar') && !target.closest('.mhz-td-image-resize-handle')) {
+                        setSelectedImageInfo(null);
+                      }
                     }}
                     onMouseDown={(e) => handleBlockMouseDown(e, block.id)}
                     onMouseMove={(e) => handleBlockMouseMove(e, block.id)}
@@ -3252,6 +4347,260 @@ export const TreeEditableCell: React.FC<TreeEditableCellProps> = ({
             <span>Delete Table</span>
           </button>
         </div>
+      )}
+
+      {/* Floating Ghost Badge while Dragging Blocks */}
+      {activeDragGhost && (
+        <div
+          className="mhz-td-drag-floating-ghost"
+          style={{
+            position: 'fixed',
+            left: `${activeDragGhost.x + 14}px`,
+            top: `${activeDragGhost.y - 12}px`,
+            pointerEvents: 'none',
+            zIndex: 99999,
+          }}
+        >
+          ↕ {activeDragGhost.label}
+        </div>
+      )}
+
+      {/* Floating Toolbar and Resize Handle for Selected Image rendered via Portal to document.body */}
+      {selectedImageInfo && selectedImageInfo.target && createPortal(
+        (() => {
+          const cropWrapper = selectedImageInfo.target.closest('span[data-crop-rect]') as HTMLElement | null;
+          const rectTarget = cropWrapper || selectedImageInfo.target;
+          if (!document.body.contains(rectTarget)) return null;
+
+          const targetRect = rectTarget.getBoundingClientRect();
+          if (targetRect.width === 0 || targetRect.height === 0) return null;
+
+          // If image is out of viewport, hide floating toolbar
+          if (targetRect.bottom < 0 || targetRect.top > window.innerHeight || targetRect.right < 0 || targetRect.left > window.innerWidth) {
+            return null;
+          }
+
+          const handleTop = targetRect.bottom - 7;
+          const handleLeft = targetRect.right - 7;
+
+          // Position directly below the image (or right above if near screen bottom)
+          let toolbarTop = targetRect.bottom + 6;
+          if (toolbarTop + 45 > window.innerHeight && targetRect.top > 50) {
+            toolbarTop = Math.max(8, targetRect.top - 42);
+          }
+          const toolbarLeft = Math.max(16, Math.min(targetRect.left, window.innerWidth - 380));
+
+          return (
+            <>
+              {/* Corner Resize Handle */}
+              <div
+                className="mhz-td-image-resize-handle"
+                style={{
+                  position: 'fixed',
+                  top: `${handleTop}px`,
+                  left: `${handleLeft}px`,
+                  zIndex: 99999
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const editorZoom = getElementZoom(rectTarget.parentElement);
+                  setIsResizingImage(true);
+                  resizeDragRef.current = {
+                    startX: e.clientX,
+                    startWidth: targetRect.width / editorZoom,
+                    blockId: selectedImageInfo.blockId,
+                    imgEl: selectedImageInfo.target,
+                    zoom: editorZoom
+                  };
+                }}
+                title="Drag to resize image"
+              />
+
+              {/* Floating Image Action Toolbar */}
+              <div
+                className="mhz-td-image-toolbar"
+                style={{
+                  position: 'fixed',
+                  top: `${toolbarTop}px`,
+                  left: `${toolbarLeft}px`,
+                  zIndex: 99998
+                }}
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">IMG</span>
+                <div className="mhz-td-image-toolbar-sep" />
+
+                {/* Trim / Crop */}
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => {
+                    const cropWrapper = selectedImageInfo.target.closest('span[data-crop-rect]') as HTMLElement | null;
+                    const rectTarget = cropWrapper || selectedImageInfo.target;
+                    const naturalW = selectedImageInfo.target.naturalWidth || 1;
+                    const editorZoom = getElementZoom(rectTarget.parentElement);
+                    const currentDisplayW = rectTarget.getBoundingClientRect().width / editorZoom;
+
+                    const customWidthAttr = cropWrapper?.getAttribute('data-custom-width') || selectedImageInfo.target.getAttribute('data-custom-width');
+                    const parsed = parseImageHash(selectedImageInfo.originalSrc);
+                    const customWidth = customWidthAttr ? parseFloat(customWidthAttr) : parsed.customWidth;
+                    const existingCrop = parsed.crop;
+                    const baseUnscaledW = existingCrop ? existingCrop.width : naturalW;
+                    const currentScale = customWidth
+                      ? (customWidth / baseUnscaledW)
+                      : (currentDisplayW < baseUnscaledW - 5 ? currentDisplayW / baseUnscaledW : 1.0);
+
+                    setTrimmingImage({
+                      src: selectedImageInfo.target.src,
+                      originalSrc: selectedImageInfo.originalSrc,
+                      blockId: selectedImageInfo.blockId,
+                      target: selectedImageInfo.target,
+                      currentScale
+                    });
+                    setSelectedImageInfo(null);
+                  }}
+                  title="Crop / Trim Image (MarhNote style)"
+                >
+                  <Crop size={14} className="text-blue-400" />
+                  <span>Crop</span>
+                </button>
+
+                <div className="mhz-td-image-toolbar-sep" />
+
+                {/* Quick Width Presets */}
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => handleSetImageWidthPercent(selectedImageInfo.blockId, selectedImageInfo.target, 0.25)}
+                  title="25% width"
+                >
+                  25%
+                </button>
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => handleSetImageWidthPercent(selectedImageInfo.blockId, selectedImageInfo.target, 0.5)}
+                  title="50% width"
+                >
+                  50%
+                </button>
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => handleSetImageWidthPercent(selectedImageInfo.blockId, selectedImageInfo.target, 0.75)}
+                  title="75% width"
+                >
+                  75%
+                </button>
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => handleSetImageWidthPercent(selectedImageInfo.blockId, selectedImageInfo.target, 1.0)}
+                  title="100% full width"
+                >
+                  100%
+                </button>
+
+                {/* Reset button */}
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => handleResetImage(selectedImageInfo.blockId, selectedImageInfo.target)}
+                  title="Reset Crop and Size"
+                >
+                  <RotateCcw size={13} className="text-amber-400" />
+                </button>
+
+                <div className="mhz-td-image-toolbar-sep" />
+
+                {/* Open Folder in Windows Explorer */}
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => handleOpenImageFolder(selectedImageInfo.originalSrc)}
+                  title="Open containing folder in Explorer"
+                >
+                  <FolderOpen size={14} className="text-emerald-400" />
+                </button>
+
+                {/* Edit Raw Markdown (F2) */}
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn"
+                  onClick={() => {
+                    handleToggleRawMarkdown(selectedImageInfo.blockId);
+                    setSelectedImageInfo(null);
+                  }}
+                  title="Edit Raw Markdown (F2)"
+                >
+                  <Code2 size={14} className="text-purple-400" />
+                  <span>F2</span>
+                </button>
+
+                <div className="mhz-td-image-toolbar-sep" />
+
+                {/* Delete Block */}
+                <button
+                  type="button"
+                  className="mhz-td-image-toolbar-btn hover:text-red-400"
+                  onClick={() => {
+                    const next = blocksRef.current.filter(b => b.id !== selectedImageInfo.blockId);
+                    onUpdateBlocks(next.length ? next : [{ id: generateId(), type: 'paragraph', html: '', indent: 0 }]);
+                    setSelectedImageInfo(null);
+                  }}
+                  title="Delete image block"
+                >
+                  <Trash2 size={14} className="text-red-400" />
+                </button>
+              </div>
+            </>
+          );
+        })(),
+        document.body
+      )}
+
+      {/* In-Place Image Crop Overlay (Directly in Editor) */}
+      {trimmingImage && (
+        <InPlaceCropOverlay
+          blockId={trimmingImage.blockId}
+          target={trimmingImage.target}
+          src={trimmingImage.src}
+          originalSrc={trimmingImage.originalSrc}
+          currentScale={trimmingImage.currentScale}
+          baseDir={baseDir}
+          onClose={() => setTrimmingImage(null)}
+          onResetCrop={() => {
+            handleUpdateImageBlock(trimmingImage.blockId, trimmingImage.target, {
+              clearCrop: true,
+              clearWidth: true
+            });
+            setTrimmingImage(null);
+          }}
+          onApplyCrop={(cropPx, targetWidth) => {
+            const cropString = `${cropPx.x},${cropPx.y},${cropPx.width},${cropPx.height}`;
+            handleUpdateImageBlock(trimmingImage.blockId, trimmingImage.target, {
+              crop: cropString,
+              width: targetWidth,
+              clearWidth: !targetWidth
+            });
+            setTrimmingImage(null);
+          }}
+          onSaveAsFile={(newRelPath, targetWidth) => {
+            const currentBlocks = blocksRef.current;
+            const idx = currentBlocks.findIndex(b => b.id === trimmingImage.blockId);
+            if (idx !== -1) {
+              const alt = trimmingImage.target.getAttribute('alt') || '';
+              const widthHash = targetWidth ? `#width=${targetWidth}` : '';
+              const newHtml = renderImageHtml(`${newRelPath}${widthHash}`, alt, '', baseDir);
+              const newBlocks = [...currentBlocks];
+              newBlocks[idx] = { ...currentBlocks[idx], html: newHtml, isRaw: false };
+              onUpdateBlocks(newBlocks);
+            }
+            setTrimmingImage(null);
+          }}
+        />
       )}
     </div>
   );

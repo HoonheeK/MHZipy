@@ -1,6 +1,36 @@
 [
   {
     "version": "1.0.5",
+    "date": "2026-11-11",
+    "notes": {
+      "ko": [
+        "MHZipy Version 1.0.5 Released!"
+      ],
+      "en": [
+        "MHZipy Version 1.0.5 Released!"
+      ],
+      "ja": [
+        "MHZipy バージョン 1.0.5 がリリースされました!"
+      ]
+    }
+  },
+  {
+    "version": "1.0.5",
+    "date": "2026-11-10",
+    "notes": {
+      "ko": [
+        "MHZipy Version 1.0.5 Released!"
+      ],
+      "en": [
+        "MHZipy Version 1.0.5 Released!"
+      ],
+      "ja": [
+        "MHZipy バージョン 1.0.5 がリリースされました!"
+      ]
+    }
+  },
+  {
+    "version": "1.0.5",
     "date": "2026-11-08",
     "notes": {
       "ko": [
