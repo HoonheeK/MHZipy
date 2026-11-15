@@ -1631,7 +1631,7 @@
         let currentScale = 1.5; // 기본 스케일
         let currentRotation = 0; // 기본 회전 각도
         let selectedPageNum = null; // 선택된 페이지 번호 (줌 앵커용)
-        let currentLayoutMode = localStorage.getItem('mhzipy_pdf_layout_mode') || 'grid'; // 'grid' | 'single'
+        let currentLayoutMode = localStorage.getItem('mhzipy_pdf_layout_mode') || 'single'; // 'single' (세로 1열 기본) | 'grid'
         let isFitWidthMode = true; // 기본 모드: 화면 폭 맞춤 (Fit to Width)
         let isPdfEncrypted = false; // 암호화 문서 여부
         let pdfSessionPassword = ''; // 문서 열람에 사용된 비밀번호
@@ -2107,9 +2107,6 @@
                 // 북마크 로드
                 loadCustomBookmarks();
 
-                // 썸네일 렌더링
-                renderThumbnails();
-
                 // 초기 페이지 표시
                 updatePageIndicator(1);
                 document.getElementById('total-pages').textContent = pdfDoc.numPages;
@@ -2120,6 +2117,9 @@
                 }
 
                 await renderPages();
+
+                // 썸네일 렌더링 (메인 페이지 렌더링 후 백그라운드 로드)
+                renderThumbnails();
 
                 // 스크롤 이벤트 리스너 등록
                 const scrollEl = document.getElementById('viewer-scroll-container');
@@ -2287,10 +2287,11 @@
 
             try {
                 const scrollContainer = document.getElementById('viewer-scroll-container');
-                const containerRect = scrollContainer.getBoundingClientRect();
+                const containerRect = scrollContainer ? scrollContainer.getBoundingClientRect() : { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth, height: window.innerHeight, width: window.innerWidth };
                 // 버퍼: 뷰포트 크기만큼 상하좌우 여유 확보 (다중 그리드 지원)
-                const bufferHeight = containerRect.height;
-                const bufferWidth = containerRect.width;
+                // 초기화 시점이나 창 생성 직후 0px인 경우 폴백 보장
+                const bufferHeight = Math.max(containerRect.height, window.innerHeight || 600);
+                const bufferWidth = Math.max(containerRect.width, window.innerWidth || 800);
 
                 // 보이는 페이지 + 버퍼 영역(상하좌우)의 페이지 찾기
                 const toRender = [];
@@ -2321,7 +2322,11 @@
                     if (version !== _renderVersion) break;
                     if (_renderedPages.has(idx)) continue;
                     _renderedPages.add(idx);
-                    await renderSinglePage(_pageDataList[idx], version);
+                    try {
+                        await renderSinglePage(_pageDataList[idx], version);
+                    } catch (renderErr) {
+                        console.error(`Error rendering page index ${idx}:`, renderErr);
+                    }
                 }
 
                 // 검색어가 있다면 검색 재실행
@@ -2366,31 +2371,35 @@
 
             // === 1단계: 모든 페이지의 플레이스홀더(wrapper)를 먼저 생성 ===
             for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-                const page = await pdfDoc.getPage(pageNum);
-                // 사용자가 요청한 전체 표시용 논리적 뷰포트
-                const targetViewport = page.getViewport({ scale: currentScale, rotation: currentRotation });
-                
-                // Canvas 크기 제한 (Chromium 하드웨어 한계 방어: 16384px)
-                const MAX_CANVAS_DIMENSION = 16384;
-                let canvasViewport = targetViewport;
-                if (targetViewport.width > MAX_CANVAS_DIMENSION || targetViewport.height > MAX_CANVAS_DIMENSION) {
-                    const scaleFactor = Math.min(MAX_CANVAS_DIMENSION / targetViewport.width, MAX_CANVAS_DIMENSION / targetViewport.height);
-                    canvasViewport = page.getViewport({ scale: currentScale * scaleFactor, rotation: currentRotation });
-                }
-                
-                // 페이지 래퍼 생성 (빈 플레이스홀더: 항상 전체 targetViewport 크기 유지하여 무제한 확대 가능)
-                const pageWrapper = document.createElement('div');
-                pageWrapper.className = 'page-wrapper';
-                if (selectedPageNum === pageNum) pageWrapper.classList.add('selected');
-                pageWrapper.id = `page-${pageNum}`;
-                pageWrapper.style.width = `${targetViewport.width}px`;
-                pageWrapper.style.height = `${targetViewport.height}px`;
-                container.appendChild(pageWrapper);
+                try {
+                    const page = await pdfDoc.getPage(pageNum);
+                    // 사용자가 요청한 전체 표시용 논리적 뷰포트
+                    const targetViewport = page.getViewport({ scale: currentScale, rotation: currentRotation });
+                    
+                    // Canvas 크기 제한 (Chromium 하드웨어 한계 방어: 16384px)
+                    const MAX_CANVAS_DIMENSION = 16384;
+                    let canvasViewport = targetViewport;
+                    if (targetViewport.width > MAX_CANVAS_DIMENSION || targetViewport.height > MAX_CANVAS_DIMENSION) {
+                        const scaleFactor = Math.min(MAX_CANVAS_DIMENSION / targetViewport.width, MAX_CANVAS_DIMENSION / targetViewport.height);
+                        canvasViewport = page.getViewport({ scale: currentScale * scaleFactor, rotation: currentRotation });
+                    }
+                    
+                    // 페이지 래퍼 생성 (빈 플레이스홀더: 항상 전체 targetViewport 크기 유지하여 무제한 확대 가능)
+                    const pageWrapper = document.createElement('div');
+                    pageWrapper.className = 'page-wrapper';
+                    if (selectedPageNum === pageNum) pageWrapper.classList.add('selected');
+                    pageWrapper.id = `page-${pageNum}`;
+                    pageWrapper.style.width = `${targetViewport.width}px`;
+                    pageWrapper.style.height = `${targetViewport.height}px`;
+                    container.appendChild(pageWrapper);
 
-                _pageDataList.push({ pageNum, page, targetViewport, canvasViewport, viewport: targetViewport, pageWrapper });
+                    _pageDataList.push({ pageNum, page, targetViewport, canvasViewport, viewport: targetViewport, pageWrapper });
 
-                if (pageNum === 1 && window.__SOURCE_PPTX_PATH__) {
-                    updateStatusBarSource(window.__SOURCE_PPTX_PATH__);
+                    if (pageNum === 1 && window.__SOURCE_PPTX_PATH__) {
+                        updateStatusBarSource(window.__SOURCE_PPTX_PATH__);
+                    }
+                } catch (pageErr) {
+                    console.error(`Failed to load page ${pageNum}:`, pageErr);
                 }
             }
 
@@ -2409,7 +2418,7 @@
             } else {
                 container.classList.remove('single-column');
                 container.classList.add('multi-grid');
-                container.style.width = (maxPageWidth > availableWidth) ? 'max-content' : '100%';
+                container.style.width = (maxPageWidth > availableWidth) ? `${Math.ceil(maxPageWidth)}px` : '100%';
             }
 
             // === 스크롤 위치 복원 (플레이스홀더가 모두 배치된 직후) ===
@@ -3915,7 +3924,7 @@
                 } else {
                     container.classList.remove('single-column');
                     container.classList.add('multi-grid');
-                    container.style.width = (maxPageWidth > availableWidth) ? 'max-content' : '100%';
+                    container.style.width = (maxPageWidth > availableWidth) ? `${Math.ceil(maxPageWidth)}px` : '100%';
                 }
                 renderVisiblePages();
             }
@@ -3974,7 +3983,7 @@
                             for (const p of _pageDataList) {
                                 if (p.targetViewport.width > maxPageWidth) maxPageWidth = p.targetViewport.width;
                             }
-                            container.style.width = maxPageWidth > availableWidth ? 'max-content' : '100%';
+                            container.style.width = maxPageWidth > availableWidth ? `${Math.ceil(maxPageWidth)}px` : '100%';
                         }
                     }
                     renderVisiblePages();

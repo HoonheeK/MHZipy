@@ -36,8 +36,9 @@ export const openPdfPrintDialog = async (
     console.warn('invoke open_pdf_print_dialog fallback to WebviewWindow:', err);
   }
 
-  const cleanKey = (file.path || file.name).replace(/[^a-zA-Z0-9-_]/g, '').slice(-32);
-  const dialogLabel = `pdf-print-dialog-${cleanKey || 'default'}`;
+  const cleanKey = (file.path || file.name).replace(/[^a-zA-Z0-9-_]/g, '').slice(-16);
+  const pathHash = hashPathString(file.path || file.name);
+  const dialogLabel = `pdf-print-dialog-${cleanKey || 'doc'}-${pathHash}`;
 
   try {
     const existingWin = await WebviewWindow.getByLabel(dialogLabel);
@@ -89,8 +90,22 @@ export const openPdfPrintDialog = async (
  *
  * @param file PDF 파일의 경로와 이름을 포함하는 객체.
  */
+/**
+ * 문자열의 고유 해시값을 계산합니다 (한글/특수문자 경로 지원용).
+ */
+const hashPathString = (str: string): string => {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(16);
+};
+
 export const openPdfInWindow = async (file: PdfFile) => {
-  const windowLabel = `pdf-viewer-${file.path.replace(/[^a-zA-Z0-9-_]/g, '')}`;
+  const cleanKey = (file.path || file.name).replace(/[^a-zA-Z0-9-_]/g, '').slice(-16);
+  const pathHash = hashPathString(file.path || file.name);
+  const windowLabel = `pdf-viewer-${cleanKey || 'doc'}-${pathHash}`;
 
   try {
     const existingWin = await WebviewWindow.getByLabel(windowLabel);
