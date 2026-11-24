@@ -163,6 +163,10 @@ export default function FileList({
     is_zip: boolean;
   } | null>(null);
   const builtInSubmenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [oneDriveMenuItems, setOneDriveMenuItems] = useState<{ path: string; items: { verb: string; label: string }[] } | null>(null);
+  const [oneDriveMenuOpen, setOneDriveMenuOpen] = useState(false);
+  const [oneDriveMenuPos, setOneDriveMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const oneDriveSubmenuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [openingFiles, setOpeningFiles] = useState<Set<string>>(new Set());
   
   const lastCtrlATimeRef = useRef<number>(0);
@@ -717,7 +721,11 @@ export default function FileList({
 
   // Close context menu on click or external trigger
   useEffect(() => {
-    const handleClose = () => setContextMenu(null);
+    const handleClose = () => {
+      setContextMenu(null);
+      setBuiltInAppMenuOpen(false);
+      setOneDriveMenuOpen(false);
+    };
     window.addEventListener('click', handleClose);
     window.addEventListener('mhz-close-context-menu', handleClose);
     return () => {
@@ -725,6 +733,31 @@ export default function FileList({
       window.removeEventListener('mhz-close-context-menu', handleClose);
     };
   }, []);
+
+  // Load OneDrive shell context menu items when file context menu opens for a single item
+  useEffect(() => {
+    if (!contextMenu || contextMenu.type !== 'file' || selectedFiles.size !== 1) {
+      setOneDriveMenuOpen(false);
+      setOneDriveMenuItems(null);
+      return;
+    }
+    const firstPath = Array.from(selectedFiles)[0];
+    let cancelled = false;
+    invoke<{ verb: string; label: string }[]>('get_onedrive_menu_items', { path: firstPath })
+      .then((items) => {
+        if (!cancelled) {
+          setOneDriveMenuItems({ path: firstPath, items });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOneDriveMenuItems(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contextMenu, selectedFiles]);
 
   // Selection Logic
   const handleFileClick = (e: React.MouseEvent, file: FileData, index: number) => {
@@ -2316,6 +2349,100 @@ export default function FileList({
               }} style={{ padding: '2px 10px' }}>
                 <span>{t('contextMenu.openInExplorer')}</span>
               </div>
+              {selectedFiles.size === 1 && (() => {
+                const firstPath = Array.from(selectedFiles)[0];
+                const items = oneDriveMenuItems?.path === firstPath ? oneDriveMenuItems.items : [];
+                if (items.length === 0) return null;
+
+                const openOneDriveSubmenuAt = (el: HTMLElement) => {
+                  if (oneDriveSubmenuTimerRef.current) {
+                    clearTimeout(oneDriveSubmenuTimerRef.current);
+                    oneDriveSubmenuTimerRef.current = null;
+                  }
+                  setBuiltInAppMenuOpen(false);
+                  const rect = el.getBoundingClientRect();
+                  const subWidth = 220;
+                  const subHeight = Math.max(40, items.length * 30 + 16);
+                  const x = rect.right + subWidth + 8 > window.innerWidth
+                    ? Math.max(8, rect.left - subWidth - 2)
+                    : rect.right + 2;
+                  const y = Math.max(8, Math.min(rect.top - 4, window.innerHeight - subHeight - 8));
+                  setOneDriveMenuPos({ x, y });
+                  setOneDriveMenuOpen(true);
+                };
+
+                const scheduleCloseOneDriveSubmenu = () => {
+                  if (oneDriveSubmenuTimerRef.current) {
+                    clearTimeout(oneDriveSubmenuTimerRef.current);
+                  }
+                  oneDriveSubmenuTimerRef.current = setTimeout(() => {
+                    setOneDriveMenuOpen(false);
+                  }, 140);
+                };
+
+                return (
+                  <div
+                    className="context-menu-item"
+                    style={{ padding: '2px 10px' }}
+                    onMouseEnter={(e) => openOneDriveSubmenuAt(e.currentTarget)}
+                    onMouseLeave={scheduleCloseOneDriveSubmenu}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (oneDriveMenuOpen) {
+                        setOneDriveMenuOpen(false);
+                      } else {
+                        openOneDriveSubmenuAt(e.currentTarget);
+                      }
+                    }}
+                  >
+                    <span>OneDrive</span>
+                    <span className="shortcut" style={{ marginLeft: '12px' }}>▸</span>
+
+                    {oneDriveMenuOpen && createPortal(
+                      <div
+                        className="context-menu"
+                        style={{
+                          position: 'fixed',
+                          left: `${oneDriveMenuPos.x}px`,
+                          top: `${oneDriveMenuPos.y}px`,
+                          minWidth: '210px',
+                          zIndex: 1400,
+                        }}
+                        onMouseEnter={() => {
+                          if (oneDriveSubmenuTimerRef.current) {
+                            clearTimeout(oneDriveSubmenuTimerRef.current);
+                            oneDriveSubmenuTimerRef.current = null;
+                          }
+                        }}
+                        onMouseLeave={scheduleCloseOneDriveSubmenu}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {items.map((item) => (
+                          <div
+                            key={item.verb}
+                            className="context-menu-item"
+                            style={{ padding: '4px 10px' }}
+                            onClick={async () => {
+                              setOneDriveMenuOpen(false);
+                              setContextMenu(null);
+                              try {
+                                await invoke('invoke_onedrive_menu_item', { path: firstPath, verb: item.verb });
+                              } catch (err) {
+                                console.error('Failed to invoke OneDrive command:', err);
+                                showMessage(t('explorer.error', { defaultValue: 'Error' }), String(err));
+                              }
+                            }}
+                          >
+                            <span>{item.label}</span>
+                          </div>
+                        ))}
+                      </div>,
+                      document.body
+                    )}
+                  </div>
+                );
+              })()}
               {selectedFiles.size === 1 && (sortedFiles.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory || filesOverride?.find(f => f.path === Array.from(selectedFiles)[0])?.isDirectory) && (
                 <>
                   <div className="context-menu-item" onClick={() => handleCopyFileNames(Array.from(selectedFiles)[0])} style={{ padding: '2px 10px' }}>

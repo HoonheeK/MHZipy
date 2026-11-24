@@ -957,14 +957,11 @@ const FileExplorer = forwardRef<FileExplorerRef, FileExplorerProps>(function Fil
     try {
       if (isDirectory) {
         saveRecentFolder(path);
-        // For directories, open them directly in the file explorer.
-        await invoke('open_file', { path });
       } else {
         const parentPath = path.substring(0, Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/')));
         if (parentPath) saveRecentFolder(parentPath);
-        // For files, open the parent folder and select the file.
-        await invoke('open_in_explorer', { path });
       }
+      await invoke('open_in_explorer', { path });
     } catch (e) {
       console.error('Failed to open in explorer:', e);
     }

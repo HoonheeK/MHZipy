@@ -1,11 +1,12 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App";
-import MarkdownEditor from "./MarkdownEditor/MarkdownEditor";
-import ImageViewer from "./ImageViewer/ImageViewer";
-import VideoPlayer from "./VideoPlayer/VideoPlayer";
-import PowerShellManager from "./PowerShellManager/PowerShellManager";
 import "./i18n";
+
+const App = lazy(() => import("./App"));
+const MarkdownEditor = lazy(() => import("./MarkdownEditor/MarkdownEditor"));
+const ImageViewer = lazy(() => import("./ImageViewer/ImageViewer"));
+const VideoPlayer = lazy(() => import("./VideoPlayer/VideoPlayer"));
+const PowerShellManager = lazy(() => import("./PowerShellManager/PowerShellManager"));
 
 const params = new URLSearchParams(window.location.search);
 const view = params.get('view') || (window as any).__INITIAL_VIEW__;
@@ -21,22 +22,24 @@ const runId = params.get('runId') || (window as any).__INITIAL_RUN_ID__ || '';
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {isMarkdownEditor ? (
-      <MarkdownEditor initialFilePath={filePath} />
-    ) : isImageViewer ? (
-      <ImageViewer initialFilePath={filePath} />
-    ) : isVideoPlayer ? (
-      <VideoPlayer initialFilePath={filePath} />
-    ) : isPowerShellManager ? (
-      <PowerShellManager
-        initialWorkingDir={workingDir}
-        initialScriptFilePath={scriptFilePath}
-        runnerMode={runnerMode}
-        runId={runId}
-      />
-    ) : (
-      <App />
-    )}
+    <Suspense fallback={null}>
+      {isMarkdownEditor ? (
+        <MarkdownEditor initialFilePath={filePath} />
+      ) : isImageViewer ? (
+        <ImageViewer initialFilePath={filePath} />
+      ) : isVideoPlayer ? (
+        <VideoPlayer initialFilePath={filePath} />
+      ) : isPowerShellManager ? (
+        <PowerShellManager
+          initialWorkingDir={workingDir}
+          initialScriptFilePath={scriptFilePath}
+          runnerMode={runnerMode}
+          runId={runId}
+        />
+      ) : (
+        <App />
+      )}
+    </Suspense>
   </React.StrictMode>,
 );
 

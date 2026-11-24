@@ -20,6 +20,7 @@ use mft::MftIndex;
 mod license;
 mod icon;
 mod native_dnd;
+mod onedrive_menu;
 
 #[derive(serde::Serialize)]
 struct ZipEntry {
@@ -1011,21 +1012,64 @@ fn get_files_from_clipboard() -> Result<Vec<String>, String> {
 fn open_in_explorer(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
         use std::process::{Command, Stdio};
+        use windows::core::HSTRING as Win52HString;
+        use windows::Win32::UI::Shell::ShellExecuteW;
+        use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use windows61::core::HSTRING as Win61HString;
+        use windows61::Win32::Foundation::{S_FALSE, S_OK};
+        use windows61::Win32::System::Com::{
+            CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
+        };
+        use windows61::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
+
         println!("[DEBUG] Attempting to open in explorer: {}", path);
 
-        let clean_path = path
+        let mut clean_path = path
             .trim_start_matches(r"\\?\")
             .replace('/', "\\");
+        if clean_path.len() == 2 && clean_path.ends_with(':') {
+            clean_path.push('\\');
+        }
         let p = std::path::Path::new(&clean_path);
 
-        let result = if p.is_file() {
-            Command::new("explorer")
-                .arg(format!("/select,{}", clean_path))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
+        if p.is_file() {
+            let mut opened = false;
+            unsafe {
+                let hr_init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let should_uninit = hr_init == S_OK || hr_init == S_FALSE;
+
+                let wide = Win61HString::from(&clean_path);
+                let pidl = ILCreateFromPathW(&wide);
+                if !pidl.is_null() {
+                    if SHOpenFolderAndSelectItems(pidl, None, 0).is_ok() {
+                        opened = true;
+                    }
+                    ILFree(Some(pidl as *const _));
+                }
+
+                if should_uninit {
+                    CoUninitialize();
+                }
+            }
+
+            if !opened {
+                Command::new("explorer")
+                    .raw_arg(format!("/select,\"{}\"", clean_path))
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| {
+                        let error_message = format!(
+                            "Failed to spawn explorer.exe for path '{}': {}",
+                            clean_path, e
+                        );
+                        println!("[ERROR] {}", error_message);
+                        error_message
+                    })?;
+            }
         } else {
             let folder = if p.is_dir() {
                 clean_path.clone()
@@ -1038,21 +1082,29 @@ fn open_in_explorer(path: String) -> Result<(), String> {
             } else {
                 clean_path.clone()
             };
-            Command::new("explorer")
-                .arg(&folder)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-        };
 
-        if let Err(e) = result {
-            let error_message = format!("Failed to spawn explorer.exe for path '{}': {}", clean_path, e);
-            println!("[ERROR] {}", error_message);
-            return Err(error_message);
+            let verb = Win52HString::from("explore");
+            let target = Win52HString::from(&folder);
+            let res = unsafe { ShellExecuteW(None, &verb, &target, None, None, SW_SHOWNORMAL) };
+            if (res.0 as isize) <= 32 {
+                Command::new("explorer")
+                    .raw_arg(format!("\"{}\"", folder))
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|e| {
+                        let error_message = format!(
+                            "Failed to spawn explorer.exe for path '{}': {}",
+                            folder, e
+                        );
+                        println!("[ERROR] {}", error_message);
+                        error_message
+                    })?;
+            }
         }
-        
-        println!("[DEBUG] Successfully spawned explorer.exe for path: {}", clean_path);
+
+        println!("[DEBUG] Successfully opened in explorer: {}", clean_path);
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -2741,6 +2793,32 @@ fn open_safe_web_folder_window(
             .replace(/^\.+|\.+$/g, '');
     }}
 
+    // Trusted-Types-safe DOM builder (avoids innerHTML on strict CSP sites like Google Drive)
+    function mkEl(tag, attrs, children) {{
+        const node = document.createElement(tag);
+        if (attrs) {{
+            for (const [k, v] of Object.entries(attrs)) {{
+                if (v === undefined || v === null || v === false) continue;
+                if (k === 'style' && typeof v === 'string') node.style.cssText = v;
+                else if (k === 'text') node.textContent = String(v);
+                else if (k === 'disabled') node.disabled = !!v;
+                else if (k in node && !k.startsWith('data-')) node[k] = v;
+                else node.setAttribute(k, String(v));
+            }}
+        }}
+        if (children) {{
+            for (const child of children) {{
+                if (child === null || child === undefined || child === false) continue;
+                if (typeof child === 'string' || typeof child === 'number') {{
+                    node.appendChild(document.createTextNode(String(child)));
+                }} else {{
+                    node.appendChild(child);
+                }}
+            }}
+        }}
+        return node;
+    }}
+
     function getActiveSubpath() {{
         return manualSubpathOverride !== null ? manualSubpathOverride : relativeSubpath;
     }}
@@ -2759,6 +2837,72 @@ fn open_safe_web_folder_window(
             }}
         }} catch (_) {{}}
     }}
+
+    // Override tauri-plugin-shell's window.open / target="_blank" hijack (which fails with
+    // "shell.open not allowed" on remote URLs like https://drive.google.com/) and instead
+    // ask the MHZipy host to open the URL in a new WebView window sharing the login session.
+    function requestOpenInNewWebView(rawUrl) {{
+        try {{
+            if (!rawUrl) return false;
+            const resolved = new URL(String(rawUrl), window.location.href).href;
+            if (!/^https?:\/\//i.test(resolved)) return false;
+            if (window.chrome && window.chrome.webview && typeof window.chrome.webview.postMessage === 'function') {{
+                window.chrome.webview.postMessage(JSON.stringify({{
+                    type: 'mhzipy-web-folder-open-url',
+                    url: resolved
+                }}));
+                return true;
+            }}
+        }} catch (_) {{}}
+        return false;
+    }}
+
+    try {{
+        window.open = function(url, target, features) {{
+            if (url && String(url).trim() !== '' && String(url).trim().toLowerCase() !== 'about:blank') {{
+                requestOpenInNewWebView(url);
+                return null;
+            }}
+            // Handle Google Drive's two-step pattern: const w = window.open('', '_blank'); w.location.href = '...';
+            let currentHref = 'about:blank';
+            const locProxy = {{
+                get href() {{ return currentHref; }},
+                set href(v) {{
+                    currentHref = String(v);
+                    requestOpenInNewWebView(currentHref);
+                }},
+                assign(v) {{
+                    currentHref = String(v);
+                    requestOpenInNewWebView(currentHref);
+                }},
+                replace(v) {{
+                    currentHref = String(v);
+                    requestOpenInNewWebView(currentHref);
+                }},
+                toString() {{ return currentHref; }}
+            }};
+            return {{
+                get location() {{ return locProxy; }},
+                set location(v) {{ locProxy.href = v; }},
+                opener: null,
+                closed: false,
+                focus() {{}},
+                blur() {{}},
+                close() {{ this.closed = true; }}
+            }};
+        }};
+    }} catch (_) {{}}
+
+    window.addEventListener('click', (e) => {{
+        const anchor = e.target && typeof e.target.closest === 'function' ? e.target.closest('a[href]') : null;
+        if (!anchor) return;
+        const target = (anchor.getAttribute('target') || '').toLowerCase();
+        if (target === '_blank' && /^https?:\/\//i.test(anchor.href || '')) {{
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            requestOpenInNewWebView(anchor.href);
+        }}
+    }}, true);
 
     function scrapeBreadcrumbsFromDOM() {{
         const selectors = [
@@ -3107,47 +3251,81 @@ fn open_safe_web_folder_window(
         const isStrict = SAFETY_LEVEL === 'strict';
         const badgeColor = isStrict ? '#ef4444' : '#f59e0b';
 
-        modal.innerHTML = `
-            <div style="background:#0f172a;border:2px solid ${{badgeColor}};border-radius:12px;width:540px;max-width:94vw;box-shadow:0 20px 50px rgba(0,0,0,0.7);overflow:hidden;">
-                <div style="padding:14px 18px;background:#1e293b;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;justify-content:space-between;align-items:center;">
-                    <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;">
-                        <span>🛡️</span>
-                        <span>Pre-Upload Safety Gate — ${{FOLDER_NAME}}</span>
-                    </div>
-                    <button id="mhzipy-modal-close" style="background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;">✕</button>
-                </div>
-                <div style="padding:16px 18px;display:flex;flex-direction:column;gap:14px;font-size:13px;">
-                    <div style="padding:10px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#fcd34d;line-height:1.45;">
-                        ⚠️ <b>Upload Caution:</b> You are about to unlock file uploading for <b>${{FOLDER_NAME}}</b>.<br>
-                        Please inspect the files you plan to upload below to prevent accidental or draft file uploads.
-                    </div>
-
-                    <div id="mhzipy-inspect-dropzone" style="background:#1e293b;border:1px dashed #38bdf8;border-radius:8px;padding:12px;text-align:center;transition:background 0.15s,border-color 0.15s;">
-                        <input type="file" id="mhzipy-file-inspector-input" data-mhzipy-inspector="true" multiple style="display:none;">
-                        <button id="mhzipy-btn-pick-inspect" style="background:#0284c7;color:#fff;border:none;padding:7px 14px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12.5px;">
-                            🔍 Select or Drop Files Here to Inspect Before Uploading...
-                        </button>
-                        <div style="font-size:11.5px;color:#94a3b8;margin-top:6px;">Checks for draft/temp keywords (초안, 임시, 복사본, temp, ~$), file size, and last modified time</div>
-                        <div id="mhzipy-inspect-results" style="margin-top:10px;text-align:left;max-height:150px;overflow-y:auto;display:none;background:#0f172a;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);"></div>
-                    </div>
-
-                    <div style="display:flex;flex-direction:column;gap:8px;background:#1e293b;padding:10px 12px;border-radius:8px;">
-                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                            <input type="checkbox" id="mhzipy-chk-1" style="width:15px;height:15px;accent-color:#3b82f6;">
-                            <span>I have verified that the target web folder (<b>${{FOLDER_NAME}}</b>) is correct.</span>
-                        </label>
-                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                            <input type="checkbox" id="mhzipy-chk-2" style="width:15px;height:15px;accent-color:#3b82f6;">
-                            <span>I have checked that the files are final versions and contain no sensitive/temporary data.</span>
-                        </label>
-                    </div>
-                </div>
-                <div style="padding:12px 18px;background:#131c2e;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:flex-end;gap:10px;">
-                    <button id="mhzipy-btn-cancel-unlock" style="padding:7px 16px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#cbd5e1;cursor:pointer;font-weight:600;">Keep Locked</button>
-                    <button id="mhzipy-btn-confirm-unlock" disabled style="padding:7px 18px;border-radius:6px;background:#dc2626;border:1px solid #ef4444;color:#fff;cursor:not-allowed;font-weight:700;opacity:0.45;">🔓 Unlock Upload (5 min)</button>
-                </div>
-            </div>
-        `;
+        const modalCard = mkEl('div', {{
+            style: `background:#0f172a;border:2px solid ${{badgeColor}};border-radius:12px;width:540px;max-width:94vw;box-shadow:0 20px 50px rgba(0,0,0,0.7);overflow:hidden;`
+        }}, [
+            mkEl('div', {{
+                style: 'padding:14px 18px;background:#1e293b;border-bottom:1px solid rgba(255,255,255,0.1);display:flex;justify-content:space-between;align-items:center;'
+            }}, [
+                mkEl('div', {{ style: 'display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;' }}, [
+                    mkEl('span', {{ text: '🛡️' }}),
+                    mkEl('span', {{ text: `Pre-Upload Safety Gate — ${{FOLDER_NAME}}` }})
+                ]),
+                mkEl('button', {{ id: 'mhzipy-modal-close', style: 'background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;', text: '✕' }})
+            ]),
+            mkEl('div', {{ style: 'padding:16px 18px;display:flex;flex-direction:column;gap:14px;font-size:13px;' }}, [
+                mkEl('div', {{
+                    style: 'padding:10px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:8px;color:#fcd34d;line-height:1.45;'
+                }}, [
+                    '⚠️ ',
+                    mkEl('b', {{ text: 'Upload Caution:' }}),
+                    ' You are about to unlock file uploading for ',
+                    mkEl('b', {{ text: FOLDER_NAME }}),
+                    '.',
+                    mkEl('br'),
+                    'Please inspect the files you plan to upload below to prevent accidental or draft file uploads.'
+                ]),
+                mkEl('div', {{
+                    id: 'mhzipy-inspect-dropzone',
+                    style: 'background:#1e293b;border:1px dashed #38bdf8;border-radius:8px;padding:12px;text-align:center;transition:background 0.15s,border-color 0.15s;'
+                }}, [
+                    mkEl('input', {{ type: 'file', id: 'mhzipy-file-inspector-input', 'data-mhzipy-inspector': 'true', multiple: true, style: 'display:none;' }}),
+                    mkEl('button', {{
+                        id: 'mhzipy-btn-pick-inspect',
+                        style: 'background:#0284c7;color:#fff;border:none;padding:7px 14px;border-radius:6px;font-weight:600;cursor:pointer;font-size:12.5px;',
+                        text: '🔍 Select or Drop Files Here to Inspect Before Uploading...'
+                    }}),
+                    mkEl('div', {{
+                        style: 'font-size:11.5px;color:#94a3b8;margin-top:6px;',
+                        text: 'Checks for draft/temp keywords (초안, 임시, 복사본, temp, ~$), file size, and last modified time'
+                    }}),
+                    mkEl('div', {{
+                        id: 'mhzipy-inspect-results',
+                        style: 'margin-top:10px;text-align:left;max-height:150px;overflow-y:auto;display:none;background:#0f172a;padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.08);'
+                    }})
+                ]),
+                mkEl('div', {{ style: 'display:flex;flex-direction:column;gap:8px;background:#1e293b;padding:10px 12px;border-radius:8px;' }}, [
+                    mkEl('label', {{ style: 'display:flex;align-items:center;gap:8px;cursor:pointer;' }}, [
+                        mkEl('input', {{ type: 'checkbox', id: 'mhzipy-chk-1', style: 'width:15px;height:15px;accent-color:#3b82f6;' }}),
+                        mkEl('span', null, [
+                            'I have verified that the target web folder (',
+                            mkEl('b', {{ text: FOLDER_NAME }}),
+                            ') is correct.'
+                        ])
+                    ]),
+                    mkEl('label', {{ style: 'display:flex;align-items:center;gap:8px;cursor:pointer;' }}, [
+                        mkEl('input', {{ type: 'checkbox', id: 'mhzipy-chk-2', style: 'width:15px;height:15px;accent-color:#3b82f6;' }}),
+                        mkEl('span', {{ text: 'I have checked that the files are final versions and contain no sensitive/temporary data.' }})
+                    ])
+                ])
+            ]),
+            mkEl('div', {{
+                style: 'padding:12px 18px;background:#131c2e;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:flex-end;gap:10px;'
+            }}, [
+                mkEl('button', {{
+                    id: 'mhzipy-btn-cancel-unlock',
+                    style: 'padding:7px 16px;border-radius:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#cbd5e1;cursor:pointer;font-weight:600;',
+                    text: 'Keep Locked'
+                }}),
+                mkEl('button', {{
+                    id: 'mhzipy-btn-confirm-unlock',
+                    disabled: true,
+                    style: 'padding:7px 18px;border-radius:6px;background:#dc2626;border:1px solid #ef4444;color:#fff;cursor:not-allowed;font-weight:700;opacity:0.45;',
+                    text: '🔓 Unlock Upload (5 min)'
+                }})
+            ])
+        ]);
+        modal.appendChild(modalCard);
 
         document.documentElement.appendChild(modal);
 
@@ -3175,20 +3353,23 @@ fn open_safe_web_folder_window(
         const renderInspectedFiles = (files) => {{
             if (!files || files.length === 0) return;
             resultsBox.style.display = 'block';
-            resultsBox.innerHTML = files.map(f => {{
+            resultsBox.replaceChildren();
+            for (const f of files) {{
                 const hits = checkRiskyName(f.name);
                 const mtime = f.lastModified ? new Date(f.lastModified).toLocaleString() : '';
-                const badge = hits.length > 0
-                    ? `<span style="background:#dc2626;color:#fff;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700;">⚠️ Caution: ${{hits.join(', ')}}</span>`
-                    : `<span style="background:#059669;color:#fff;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700;">✅ Clean</span>`;
-                return `<div style="padding:5px 4px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;">
-                    <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                        <b style="color:${{hits.length > 0 ? '#fca5a5' : '#e2e8f0'}}">${{f.name}}</b>
-                        <span style="color:#64748b;font-size:11px;margin-left:6px;">(${{formatSize(f.size)}} • ${{mtime}})</span>
-                    </div>
-                    ${{badge}}
-                </div>`;
-            }}).join('');
+                const badgeEl = hits.length > 0
+                    ? mkEl('span', {{ style: 'background:#dc2626;color:#fff;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700;', text: `⚠️ Caution: ${{hits.join(', ')}}` }})
+                    : mkEl('span', {{ style: 'background:#059669;color:#fff;padding:1px 6px;border-radius:4px;font-size:10.5px;font-weight:700;', text: '✅ Clean' }});
+                resultsBox.appendChild(mkEl('div', {{
+                    style: 'padding:5px 4px;border-bottom:1px solid rgba(255,255,255,0.06);display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;'
+                }}, [
+                    mkEl('div', {{ style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' }}, [
+                        mkEl('b', {{ style: `color:${{hits.length > 0 ? '#fca5a5' : '#e2e8f0'}}`, text: f.name }}),
+                        mkEl('span', {{ style: 'color:#64748b;font-size:11px;margin-left:6px;', text: `(${{formatSize(f.size)}} • ${{mtime}})` }})
+                    ]),
+                    badgeEl
+                ]));
+            }}
         }};
 
         fileInput.onchange = () => {{
@@ -3231,7 +3412,7 @@ fn open_safe_web_folder_window(
         if (!statusBtn || !bar) return;
 
         if (SAFETY_LEVEL === 'download_only') {{
-            statusBtn.innerHTML = '🟢 Download Only (Upload Disabled)';
+            statusBtn.textContent = '🟢 Download Only (Upload Disabled)';
             statusBtn.style.background = '#065f46';
             statusBtn.style.borderColor = '#10b981';
             return;
@@ -3240,12 +3421,12 @@ fn open_safe_web_folder_window(
         if (uploadUnlocked) {{
             const m = String(Math.floor(remSeconds / 60)).padStart(2, '0');
             const s = String(remSeconds % 60).padStart(2, '0');
-            statusBtn.innerHTML = `🔓 Upload UNLOCKED (${{m}}:${{s}}) — Click to Lock Now`;
+            statusBtn.textContent = `🔓 Upload UNLOCKED (${{m}}:${{s}}) — Click to Lock Now`;
             statusBtn.style.background = '#dc2626';
             statusBtn.style.borderColor = '#f87171';
             bar.style.borderBottom = '2px solid #ef4444';
         }} else {{
-            statusBtn.innerHTML = '🔒 Upload Locked (Safe Mode) — Click to Unlock...';
+            statusBtn.textContent = '🔒 Upload Locked (Safe Mode) — Click to Unlock...';
             statusBtn.style.background = '#1e293b';
             statusBtn.style.borderColor = '#38bdf8';
             bar.style.borderBottom = SAFETY_LEVEL === 'strict' ? '2px solid #f59e0b' : '1px solid #334155';
@@ -3302,40 +3483,61 @@ fn open_safe_web_folder_window(
         bar.id = 'mhzipy-safety-bar';
         bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:38px;background:#0f172a;color:#f8fafc;z-index:2147483645;display:flex;align-items:center;justify-content:space-between;padding:0 12px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,0.35);border-bottom:1px solid #334155;user-select:none;box-sizing:border-box;';
 
-        const levelBadge = SAFETY_LEVEL === 'strict'
-            ? '<span style="background:#dc2626;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;">🔴 STRICT OFFICIAL</span>'
+        const levelBadgeEl = SAFETY_LEVEL === 'strict'
+            ? mkEl('span', {{ style: 'background:#dc2626;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;', text: '🔴 STRICT OFFICIAL' }})
             : (SAFETY_LEVEL === 'download_only'
-                ? '<span style="background:#059669;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;">🟢 DOWNLOAD ONLY</span>'
-                : '<span style="background:#d97706;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;">🟡 CAUTION GUARD</span>');
+                ? mkEl('span', {{ style: 'background:#059669;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;', text: '🟢 DOWNLOAD ONLY' }})
+                : mkEl('span', {{ style: 'background:#d97706;color:#fff;padding:2px 7px;border-radius:4px;font-weight:700;font-size:11px;', text: '🟡 CAUTION GUARD' }}));
 
-        bar.innerHTML = `
-            <div style="display:flex;align-items:center;gap:8px;overflow:hidden;">
-                ${{levelBadge}}
-                <span style="font-weight:700;color:#38bdf8;white-space:nowrap;">🌐 ${{FOLDER_NAME}}</span>
-                ${{LINKED_LOCAL ? `
-                    <span style="color:#cbd5e1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;" title="Linked Local Root Folder: ${{LINKED_LOCAL}}">📥 ${{LINKED_LOCAL}}</span>
-                    <button id="mhzipy-subpath-badge" title="Auto-detected Web Folder hierarchy subpath. Click to customize or reset to auto-detect." style="background:rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.35);color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">
-                        📁 [Root]
-                    </button>
-                ` : `<span style="color:#64748b;font-size:11px;">(No linked local folder — downloads go to default Downloads)</span>`}}
-            </div>
-            <div style="display:flex;align-items:center;gap:7px;flex-shrink:0;">
-                ${{LINKED_LOCAL ? `
-                    <button id="mhzipy-auto-zip-btn" title="When ON, downloading a folder (.zip) from Box automatically extracts its folder hierarchy into the target local path." style="background:#065f46;border:1px solid #10b981;color:#ecfdf5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
-                        📦 Auto-Unpack ZIP: ON
-                    </button>
-                ` : ''}}
-                <button id="mhzipy-inspect-btn" style="background:#0284c7;border:1px solid #38bdf8;color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
-                    🔍 Pre-Upload File Inspector
-                </button>
-                <button id="mhzipy-lock-toggle-btn" style="background:#1e293b;border:1px solid #38bdf8;color:#fff;padding:3px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;">
-                    🔒 Upload Locked (Safe Mode) — Click to Unlock...
-                </button>
-                <button id="mhzipy-collapse-bar-btn" title="Minimize Safety Bar" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);color:#cbd5e1;padding:3px 7px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;">
-                    ▲ Hide
-                </button>
-            </div>
-        `;
+        const leftGroup = mkEl('div', {{ style: 'display:flex;align-items:center;gap:8px;overflow:hidden;' }}, [
+            levelBadgeEl,
+            mkEl('span', {{ style: 'font-weight:700;color:#38bdf8;white-space:nowrap;', text: `🌐 ${{FOLDER_NAME}}` }}),
+            ...(LINKED_LOCAL ? [
+                mkEl('span', {{
+                    style: 'color:#cbd5e1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px;',
+                    title: `Linked Local Root Folder: ${{LINKED_LOCAL}}`,
+                    text: `📥 ${{LINKED_LOCAL}}`
+                }}),
+                mkEl('button', {{
+                    id: 'mhzipy-subpath-badge',
+                    title: 'Auto-detected Web Folder hierarchy subpath. Click to customize or reset to auto-detect.',
+                    style: 'background:rgba(15,23,42,0.9);border:1px solid rgba(148,163,184,0.35);color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;',
+                    text: '📁 [Root]'
+                }})
+            ] : [
+                mkEl('span', {{ style: 'color:#64748b;font-size:11px;', text: '(No linked local folder — downloads go to default Downloads)' }})
+            ])
+        ]);
+
+        const rightGroup = mkEl('div', {{ style: 'display:flex;align-items:center;gap:7px;flex-shrink:0;' }}, [
+            ...(LINKED_LOCAL ? [
+                mkEl('button', {{
+                    id: 'mhzipy-auto-zip-btn',
+                    title: 'When ON, downloading a folder (.zip) from Box automatically extracts its folder hierarchy into the target local path.',
+                    style: 'background:#065f46;border:1px solid #10b981;color:#ecfdf5;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;',
+                    text: '📦 Auto-Unpack ZIP: ON'
+                }})
+            ] : []),
+            mkEl('button', {{
+                id: 'mhzipy-inspect-btn',
+                style: 'background:#0284c7;border:1px solid #38bdf8;color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;',
+                text: '🔍 Pre-Upload File Inspector'
+            }}),
+            mkEl('button', {{
+                id: 'mhzipy-lock-toggle-btn',
+                style: 'background:#1e293b;border:1px solid #38bdf8;color:#fff;padding:3px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;',
+                text: '🔒 Upload Locked (Safe Mode) — Click to Unlock...'
+            }}),
+            mkEl('button', {{
+                id: 'mhzipy-collapse-bar-btn',
+                title: 'Minimize Safety Bar',
+                style: 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.18);color:#cbd5e1;padding:3px 7px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;',
+                text: '▲ Hide'
+            }})
+        ]);
+
+        bar.appendChild(leftGroup);
+        bar.appendChild(rightGroup);
 
         document.documentElement.appendChild(bar);
 
@@ -3343,7 +3545,7 @@ fn open_safe_web_folder_window(
         pill.id = 'mhzipy-collapsed-pill';
         pill.title = 'Click to expand MHZipy Web Folder Safety Bar';
         pill.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:2147483645;background:#0f172a;border:1px solid #38bdf8;color:#f8fafc;padding:6px 12px;border-radius:999px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:11.5px;font-weight:700;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,0.5);display:none;align-items:center;gap:6px;opacity:0.9;';
-        pill.innerHTML = '🛡️ Safe Guard ▼';
+        pill.textContent = '🛡️ Safe Guard ▼';
         pill.onclick = () => {{
             barCollapsed = false;
             syncBarCollapseState();
@@ -3451,6 +3653,14 @@ fn open_safe_web_folder_window(
         .visible(true)
         .focused(true)
         .disable_drag_drop_handler()
+        .on_new_window(|url, _features| {
+            let scheme = url.scheme();
+            if scheme == "http" || scheme == "https" || scheme == "about" {
+                tauri::webview::NewWindowResponse::Allow
+            } else {
+                tauri::webview::NewWindowResponse::Deny
+            }
+        })
         .initialization_script(&init_script);
 
         if let Some(p) = pos {
@@ -3651,7 +3861,46 @@ fn attach_web_folder_download_manager(
             };
             let text = webview2_com::take_pwstr(raw);
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                if json.get("type").and_then(|v| v.as_str()) == Some("mhzipy-web-folder-state") {
+                let msg_type = json.get("type").and_then(|v| v.as_str());
+                if msg_type == Some("mhzipy-web-folder-open-url") {
+                    if let Some(target_url) = json.get("url").and_then(|v| v.as_str()) {
+                        if let Ok(parsed) = target_url.trim().parse::<tauri::Url>() {
+                            if parsed.scheme() == "http" || parsed.scheme() == "https" {
+                                let app_open = app_for_msg.clone();
+                                std::thread::spawn(move || {
+                                    let ts = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_millis())
+                                        .unwrap_or(0);
+                                    let popup_label = format!("web-folder-popup-{}", ts);
+                                    let builder = tauri::WebviewWindowBuilder::new(
+                                        &app_open,
+                                        &popup_label,
+                                        tauri::WebviewUrl::External(parsed),
+                                    )
+                                    .title("🌐 MHZipy Web View")
+                                    .inner_size(1220.0, 860.0)
+                                    .min_inner_size(640.0, 480.0)
+                                    .decorations(true)
+                                    .resizable(true)
+                                    .visible(true)
+                                    .focused(true)
+                                    .on_new_window(|url, _features| {
+                                        let scheme = url.scheme();
+                                        if scheme == "http" || scheme == "https" || scheme == "about" {
+                                            tauri::webview::NewWindowResponse::Allow
+                                        } else {
+                                            tauri::webview::NewWindowResponse::Deny
+                                        }
+                                    });
+                                    if let Ok(popup_win) = builder.build() {
+                                        focus_webview_window(&popup_win);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                } else if msg_type == Some("mhzipy-web-folder-state") {
                     let unlocked = json
                         .get("uploadUnlocked")
                         .and_then(|v| v.as_bool())
@@ -4706,7 +4955,9 @@ pub fn run() {
             execute_webview_print,
             open_safe_web_folder_window,
             inspect_file_content_kind,
-            run_powershell_script
+            run_powershell_script,
+            onedrive_menu::get_onedrive_menu_items,
+            onedrive_menu::invoke_onedrive_menu_item
         ])
         // .invoke_handler(tauri::generate_handler![greet])
         .run(tauri::generate_context!())
