@@ -35,17 +35,8 @@ export default defineConfig(async () => ({
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) return;
-          if (id.includes("react-dom") || id.includes("node_modules/react/") || id.includes("scheduler")) {
-            return "vendor-react";
-          }
           if (id.includes("@tauri-apps")) {
             return "vendor-tauri";
-          }
-          if (id.includes("lucide-react")) {
-            return "vendor-icons";
-          }
-          if (id.includes("i18next")) {
-            return "vendor-i18n";
           }
           if (id.includes("pdf-lib") || id.includes("marked")) {
             return "vendor-docs";
