@@ -4660,6 +4660,230 @@ async fn run_powershell_script(
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// 명령줄 인자 문자열을 큰따옴표를 보존하며 토큰 벡터로 분리합니다.
+fn split_command_args(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '"' {
+            in_quotes = !in_quotes;
+        } else if c.is_whitespace() && !in_quotes {
+            if !current.is_empty() {
+                args.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(c);
+        }
+        i += 1;
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
+/// 외부 실행 파일(.exe, .bat, .cmd 등)을 실행합니다.
+/// 인자 템플릿에서 `{CurrentDir}`, `{SelectedFile}`, `{SelectedFiles}` (또는 `$CurrentDir`, `$SelectedFile`, `$SelectedFiles`) 치환을 지원합니다.
+#[tauri::command]
+async fn launch_external_app(
+    exe_path: String,
+    args_template: String,
+    working_dir: String,
+    selected_files: Vec<String>,
+    run_as_admin: bool,
+    wait_for_output: bool,
+) -> Result<PowerShellRunResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use std::process::Command;
+        use std::time::Instant;
+
+        let trimmed_exe = exe_path.trim().trim_matches('"').to_string();
+        if trimmed_exe.is_empty() {
+            return Err("Executable path is empty.".to_string());
+        }
+
+        let trimmed_wd = working_dir.trim();
+        let valid_wd = if !trimmed_wd.is_empty() && trimmed_wd != "My PC" {
+            let p = Path::new(trimmed_wd);
+            if p.exists() && p.is_dir() {
+                Some(p.to_path_buf())
+            } else {
+                None
+            }
+        } else {
+            let exe_parent = Path::new(&trimmed_exe).parent();
+            exe_parent
+                .filter(|p| !p.as_os_str().is_empty() && p.exists())
+                .map(|p| p.to_path_buf())
+        };
+
+        let effective_wd = valid_wd
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let first_file = selected_files.first().cloned().unwrap_or_default();
+        let quoted_all_files = selected_files
+            .iter()
+            .map(|f| format!("\"{}\"", f))
+            .collect::<Vec<String>>()
+            .join(" ");
+
+        // Expand placeholders in args_template
+        let mut expanded = args_template.clone();
+        // Handle pre-quoted placeholders first so we don't double-quote them
+        expanded = expanded
+            .replace("\"{CurrentDir}\"", &format!("\"{}\"", effective_wd))
+            .replace("\"$CurrentDir\"", &format!("\"{}\"", effective_wd))
+            .replace("{CurrentDir}", &format!("\"{}\"", effective_wd))
+            .replace("$CurrentDir", &format!("\"{}\"", effective_wd));
+
+        if first_file.is_empty() {
+            expanded = expanded
+                .replace("\"{SelectedFile}\"", "")
+                .replace("\"$SelectedFile\"", "")
+                .replace("{SelectedFile}", "")
+                .replace("$SelectedFile", "");
+        } else {
+            expanded = expanded
+                .replace("\"{SelectedFile}\"", &format!("\"{}\"", first_file))
+                .replace("\"$SelectedFile\"", &format!("\"{}\"", first_file))
+                .replace("{SelectedFile}", &format!("\"{}\"", first_file))
+                .replace("$SelectedFile", &format!("\"{}\"", first_file));
+        }
+
+        expanded = expanded
+            .replace("\"{SelectedFiles}\"", &quoted_all_files)
+            .replace("\"$SelectedFiles\"", &quoted_all_files)
+            .replace("{SelectedFiles}", &quoted_all_files)
+            .replace("$SelectedFiles", &quoted_all_files);
+
+        let parsed_args = split_command_args(expanded.trim());
+        let start = Instant::now();
+
+        if run_as_admin {
+            // Launch elevated via PowerShell Start-Process -Verb RunAs
+            let ps_exe = trimmed_exe.replace('\'', "''");
+            let ps_wd = effective_wd.replace('\'', "''");
+            let ps_args_list = if parsed_args.is_empty() {
+                String::new()
+            } else {
+                let items: Vec<String> = parsed_args
+                    .iter()
+                    .map(|a| format!("'\"{}\"'", a.replace('\'', "''").replace('"', "\\\"")))
+                    .collect();
+                format!(" -ArgumentList @({})", items.join(", "))
+            };
+            let ps_wd_arg = if ps_wd.is_empty() {
+                String::new()
+            } else {
+                format!(" -WorkingDirectory '{}'", ps_wd)
+            };
+            let ps_cmd = format!(
+                "Start-Process -FilePath '{}' -Verb RunAs{}{}",
+                ps_exe, ps_args_list, ps_wd_arg
+            );
+
+            let mut cmd = Command::new("powershell");
+            cmd.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", &ps_cmd]);
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            }
+
+            let output = cmd
+                .output()
+                .map_err(|e| format!("Failed to invoke elevated launcher: {}", e))?;
+            let duration_ms = start.elapsed().as_millis() as u64;
+            let exit_code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+            let stdout = if exit_code == 0 {
+                format!(
+                    "🛡️ Launched as Administrator:\n  Executable : {}\n  Arguments  : {}\n  WorkingDir : {}",
+                    trimmed_exe,
+                    if expanded.trim().is_empty() { "(none)" } else { expanded.trim() },
+                    if effective_wd.is_empty() { "(default)" } else { &effective_wd }
+                )
+            } else {
+                String::from_utf8_lossy(&output.stdout).to_string()
+            };
+
+            return Ok(PowerShellRunResult {
+                stdout,
+                stderr,
+                exit_code,
+                duration_ms,
+                shell_used: "External App (RunAs Admin)".to_string(),
+            });
+        }
+
+        let mut cmd = Command::new(&trimmed_exe);
+        if !parsed_args.is_empty() {
+            cmd.args(&parsed_args);
+        }
+        if let Some(ref wd) = valid_wd {
+            cmd.current_dir(wd);
+        }
+
+        if wait_for_output {
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                let lower = trimmed_exe.to_lowercase();
+                if lower.ends_with(".bat") || lower.ends_with(".cmd") {
+                    cmd.creation_flags(0x08000000);
+                }
+            }
+            let output = cmd
+                .output()
+                .map_err(|e| format!("Failed to execute \"{}\": {}", trimmed_exe, e))?;
+            let duration_ms = start.elapsed().as_millis() as u64;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            Ok(PowerShellRunResult {
+                stdout,
+                stderr,
+                exit_code,
+                duration_ms,
+                shell_used: "External App (Captured Output)".to_string(),
+            })
+        } else {
+            let child = cmd
+                .spawn()
+                .map_err(|e| format!("Failed to launch \"{}\": {}", trimmed_exe, e))?;
+            let pid = child.id();
+            let duration_ms = start.elapsed().as_millis() as u64;
+            let stdout = format!(
+                "🚀 External Application Launched Successfully (PID: {})\n  Executable : {}\n  Arguments  : {}\n  WorkingDir : {}\n  Files      : {} selected",
+                pid,
+                trimmed_exe,
+                if expanded.trim().is_empty() { "(none)" } else { expanded.trim() },
+                if effective_wd.is_empty() { "(default)" } else { &effective_wd },
+                selected_files.len()
+            );
+
+            Ok(PowerShellRunResult {
+                stdout,
+                stderr: String::new(),
+                exit_code: 0,
+                duration_ms,
+                shell_used: format!("External App (PID {})", pid),
+            })
+        }
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "windows")]
@@ -4956,6 +5180,7 @@ pub fn run() {
             open_safe_web_folder_window,
             inspect_file_content_kind,
             run_powershell_script,
+            launch_external_app,
             onedrive_menu::get_onedrive_menu_items,
             onedrive_menu::invoke_onedrive_menu_item
         ])

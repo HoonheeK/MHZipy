@@ -711,16 +711,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <span className="tb-btn-text">{t('contextMenu.createMarkdownFile', 'New MD File')}</span>
         </button>
 
-        {/* PowerShell Studio Manager */}
+        {/* Command Studio (PowerShell & External App Manager) */}
         {onOpenPowerShellManager && (
           <button
             type="button"
             className="tb-btn"
             onClick={onOpenPowerShellManager}
-            title="Open PowerShell Studio & Output Manager"
+            title="Open Command Studio (PowerShell & External App Launcher)"
           >
             <Terminal size={15} color="#38bdf8" />
-            <span className="tb-btn-text">PS Studio</span>
+            <span className="tb-btn-text">Cmd Studio</span>
           </button>
         )}
       </div>

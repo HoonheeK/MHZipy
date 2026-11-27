@@ -1257,7 +1257,7 @@ export default function FileList({
       if (!info.is_text) {
         showMessage(
           'Unsupported File Content',
-          `Cannot open "${fileName}" as a script in PowerShell Studio.\n\nDetected file content: ${info.detected_kind}.\nPowerShell Studio script editor only supports plain text / PowerShell (.ps1) content.`
+          `Cannot open "${fileName}" as a script in Command Studio.\n\nDetected file content: ${info.detected_kind}.\nCommand Studio script editor only supports plain text / PowerShell (.ps1) content.`
         );
         return;
       }
@@ -2644,9 +2644,28 @@ export default function FileList({
                             await openWithBuiltInAppChecked('powershell', firstPath, fileName, fileData);
                           }}
                         >
-                          <span>⚡ PowerShell Studio (Script)</span>
+                          <span>⚡ Command Studio (PowerShell Script)</span>
                           {fileName.toLowerCase().endsWith('.ps1') && <span style={badgeStyle}>Match</span>}
                         </div>
+
+                        {/\.(exe|bat|cmd|lnk)$/i.test(fileName) && (
+                          <div
+                            className="context-menu-item"
+                            style={{ padding: '4px 10px' }}
+                            onClick={async () => {
+                              setBuiltInAppMenuOpen(false);
+                              setContextMenu(null);
+                              await openPowerShellManagerWindow({
+                                workingDir: path && path !== 'My PC' ? path : '',
+                                selectedFiles: Array.from(selectedFiles),
+                                appExePath: firstPath,
+                              });
+                            }}
+                          >
+                            <span>🖥️ Register App in Command Studio (.exe)</span>
+                            <span style={badgeStyle}>Match</span>
+                          </div>
+                        )}
 
                         <div className="context-menu-separator" />
 
@@ -2662,8 +2681,68 @@ export default function FileList({
                             });
                           }}
                         >
-                          <span>⚡ Send to PowerShell Studio ($SelectedFiles)</span>
+                          <span>⚡ Send to Command Studio ($SelectedFiles)</span>
                         </div>
+
+                        {(() => {
+                          let pinnedApps: Array<{
+                            id: string;
+                            title: string;
+                            exePath: string;
+                            appArgs: string;
+                            appWorkingDirMode: 'current' | 'exe_dir' | 'custom';
+                            appCustomWorkingDir: string;
+                            runAsAdmin: boolean;
+                            waitForOutput: boolean;
+                          }> = [];
+                          try {
+                            const raw = localStorage.getItem('mhz_command_studio_apps');
+                            if (raw) {
+                              const parsed = JSON.parse(raw);
+                              if (Array.isArray(parsed)) pinnedApps = parsed;
+                            }
+                          } catch {}
+                          if (pinnedApps.length === 0) return null;
+                          return (
+                            <>
+                              <div className="context-menu-separator" />
+                              {pinnedApps.map((appItem) => (
+                                <div
+                                  key={appItem.id}
+                                  className="context-menu-item"
+                                  style={{ padding: '4px 10px' }}
+                                  onClick={async () => {
+                                    setBuiltInAppMenuOpen(false);
+                                    setContextMenu(null);
+                                    const explorerWd = path && path !== 'My PC' ? path : '';
+                                    const resolvedWd =
+                                      appItem.appWorkingDirMode === 'custom' && appItem.appCustomWorkingDir
+                                        ? appItem.appCustomWorkingDir
+                                        : appItem.appWorkingDirMode === 'exe_dir'
+                                          ? appItem.exePath.replace(/[\\/][^\\/]+$/, '')
+                                          : explorerWd;
+                                    try {
+                                      await invoke('launch_external_app', {
+                                        exePath: appItem.exePath,
+                                        argsTemplate: appItem.appArgs || '{SelectedFiles}',
+                                        workingDir: resolvedWd,
+                                        selectedFiles: Array.from(selectedFiles),
+                                        runAsAdmin: !!appItem.runAsAdmin,
+                                        waitForOutput: false,
+                                      });
+                                    } catch (err) {
+                                      showMessage('External App Launch Error', String(err));
+                                    }
+                                  }}
+                                >
+                                  <span>
+                                    {appItem.runAsAdmin ? '🛡️' : '🖥️'} {appItem.title}
+                                  </span>
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
 
                         <div className="context-menu-separator" />
 

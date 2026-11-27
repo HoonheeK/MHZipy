@@ -6,6 +6,7 @@ import { appConfigDir, join } from '@tauri-apps/api/path';
 import { readTextFile, writeTextFile, exists, mkdir } from '@tauri-apps/plugin-fs';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { openPowerShellRunnerWindow } from './openPowerShellManagerWindow';
+import './PowerShellManager.css';
 
 export interface PowerShellFolder {
   id: string;
@@ -16,6 +17,8 @@ export interface PowerShellFolder {
 
 export type PowerShellScriptType = 'readonly' | 'modify';
 export type PowerShellScriptTypeOption = 'auto' | 'readonly' | 'modify';
+export type StudioItemKind = 'script' | 'app';
+export type AppWorkingDirMode = 'current' | 'exe_dir' | 'custom';
 
 export interface PowerShellSnippet {
   id: string;
@@ -26,6 +29,26 @@ export interface PowerShellSnippet {
   code: string;
   updatedAt: number;
   scriptType?: PowerShellScriptTypeOption;
+  // External Application (.exe) Launcher properties
+  itemKind?: StudioItemKind;
+  exePath?: string;
+  appArgs?: string;
+  appWorkingDirMode?: AppWorkingDirMode;
+  appCustomWorkingDir?: string;
+  runAsAdmin?: boolean;
+  waitForOutput?: boolean;
+  showInContextMenu?: boolean;
+}
+
+export interface RegisteredExternalAppSummary {
+  id: string;
+  title: string;
+  exePath: string;
+  appArgs: string;
+  appWorkingDirMode: AppWorkingDirMode;
+  appCustomWorkingDir: string;
+  runAsAdmin: boolean;
+  waitForOutput: boolean;
 }
 
 /**
@@ -318,11 +341,29 @@ Write-Output "Folder cleanup completed."`,
     updatedAt: Date.now(),
     scriptType: 'modify',
   },
+  {
+    id: 'app_default_notepad',
+    title: 'Windows Notepad (Open Selected File)',
+    category: 'Default',
+    parentId: 'folder_default',
+    description: 'Opens the currently selected file in Windows Notepad (notepad.exe).',
+    code: '',
+    updatedAt: Date.now(),
+    itemKind: 'app',
+    exePath: 'C:\\Windows\\System32\\notepad.exe',
+    appArgs: '{SelectedFile}',
+    appWorkingDirMode: 'current',
+    appCustomWorkingDir: '',
+    runAsAdmin: false,
+    waitForOutput: false,
+    showInContextMenu: true,
+  },
 ];
 
 interface PowerShellManagerProps {
   initialWorkingDir?: string;
   initialScriptFilePath?: string;
+  initialAppExePath?: string;
   runnerMode?: boolean;
   runId?: string;
 }
@@ -330,6 +371,7 @@ interface PowerShellManagerProps {
 const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   initialWorkingDir = '',
   initialScriptFilePath = '',
+  initialAppExePath = '',
   runnerMode = false,
   runId = '',
 }) => {
@@ -386,6 +428,21 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [code, setCode] = useState<string>(DEFAULT_SNIPPETS[0].code);
   const [scriptType, setScriptType] = useState<PowerShellScriptTypeOption>(DEFAULT_SNIPPETS[0].scriptType || 'auto');
   const [snippetFolderId, setSnippetFolderId] = useState<string | null>(DEFAULT_SNIPPETS[0].parentId ?? null);
+  const [itemKind, setItemKind] = useState<StudioItemKind>(DEFAULT_SNIPPETS[0].itemKind || 'script');
+  const [exePath, setExePath] = useState<string>(DEFAULT_SNIPPETS[0].exePath || '');
+  const [appArgs, setAppArgs] = useState<string>(DEFAULT_SNIPPETS[0].appArgs || '');
+  const [appWorkingDirMode, setAppWorkingDirMode] = useState<AppWorkingDirMode>(
+    DEFAULT_SNIPPETS[0].appWorkingDirMode || 'current'
+  );
+  const [appCustomWorkingDir, setAppCustomWorkingDir] = useState<string>(
+    DEFAULT_SNIPPETS[0].appCustomWorkingDir || ''
+  );
+  const [runAsAdmin, setRunAsAdmin] = useState<boolean>(!!DEFAULT_SNIPPETS[0].runAsAdmin);
+  const [waitForOutput, setWaitForOutput] = useState<boolean>(!!DEFAULT_SNIPPETS[0].waitForOutput);
+  const [showInContextMenu, setShowInContextMenu] = useState<boolean>(
+    DEFAULT_SNIPPETS[0].showInContextMenu !== false
+  );
+  const [appIcons, setAppIcons] = useState<Record<string, string>>({});
   const [isDirty, setIsDirty] = useState<boolean>(false);
 
   // Explorer context
@@ -393,9 +450,9 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [showSelectedFilesModal, setShowSelectedFilesModal] = useState<boolean>(false);
 
-  // Filter in sidebar (Search & Read/Modify Type)
+  // Filter in sidebar (Search & Read/Modify/App Type)
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [scriptTypeFilter, setScriptTypeFilter] = useState<'all' | 'readonly' | 'modify'>('all');
+  const [scriptTypeFilter, setScriptTypeFilter] = useState<'all' | 'readonly' | 'modify' | 'app'>('all');
 
   // Effective script type for the actively edited code
   const currentEffectiveType = useMemo<PowerShellScriptType>(() => {
@@ -403,15 +460,21 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     return detectScriptType(code);
   }, [scriptType, code]);
 
-  // Total script counts by type for sidebar filter chips
+  // Total item counts by type for sidebar filter chips
   const scriptTypeCounts = useMemo(() => {
     let readCount = 0;
     let modCount = 0;
+    let appCount = 0;
     for (const s of snippets) {
-      if (getEffectiveScriptType(s) === 'modify') modCount++;
-      else readCount++;
+      if (s.itemKind === 'app') {
+        appCount++;
+      } else if (getEffectiveScriptType(s) === 'modify') {
+        modCount++;
+      } else {
+        readCount++;
+      }
     }
-    return { all: snippets.length, readonly: readCount, modify: modCount };
+    return { all: snippets.length, readonly: readCount, modify: modCount, app: appCount };
   }, [snippets]);
 
   // Resizable Splitters (Left/Right and Top/Bottom)
@@ -475,6 +538,71 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   useEffect(() => {
     historyRef.current = history;
   }, [history]);
+
+  // Sync window maximized state on mount and resize
+  useEffect(() => {
+    const win = getCurrentWindow();
+    win.isMaximized().then(setIsMaximized).catch(() => {});
+    const unlistenPromise = win.onResized(() => {
+      win.isMaximized().then(setIsMaximized).catch(() => {});
+    });
+    return () => {
+      unlistenPromise.then((f) => f()).catch(() => {});
+    };
+  }, []);
+
+  // Load native Windows icons for registered external apps (.exe)
+  useEffect(() => {
+    const appPaths = Array.from(
+      new Set(
+        [
+          ...(itemKind === 'app' && exePath.trim() ? [exePath.trim()] : []),
+          ...snippets
+            .filter((s) => s.itemKind === 'app' && s.exePath && s.exePath.trim())
+            .map((s) => s.exePath!.trim()),
+        ].filter((p) => !appIcons[p])
+      )
+    );
+    if (appPaths.length === 0) return;
+
+    const requests = appPaths.map((p) => {
+      const extMatch = p.match(/\.([a-zA-Z0-9]+)$/);
+      return {
+        key: p,
+        path: p,
+        extension: extMatch ? extMatch[1].toLowerCase() : 'exe',
+        is_dir: false,
+      };
+    });
+
+    invoke<Record<string, string>>('get_file_icons', { requests })
+      .then((res) => {
+        if (res && Object.keys(res).length > 0) {
+          setAppIcons((prev) => ({ ...prev, ...res }));
+        }
+      })
+      .catch(() => {});
+  }, [snippets, itemKind, exePath, appIcons]);
+
+  // Sync pinned external apps to localStorage so FileExplorer right-click menu can access them
+  const syncRegisteredAppsToStorage = useCallback((list: PowerShellSnippet[]) => {
+    try {
+      const apps: RegisteredExternalAppSummary[] = list
+        .filter((s) => s.itemKind === 'app' && s.exePath && s.exePath.trim() && s.showInContextMenu !== false)
+        .map((s) => ({
+          id: s.id,
+          title: s.title || 'External App',
+          exePath: s.exePath!.trim(),
+          appArgs: s.appArgs ?? '{SelectedFiles}',
+          appWorkingDirMode: s.appWorkingDirMode || 'current',
+          appCustomWorkingDir: s.appCustomWorkingDir || '',
+          runAsAdmin: !!s.runAsAdmin,
+          waitForOutput: !!s.waitForOutput,
+        }));
+      localStorage.setItem('mhz_command_studio_apps', JSON.stringify(apps));
+      emit('mhz-command-studio-apps-updated', apps).catch(() => {});
+    } catch {}
+  }, []);
 
   // Track window and right pane width dynamically for responsive compact buttons
   useEffect(() => {
@@ -561,6 +689,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       nextSnippets: PowerShellSnippet[],
       nextHistory: PowerShellRunRecord[]
     ) => {
+      syncRegisteredAppsToStorage(nextSnippets);
       if (!storageLoadedRef.current || runnerMode) return;
       try {
         const dir = await appConfigDir();
@@ -584,7 +713,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
         console.warn('Failed to save ps_manager.json:', err);
       }
     },
-    [runnerMode]
+    [runnerMode, syncRegisteredAppsToStorage]
   );
 
   // Build Flattened Visible Tree Items for Rendering, Shift+Click, and Shift+Arrow Navigation
@@ -592,22 +721,26 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     const q = searchTerm.trim().toLowerCase();
     const result: VisibleTreeItem[] = [];
 
-    // Filter helper by script type (readonly vs. modify)
+    // Filter helper by script/app type (readonly vs. modify vs. app)
     const matchesTypeFilter = (s: PowerShellSnippet) => {
       if (scriptTypeFilter === 'all') return true;
+      if (scriptTypeFilter === 'app') return s.itemKind === 'app';
+      if (s.itemKind === 'app') return false;
       return getEffectiveScriptType(s) === scriptTypeFilter;
     };
 
     if (q) {
-      // When searching, show matching scripts flat with their folder context
+      // When searching, show matching scripts/apps flat with their folder context
       for (const s of snippets) {
         if (!matchesTypeFilter(s)) continue;
         const sTitle = typeof s.title === 'string' ? s.title : String(s.title || '');
         const sDesc = typeof s.description === 'string' ? s.description : String(s.description || '');
+        const sExe = typeof s.exePath === 'string' ? s.exePath : '';
         const sCode = typeof s.code === 'string' ? s.code : (s.code && typeof s.code === 'object' && 'content' in (s.code as any) ? (s.code as any).content || '' : String(s.code || ''));
         if (
           sTitle.toLowerCase().includes(q) ||
           sDesc.toLowerCase().includes(q) ||
+          sExe.toLowerCase().includes(q) ||
           sCode.toLowerCase().includes(q)
         ) {
           result.push({
@@ -703,12 +836,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
         const firstId = Array.from(hitScripts)[0];
         const found = snippetsRef.current.find((s) => s.id === firstId);
         if (found) {
-          setSelectedSnippetId(found.id);
-          setTitle(found.title);
-          setDescription(found.description || '');
-          setCode(found.code);
-          setScriptType(found.scriptType || 'auto');
-          setIsDirty(false);
+          activateSnippetInEditor(found);
         }
       }
     };
@@ -724,6 +852,81 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [marquee, visibleTreeItems]);
+
+  const executeExternalApp = useCallback(
+    async (
+      appTitle: string,
+      targetExePath: string,
+      targetArgs: string,
+      targetWdMode: AppWorkingDirMode,
+      targetCustomWd: string,
+      targetAdmin: boolean,
+      targetWait: boolean,
+      explorerWd: string,
+      explorerFiles: string[]
+    ) => {
+      if (!targetExePath.trim()) return;
+      setIsRunning(true);
+      setActiveBottomTab('output');
+
+      const resolvedWd =
+        targetWdMode === 'custom' && targetCustomWd.trim()
+          ? targetCustomWd.trim()
+          : targetWdMode === 'exe_dir'
+            ? targetExePath.trim().replace(/[\\/][^\\/]+$/, '')
+            : explorerWd;
+
+      try {
+        const res = await invoke<PowerShellRunResult>('launch_external_app', {
+          exePath: targetExePath,
+          argsTemplate: targetArgs,
+          workingDir: resolvedWd,
+          selectedFiles: explorerFiles,
+          runAsAdmin: targetAdmin,
+          waitForOutput: targetWait,
+        });
+
+        const record: PowerShellRunRecord = {
+          id: `run_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+          scriptId: selectedSnippetId,
+          scriptTitle: `🖥️ ${appTitle.trim() || 'External App'}`,
+          code: `"${targetExePath}" ${targetArgs}`.trim(),
+          workingDir: resolvedWd,
+          selectedFiles: [...explorerFiles],
+          stdout: res.stdout || '',
+          stderr: res.stderr || '',
+          exitCode: res.exit_code,
+          durationMs: res.duration_ms,
+          shellUsed: res.shell_used,
+          timestamp: Date.now(),
+        };
+
+        setCurrentResult(record);
+        const nextHistory = [record, ...historyRef.current].slice(0, 50);
+        setHistory(nextHistory);
+        persistData(foldersRef.current, snippetsRef.current, nextHistory);
+      } catch (err) {
+        const record: PowerShellRunRecord = {
+          id: `run_${Date.now()}`,
+          scriptId: selectedSnippetId,
+          scriptTitle: `🖥️ ${appTitle.trim() || 'External App'}`,
+          code: `"${targetExePath}" ${targetArgs}`.trim(),
+          workingDir: resolvedWd,
+          selectedFiles: [...explorerFiles],
+          stdout: '',
+          stderr: String(err),
+          exitCode: -1,
+          durationMs: 0,
+          shellUsed: 'External App Error',
+          timestamp: Date.now(),
+        };
+        setCurrentResult(record);
+      } finally {
+        setIsRunning(false);
+      }
+    },
+    [selectedSnippetId, persistData]
+  );
 
   const executePowerShellCode = useCallback(
     async (execTitle: string, execCode: string, execWorkingDir: string, execSelectedFiles: string[]) => {
@@ -820,6 +1023,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       workingDir?: string;
       selectedFiles?: string[];
       scriptFilePath?: string;
+      appExePath?: string;
     }>('mhz-ps-manager-context', (ev) => {
       const p = ev.payload;
       if (!p) return;
@@ -831,6 +1035,9 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       }
       if (p.scriptFilePath) {
         loadExternalPs1File(p.scriptFilePath);
+      }
+      if (p.appExePath) {
+        registerExternalAppExe(p.appExePath);
       }
     }).then((fn) => {
       unlistenCtx = fn;
@@ -861,10 +1068,11 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
     const initializeStudio = async () => {
       try {
-        // 1. Read initial context (workingDir, selectedFiles, scriptFilePath)
+        // 1. Read initial context (workingDir, selectedFiles, scriptFilePath, appExePath)
         let initWd = initialWorkingDir;
         let initFiles: string[] = [];
         let initScriptPath = initialScriptFilePath;
+        let initAppExe = initialAppExePath;
 
         try {
           const raw = localStorage.getItem('mhz_ps_initial_context');
@@ -879,6 +1087,9 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             }
             if (parsed.scriptFilePath) {
               initScriptPath = parsed.scriptFilePath;
+            }
+            if (parsed.appExePath) {
+              initAppExe = parsed.appExePath;
             }
           }
         } catch {}
@@ -1026,6 +1237,35 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
           } catch (err) {
             console.error('Failed to read external launch script:', err);
           }
+        } else if (initAppExe) {
+          const existingApp = loadedSnippets.find(
+            (s) => s.itemKind === 'app' && s.exePath?.toLowerCase() === initAppExe.toLowerCase()
+          );
+          if (existingApp) {
+            activeSnippet = existingApp;
+          } else {
+            const rawName = initAppExe.split(/[\\/]/).pop() || 'App.exe';
+            const cleanAppName = rawName.replace(/\.(exe|bat|cmd|lnk)$/i, '');
+            const registeredApp: PowerShellSnippet = {
+              id: `app_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              title: cleanAppName,
+              category: 'Apps',
+              parentId: 'folder_default',
+              description: `External application (${rawName})`,
+              code: '',
+              updatedAt: Date.now(),
+              itemKind: 'app',
+              exePath: initAppExe,
+              appArgs: '{SelectedFiles}',
+              appWorkingDirMode: 'current',
+              appCustomWorkingDir: '',
+              runAsAdmin: false,
+              waitForOutput: false,
+              showInContextMenu: true,
+            };
+            loadedSnippets = [registeredApp, ...loadedSnippets];
+            activeSnippet = registeredApp;
+          }
         }
 
         if (!activeSnippet && loadedSnippets.length > 0) {
@@ -1041,6 +1281,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
         snippetsRef.current = loadedSnippets;
         historyRef.current = loadedHistory;
         storageLoadedRef.current = true;
+        syncRegisteredAppsToStorage(loadedSnippets);
 
         setFolders(loadedFolders);
         setExpandedFolderIds(new Set(loadedFolders.map((f) => f.id)));
@@ -1061,11 +1302,19 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
           setCode(activeSnippet.code || '');
           setScriptType(activeSnippet.scriptType || 'auto');
           setSnippetFolderId(activeSnippet.parentId ?? null);
+          setItemKind(activeSnippet.itemKind || 'script');
+          setExePath(activeSnippet.exePath || '');
+          setAppArgs(activeSnippet.appArgs ?? (activeSnippet.itemKind === 'app' ? '{SelectedFiles}' : ''));
+          setAppWorkingDirMode(activeSnippet.appWorkingDirMode || 'current');
+          setAppCustomWorkingDir(activeSnippet.appCustomWorkingDir || '');
+          setRunAsAdmin(!!activeSnippet.runAsAdmin);
+          setWaitForOutput(!!activeSnippet.waitForOutput);
+          setShowInContextMenu(activeSnippet.showInContextMenu !== false);
         }
 
         setIsReady(true);
 
-        if (initScriptPath && activeSnippet) {
+        if ((initScriptPath || initAppExe) && activeSnippet) {
           persistData(loadedFolders, loadedSnippets, loadedHistory);
         }
       } catch (err) {
@@ -1079,7 +1328,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [runnerMode, initialWorkingDir, initialScriptFilePath, persistData]);
+  }, [runnerMode, initialWorkingDir, initialScriptFilePath, initialAppExePath, persistData, syncRegisteredAppsToStorage]);
 
   const activateSnippetInEditor = (item: PowerShellSnippet) => {
     try {
@@ -1098,7 +1347,68 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     setCode(cleanCode);
     setScriptType(item.scriptType || 'auto');
     setSnippetFolderId(item.parentId ?? null);
+    setItemKind(item.itemKind || 'script');
+    setExePath(item.exePath || '');
+    setAppArgs(item.appArgs ?? (item.itemKind === 'app' ? '{SelectedFiles}' : ''));
+    setAppWorkingDirMode(item.appWorkingDirMode || 'current');
+    setAppCustomWorkingDir(item.appCustomWorkingDir || '');
+    setRunAsAdmin(!!item.runAsAdmin);
+    setWaitForOutput(!!item.waitForOutput);
+    setShowInContextMenu(item.showInContextMenu !== false);
     setIsDirty(false);
+  };
+
+  const registerExternalAppExe = (targetExePath: string, targetFolderId: string | null = activeFolderId) => {
+    const cleanPath = targetExePath.trim();
+    if (!cleanPath) return;
+
+    const existing = snippetsRef.current.find(
+      (s) => s.itemKind === 'app' && s.exePath?.toLowerCase() === cleanPath.toLowerCase()
+    );
+    if (existing) {
+      setSelectedScriptIds(new Set([existing.id]));
+      setAnchorItemId(existing.id);
+      setFocusedItemId(existing.id);
+      activateSnippetInEditor(existing);
+      setSaveFeedback(`🖥️ Selected "${existing.title}"`);
+      setTimeout(() => setSaveFeedback(''), 2000);
+      return;
+    }
+
+    const rawName = cleanPath.split(/[\\/]/).pop() || 'App.exe';
+    const cleanAppName = rawName.replace(/\.(exe|bat|cmd|lnk)$/i, '');
+    const newApp: PowerShellSnippet = {
+      id: `app_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: cleanAppName,
+      category: 'Apps',
+      parentId: targetFolderId,
+      description: `External application (${rawName})`,
+      code: '',
+      updatedAt: Date.now(),
+      itemKind: 'app',
+      exePath: cleanPath,
+      appArgs: '{SelectedFiles}',
+      appWorkingDirMode: 'current',
+      appCustomWorkingDir: '',
+      runAsAdmin: false,
+      waitForOutput: false,
+      showInContextMenu: true,
+    };
+
+    setSnippets((prev) => {
+      const next = [newApp, ...prev];
+      persistData(foldersRef.current, next, historyRef.current);
+      return next;
+    });
+    if (targetFolderId) {
+      setExpandedFolderIds((prev) => new Set([...prev, targetFolderId]));
+    }
+    setSelectedScriptIds(new Set([newApp.id]));
+    setAnchorItemId(newApp.id);
+    setFocusedItemId(newApp.id);
+    activateSnippetInEditor(newApp);
+    setSaveFeedback(`🖥️ Registered "${newApp.title}"`);
+    setTimeout(() => setSaveFeedback(''), 2200);
   };
 
   const loadExternalPs1File = async (filePath: string) => {
@@ -1139,17 +1449,31 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   };
 
   const handleSaveCurrentSnippet = () => {
-    const cleanTitle = title.trim() || 'Untitled PowerShell Script';
+    const cleanTitle =
+      title.trim() || (itemKind === 'app' ? 'Untitled External App' : 'Untitled PowerShell Script');
     const currentObj = snippets.find((s) => s.id === selectedSnippetId);
     const updatedItem: PowerShellSnippet = {
-      id: selectedSnippetId || `ps_${Date.now()}`,
+      id: selectedSnippetId || `${itemKind === 'app' ? 'app' : 'ps'}_${Date.now()}`,
       title: cleanTitle,
-      category: currentObj?.category || 'General',
-      parentId: snippetFolderId !== undefined ? snippetFolderId : (currentObj ? (currentObj.parentId ?? null) : activeFolderId),
+      category: currentObj?.category || (itemKind === 'app' ? 'Apps' : 'General'),
+      parentId:
+        snippetFolderId !== undefined
+          ? snippetFolderId
+          : currentObj
+            ? (currentObj.parentId ?? null)
+            : activeFolderId,
       description: description.trim(),
       code,
       updatedAt: Date.now(),
       scriptType,
+      itemKind,
+      exePath: exePath.trim(),
+      appArgs,
+      appWorkingDirMode,
+      appCustomWorkingDir: appCustomWorkingDir.trim(),
+      runAsAdmin,
+      waitForOutput,
+      showInContextMenu,
     };
 
     if (updatedItem.parentId) {
@@ -1182,6 +1506,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
       description: '',
       code: `# Available variables from MHZipy:\n# $CurrentDir    -> Current Working Directory\n# $SelectedFiles -> Array of selected file/folder paths\n\nWrite-Output "Working Dir: $CurrentDir"\n`,
       updatedAt: Date.now(),
+      itemKind: 'script',
     };
     if (targetParentId) {
       setExpandedFolderIds((prev) => new Set([...prev, targetParentId]));
@@ -1193,6 +1518,50 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     setFocusedItemId(newItem.id);
     activateSnippetInEditor(newItem);
     persistData(folders, next, history);
+  };
+
+  const handleCreateNewApp = async (targetParentId: string | null = activeFolderId) => {
+    try {
+      const picked = await open({
+        multiple: false,
+        filters: [
+          { name: 'Executable Programs', extensions: ['exe', 'bat', 'cmd', 'lnk'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (!picked || typeof picked !== 'string') {
+        return;
+      }
+      registerExternalAppExe(picked, targetParentId);
+    } catch (err) {
+      console.error('Failed to open executable picker:', err);
+    }
+  };
+
+  const handleBrowseAppExe = async () => {
+    try {
+      const picked = await open({
+        multiple: false,
+        filters: [
+          { name: 'Executable Programs', extensions: ['exe', 'bat', 'cmd', 'lnk'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (picked && typeof picked === 'string') {
+        setExePath(picked);
+        setIsDirty(true);
+        const rawName = picked.split(/[\\/]/).pop() || 'App.exe';
+        const cleanName = rawName.replace(/\.(exe|bat|cmd|lnk)$/i, '');
+        if (!title.trim() || title === 'New External Application') {
+          setTitle(cleanName);
+        }
+        if (!description.trim() || description === 'Frequently used external application (.exe)') {
+          setDescription(`External application (${rawName})`);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to pick executable:', err);
+    }
   };
 
   const handleCreateNewFolder = (parentFolderId: string | null = null) => {
@@ -1710,11 +2079,31 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   };
 
   const handleRunInCurrentWindow = () => {
-    if (isRunning || !code.trim()) return;
+    if (isRunning) return;
+    if (itemKind === 'app') {
+      if (!exePath.trim()) return;
+      executeExternalApp(
+        title,
+        exePath,
+        appArgs,
+        appWorkingDirMode,
+        appCustomWorkingDir,
+        runAsAdmin,
+        waitForOutput,
+        workingDir,
+        selectedFiles
+      );
+      return;
+    }
+    if (!code.trim()) return;
     executePowerShellCode(title, code, workingDir, selectedFiles);
   };
 
   const handleRunInSeparateWindow = () => {
+    if (itemKind === 'app') {
+      handleRunInCurrentWindow();
+      return;
+    }
     if (!code.trim()) return;
     openPowerShellRunnerWindow({
       title: title.trim() || 'PowerShell Script',
@@ -1725,7 +2114,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   };
 
   const handlePrimaryRunAction = () => {
-    if (runnerMode || runMode === 'inline') {
+    if (itemKind === 'app' || runnerMode || runMode === 'inline') {
       handleRunInCurrentWindow();
     } else {
       handleRunInSeparateWindow();
@@ -1772,6 +2161,19 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
   };
 
   const insertVariableAtCursor = (varText: string) => {
+    if (itemKind === 'app') {
+      const placeholder =
+        varText === '$CurrentDir'
+          ? '{CurrentDir}'
+          : varText === '$SelectedFile'
+            ? '{SelectedFile}'
+            : varText === '$SelectedFiles'
+              ? '{SelectedFiles}'
+              : varText;
+      setAppArgs((prev) => (prev.trim() ? `${prev.trim()} ${placeholder}` : placeholder));
+      setIsDirty(true);
+      return;
+    }
     const el = textareaRef.current;
     if (!el) {
       setCode((prev) => `${prev}\n${varText}`);
@@ -1789,6 +2191,28 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     }, 10);
   };
 
+  const resolvedAppCommandPreview = useMemo(() => {
+    if (itemKind !== 'app') return '';
+    const firstFile = selectedFiles[0] || '<no-selected-file>';
+    const allFiles =
+      selectedFiles.length > 0
+        ? selectedFiles.map((f) => `"${f}"`).join(' ')
+        : '<no-selected-files>';
+    const effWd =
+      appWorkingDirMode === 'custom' && appCustomWorkingDir.trim()
+        ? appCustomWorkingDir.trim()
+        : appWorkingDirMode === 'exe_dir' && exePath.trim()
+          ? exePath.trim().replace(/[\\/][^\\/]+$/, '')
+          : workingDir;
+
+    const expanded = (appArgs || '')
+      .replace(/"\{CurrentDir\}"|\{CurrentDir\}|"\$CurrentDir"|\$CurrentDir/g, `"${effWd}"`)
+      .replace(/"\{SelectedFile\}"|\{SelectedFile\}|"\$SelectedFile"|\$SelectedFile/g, `"${firstFile}"`)
+      .replace(/"\{SelectedFiles\}"|\{SelectedFiles\}|"\$SelectedFiles"|\$SelectedFiles/g, allFiles);
+
+    return `"${exePath || '<executable.exe>'}" ${expanded}`.trim();
+  }, [itemKind, exePath, appArgs, appWorkingDirMode, appCustomWorkingDir, workingDir, selectedFiles]);
+
   const combinedOutputText = useMemo(() => {
     if (!currentResult) return '';
     const out = currentResult.stdout || '';
@@ -1804,6 +2228,14 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
     return lines.filter((line) => line.toLowerCase().includes(q));
   }, [combinedOutputText, resultFilterQuery]);
 
+  const handleTitlebarMouseDown = (e: React.MouseEvent) => {
+    if (e.button === 0 && !(e.target as HTMLElement).closest('button, input, select, a')) {
+      try {
+        getCurrentWindow().startDragging();
+      } catch {}
+    }
+  };
+
   const handleToggleMaximize = async () => {
     try {
       const win = getCurrentWindow();
@@ -1815,24 +2247,10 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
   if (!isReady && !runnerMode) {
     return (
-      <div
-        style={{
-          width: '100vw',
-          height: '100vh',
-          backgroundColor: '#020617',
-          color: '#38bdf8',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontFamily: 'Segoe UI, system-ui, sans-serif',
-          gap: '12px',
-          userSelect: 'none',
-        }}
-      >
+      <div className={`mhz-cs-root${isMaximized ? ' maximized' : ''}`} style={{ alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
         <div style={{ fontSize: '1.8rem' }}>⚡</div>
         <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#94a3b8' }}>
-          Loading PowerShell Studio...
+          Loading Command Studio...
         </div>
       </div>
     );
@@ -1840,16 +2258,8 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
 
   return (
     <div
+      className={`mhz-cs-root${isMaximized ? ' maximized' : ''}`}
       style={{
-        width: '100vw',
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#0b1120',
-        color: '#e2e8f0',
-        fontFamily: 'Segoe UI, system-ui, sans-serif',
-        overflow: 'hidden',
-        userSelect: 'none',
         cursor: isResizingHorizontal
           ? 'col-resize'
           : isResizingVertical
@@ -1857,83 +2267,50 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             : 'default',
       }}
     >
-      {/* 1. Custom Window Titlebar */}
+      {/* 1. Custom Frameless Window Titlebar */}
       <header
+        className="mhz-cs-titlebar"
         data-tauri-drag-region
+        onMouseDown={handleTitlebarMouseDown}
         onDoubleClick={handleToggleMaximize}
-        style={{
-          height: '38px',
-          backgroundColor: '#0f172a',
-          borderBottom: '1px solid rgba(148, 163, 184, 0.18)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 10px 0 14px',
-          flexShrink: 0,
-        }}
       >
-        <div
-          data-tauri-drag-region
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 700, fontSize: '0.88rem', overflow: 'hidden' }}
-        >
-          <span style={{ fontSize: '1.05rem', flexShrink: 0 }}>{runnerMode ? '🚀' : '⚡'}</span>
-          <span style={{ color: '#38bdf8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {runnerMode ? (isCompact ? title : `PowerShell Runner — ${title}`) : (isCompact ? 'PS Studio' : 'MHZipy PowerShell Studio')}
+        <div className="mhz-cs-titlebar-left" data-tauri-drag-region>
+          <span className="mhz-cs-app-badge">
+            <span>{runnerMode ? '🚀' : '⚡'}</span>
+            <span>{runnerMode ? 'RUNNER' : 'COMMAND STUDIO'}</span>
+          </span>
+          <span style={{ color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {runnerMode ? title : isCompact ? title : 'MHZipy Command Studio'}
           </span>
           {!isCompact && (
             <span style={{ color: '#64748b', fontWeight: 400, fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
-              {runnerMode ? '(Code & Result View)' : '— Script Tree & Output Manager'}
+              {runnerMode ? '(Code & Result View)' : '— PowerShell & External App Launcher'}
             </span>
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div className="mhz-cs-win-controls" onMouseDown={(e) => e.stopPropagation()}>
           <button
             type="button"
+            className="mhz-cs-win-btn"
             onClick={() => getCurrentWindow().minimize()}
             title="Minimize"
-            style={{
-              width: '30px',
-              height: '26px',
-              border: 'none',
-              borderRadius: '4px',
-              background: 'transparent',
-              color: '#94a3b8',
-              cursor: 'pointer',
-            }}
           >
             ─
           </button>
           <button
             type="button"
+            className="mhz-cs-win-btn"
             onClick={handleToggleMaximize}
             title={isMaximized ? 'Restore' : 'Maximize'}
-            style={{
-              width: '30px',
-              height: '26px',
-              border: 'none',
-              borderRadius: '4px',
-              background: 'transparent',
-              color: '#94a3b8',
-              cursor: 'pointer',
-            }}
           >
             {isMaximized ? '❐' : '□'}
           </button>
           <button
             type="button"
+            className="mhz-cs-win-btn close"
             onClick={() => getCurrentWindow().close()}
             title="Close Window"
-            style={{
-              width: '30px',
-              height: '26px',
-              border: 'none',
-              borderRadius: '4px',
-              background: 'transparent',
-              color: '#f87171',
-              cursor: 'pointer',
-              fontWeight: 700,
-            }}
           >
             ✕
           </button>
@@ -1964,20 +2341,20 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 gap: '7px',
               }}
             >
-              <div style={{ display: 'flex', gap: '5px' }}>
+              <div style={{ display: 'flex', gap: '4px' }}>
                 <button
                   type="button"
                   onClick={() => handleCreateNewSnippet(activeFolderId)}
                   title="New PowerShell Script in active folder (Ctrl+N)"
                   style={{
                     flex: 1,
-                    padding: isNarrowSidebar ? '5px 5px' : '5px 8px',
+                    padding: isNarrowSidebar ? '5px 4px' : '5px 6px',
                     borderRadius: '6px',
                     border: '1px solid #0284c7',
                     backgroundColor: '#0369a1',
                     color: '#f8fafc',
                     fontWeight: 700,
-                    fontSize: isNarrowSidebar ? '0.72rem' : '0.76rem',
+                    fontSize: isNarrowSidebar ? '0.71rem' : '0.75rem',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
                   }}
@@ -1986,16 +2363,35 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleCreateNewApp(activeFolderId)}
+                  title="Register External Application (.exe) in active folder"
+                  style={{
+                    flex: 1,
+                    padding: isNarrowSidebar ? '5px 4px' : '5px 6px',
+                    borderRadius: '6px',
+                    border: '1px solid #8b5cf6',
+                    backgroundColor: 'rgba(124, 58, 237, 0.35)',
+                    color: '#ede9fe',
+                    fontWeight: 700,
+                    fontSize: isNarrowSidebar ? '0.71rem' : '0.75rem',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {isNarrowSidebar ? '+🖥️' : '+ App'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleCreateNewFolder(null)}
                   title="Create New Folder in Tree (Ctrl+Shift+N)"
                   style={{
-                    padding: isNarrowSidebar ? '5px 5px' : '5px 8px',
+                    padding: isNarrowSidebar ? '5px 4px' : '5px 6px',
                     borderRadius: '6px',
                     border: '1px solid rgba(56, 189, 248, 0.35)',
                     backgroundColor: 'rgba(30, 41, 59, 0.9)',
                     color: '#7dd3fc',
                     fontWeight: 600,
-                    fontSize: isNarrowSidebar ? '0.72rem' : '0.76rem',
+                    fontSize: isNarrowSidebar ? '0.71rem' : '0.75rem',
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
                   }}
@@ -2007,12 +2403,12 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   onClick={handleImportPs1}
                   title="Import .ps1 file into active folder"
                   style={{
-                    padding: '5px 7px',
+                    padding: '5px 6px',
                     borderRadius: '6px',
                     border: '1px solid rgba(148, 163, 184, 0.25)',
                     backgroundColor: '#1e293b',
                     color: '#cbd5e1',
-                    fontSize: '0.75rem',
+                    fontSize: '0.74rem',
                     cursor: 'pointer',
                   }}
                 >
@@ -2023,12 +2419,12 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   onClick={handleExportPs1}
                   title="Export active script as .ps1"
                   style={{
-                    padding: '5px 7px',
+                    padding: '5px 6px',
                     borderRadius: '6px',
                     border: '1px solid rgba(148, 163, 184, 0.25)',
                     backgroundColor: '#1e293b',
                     color: '#cbd5e1',
-                    fontSize: '0.75rem',
+                    fontSize: '0.74rem',
                     cursor: 'pointer',
                   }}
                 >
@@ -2040,7 +2436,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="🔍 Filter scripts in tree..."
+                placeholder="🔍 Filter scripts & apps..."
                 style={{
                   padding: '5px 9px',
                   borderRadius: '6px',
@@ -2052,17 +2448,17 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 }}
               />
 
-              {/* Type Filter Chips (All / Read-Only / Modify) */}
-              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+              {/* Type Filter Chips (All / Read-Only / Modify / App) */}
+              <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
                 <button
                   type="button"
                   onClick={() => setScriptTypeFilter('all')}
-                  title="Show all scripts"
+                  title="Show all scripts and external apps"
                   style={{
                     flex: 1,
                     padding: '3px 0',
                     borderRadius: '5px',
-                    fontSize: '0.69rem',
+                    fontSize: '0.67rem',
                     fontWeight: scriptTypeFilter === 'all' ? 700 : 500,
                     backgroundColor: scriptTypeFilter === 'all' ? '#334155' : 'rgba(30, 41, 59, 0.5)',
                     color: scriptTypeFilter === 'all' ? '#f8fafc' : '#94a3b8',
@@ -2080,7 +2476,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     flex: 1,
                     padding: '3px 0',
                     borderRadius: '5px',
-                    fontSize: '0.69rem',
+                    fontSize: '0.67rem',
                     fontWeight: scriptTypeFilter === 'readonly' ? 700 : 500,
                     backgroundColor: scriptTypeFilter === 'readonly' ? 'rgba(2, 132, 199, 0.28)' : 'rgba(30, 41, 59, 0.5)',
                     color: scriptTypeFilter === 'readonly' ? '#38bdf8' : '#94a3b8',
@@ -2098,7 +2494,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     flex: 1,
                     padding: '3px 0',
                     borderRadius: '5px',
-                    fontSize: '0.69rem',
+                    fontSize: '0.67rem',
                     fontWeight: scriptTypeFilter === 'modify' ? 700 : 500,
                     backgroundColor: scriptTypeFilter === 'modify' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(30, 41, 59, 0.5)',
                     color: scriptTypeFilter === 'modify' ? '#fbbf24' : '#94a3b8',
@@ -2107,6 +2503,24 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   }}
                 >
                   {isNarrowSidebar ? `⚡${scriptTypeCounts.modify}` : `⚡ Action (${scriptTypeCounts.modify})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScriptTypeFilter('app')}
+                  title="Filter External Applications (.exe)"
+                  style={{
+                    flex: 1,
+                    padding: '3px 0',
+                    borderRadius: '5px',
+                    fontSize: '0.67rem',
+                    fontWeight: scriptTypeFilter === 'app' ? 700 : 500,
+                    backgroundColor: scriptTypeFilter === 'app' ? 'rgba(139, 92, 246, 0.28)' : 'rgba(30, 41, 59, 0.5)',
+                    color: scriptTypeFilter === 'app' ? '#c4b5fd' : '#94a3b8',
+                    border: scriptTypeFilter === 'app' ? '1px solid #8b5cf6' : '1px solid rgba(148, 163, 184, 0.15)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isNarrowSidebar ? `🖥️${scriptTypeCounts.app}` : `🖥️ App (${scriptTypeCounts.app})`}
                 </button>
               </div>
 
@@ -2414,8 +2828,22 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       />
                     )}
 
-                    <span style={{ fontSize: '0.82rem', flexShrink: 0, pointerEvents: 'none' }}>
-                      {isFolder ? (isExpanded ? '📂' : '📁') : '📜'}
+                    <span style={{ fontSize: '0.82rem', flexShrink: 0, pointerEvents: 'none', display: 'inline-flex', alignItems: 'center' }}>
+                      {isFolder ? (
+                        isExpanded ? '📂' : '📁'
+                      ) : item.snippet?.itemKind === 'app' ? (
+                        item.snippet.exePath && appIcons[item.snippet.exePath.trim()] ? (
+                          <img
+                            src={appIcons[item.snippet.exePath.trim()]}
+                            alt=""
+                            style={{ width: '15px', height: '15px', objectFit: 'contain' }}
+                          />
+                        ) : (
+                          '🖥️'
+                        )
+                      ) : (
+                        '📜'
+                      )}
                     </span>
 
                     {renamingNodeId === item.id ? (
@@ -2464,6 +2892,27 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                     )}
 
                     {!isFolder && item.snippet && (() => {
+                      if (item.snippet.itemKind === 'app') {
+                        return (
+                          <span
+                            title={item.snippet.runAsAdmin ? 'External Application (Run as Administrator)' : 'External Application (.exe)'}
+                            style={{
+                              fontSize: '0.61rem',
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              backgroundColor: 'rgba(139, 92, 246, 0.22)',
+                              color: '#c4b5fd',
+                              border: '1px solid rgba(139, 92, 246, 0.45)',
+                              fontWeight: 700,
+                              flexShrink: 0,
+                              letterSpacing: '0.2px',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            {item.snippet.runAsAdmin ? '🛡️ Admin' : '🖥️ App'}
+                          </span>
+                        );
+                      }
                       const eff = getEffectiveScriptType(item.snippet);
                       return eff === 'modify' ? (
                         <span
@@ -2514,7 +2963,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                           pointerEvents: 'none',
                         }}
                       >
-                        .ps1
+                        {item.snippet?.itemKind === 'app' ? '.exe' : '.ps1'}
                       </span>
                     )}
 
@@ -2608,7 +3057,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
           ref={rightPaneRef}
           style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}
         >
-          {/* Top Pane: Script Metadata + Context Bar + Code Editor */}
+          {/* Top Pane: Script / App Metadata + Context Bar + Editor */}
           <section
             style={{
               height: `${topPaneRatio}%`,
@@ -2616,12 +3065,13 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
               flexDirection: 'column',
               padding: '10px 12px',
               gap: '8px',
-              minHeight: '110px',
+              minHeight: '140px',
               boxSizing: 'border-box',
+              overflow: 'hidden',
             }}
           >
             {/* Title, Description, Save & Selectable Run Row */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '32px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: '32px', flexShrink: 0 }}>
               <input
                 type="text"
                 value={title}
@@ -2629,7 +3079,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   setTitle(e.target.value);
                   setIsDirty(true);
                 }}
-                placeholder="Script Title..."
+                placeholder={itemKind === 'app' ? 'Application Name...' : 'Script Title...'}
                 style={{
                   flex: 3,
                   height: '32px',
@@ -2680,7 +3130,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       setSnippetFolderId(nextId);
                       setIsDirty(true);
                     }}
-                    title="Change parent folder for this script"
+                    title="Change parent folder"
                     style={{
                       height: '32px',
                       boxSizing: 'border-box',
@@ -2704,49 +3154,51 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                       </option>
                     ))}
                   </select>
-                  <select
-                    value={scriptType}
-                    onChange={(e) => {
-                      setScriptType(e.target.value as PowerShellScriptTypeOption);
-                      setIsDirty(true);
-                    }}
-                    title={`Script Mode Setting. Current effective: ${currentEffectiveType === 'modify' ? '⚡ Action (File/System Mutating)' : '🔍 Read-Only (Safe Inspection)'}`}
-                    style={{
-                      height: '32px',
-                      boxSizing: 'border-box',
-                      margin: 0,
-                      padding: isUltraCompact ? '0 5px' : '0 8px',
-                      borderRadius: '6px',
-                      border:
-                        currentEffectiveType === 'modify'
-                          ? '1px solid #f59e0b'
-                          : '1px solid rgba(56, 189, 248, 0.4)',
-                      backgroundColor:
-                        currentEffectiveType === 'modify'
-                          ? 'rgba(245, 158, 11, 0.16)'
-                          : '#0f172a',
-                      color: currentEffectiveType === 'modify' ? '#fcd34d' : '#7dd3fc',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      outline: 'none',
-                      maxWidth: isUltraCompact ? '80px' : isCompact ? '95px' : '130px',
-                    }}
-                  >
-                    <option value="auto">
-                      {isUltraCompact
-                        ? '🪄 Auto'
-                        : isCompact
-                          ? `🪄 Auto (${currentEffectiveType === 'modify' ? '⚡' : '🔍'})`
-                          : `🪄 Auto (${currentEffectiveType === 'modify' ? '⚡ Action' : '🔍 Read'})`}
-                    </option>
-                    <option value="readonly">{isUltraCompact ? '🔍 Read' : '🔍 Read-Only'}</option>
-                    <option value="modify">{isUltraCompact ? '⚡ Action' : '⚡ Action / Modify'}</option>
-                  </select>
+                  {itemKind !== 'app' && (
+                    <select
+                      value={scriptType}
+                      onChange={(e) => {
+                        setScriptType(e.target.value as PowerShellScriptTypeOption);
+                        setIsDirty(true);
+                      }}
+                      title={`Script Mode Setting. Current effective: ${currentEffectiveType === 'modify' ? '⚡ Action (File/System Mutating)' : '🔍 Read-Only (Safe Inspection)'}`}
+                      style={{
+                        height: '32px',
+                        boxSizing: 'border-box',
+                        margin: 0,
+                        padding: isUltraCompact ? '0 5px' : '0 8px',
+                        borderRadius: '6px',
+                        border:
+                          currentEffectiveType === 'modify'
+                            ? '1px solid #f59e0b'
+                            : '1px solid rgba(56, 189, 248, 0.4)',
+                        backgroundColor:
+                          currentEffectiveType === 'modify'
+                            ? 'rgba(245, 158, 11, 0.16)'
+                            : '#0f172a',
+                        color: currentEffectiveType === 'modify' ? '#fcd34d' : '#7dd3fc',
+                        fontSize: '0.78rem',
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        outline: 'none',
+                        maxWidth: isUltraCompact ? '80px' : isCompact ? '95px' : '130px',
+                      }}
+                    >
+                      <option value="auto">
+                        {isUltraCompact
+                          ? '🪄 Auto'
+                          : isCompact
+                            ? `🪄 Auto (${currentEffectiveType === 'modify' ? '⚡' : '🔍'})`
+                            : `🪄 Auto (${currentEffectiveType === 'modify' ? '⚡ Action' : '🔍 Read'})`}
+                      </option>
+                      <option value="readonly">{isUltraCompact ? '🔍 Read' : '🔍 Read-Only'}</option>
+                      <option value="modify">{isUltraCompact ? '⚡ Action' : '⚡ Action / Modify'}</option>
+                    </select>
+                  )}
                   <button
                     type="button"
                     onClick={handleSaveCurrentSnippet}
-                    title={saveFeedback || (isDirty ? 'Save Changes (Ctrl+S)' : 'Save Script')}
+                    title={saveFeedback || (isDirty ? 'Save Changes (Ctrl+S)' : 'Save Item')}
                     style={{
                       height: '32px',
                       boxSizing: 'border-box',
@@ -2775,11 +3227,11 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      if (window.confirm(`Are you sure you want to delete script "${title}"?`)) {
+                      if (window.confirm(`Are you sure you want to delete "${title}"?`)) {
                         handleDeleteTreeItems('script', selectedSnippetId);
                       }
                     }}
-                    title="Delete active script (Del key)"
+                    title="Delete active item (Del key)"
                     style={{
                       height: '32px',
                       boxSizing: 'border-box',
@@ -2804,8 +3256,45 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
                 </>
               )}
 
-              {/* Selectable Run Split Button */}
-              {runnerMode ? (
+              {/* Selectable Run / Launch Button */}
+              {itemKind === 'app' ? (
+                <button
+                  type="button"
+                  disabled={isRunning || !exePath.trim()}
+                  onClick={handleRunInCurrentWindow}
+                  title={`Launch "${title}" with current Working Dir and Selected Files (Ctrl+Enter or F5)`}
+                  style={{
+                    height: '32px',
+                    boxSizing: 'border-box',
+                    margin: 0,
+                    lineHeight: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: isUltraCompact ? '0 9px' : isCompact ? '0 12px' : '0 15px',
+                    borderRadius: '6px',
+                    border: runAsAdmin ? '1px solid #f59e0b' : '1px solid #8b5cf6',
+                    backgroundColor: isRunning
+                      ? '#5b21b6'
+                      : runAsAdmin
+                        ? '#d97706'
+                        : '#7c3aed',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    fontSize: isUltraCompact ? '0.78rem' : '0.82rem',
+                    cursor: isRunning ? 'wait' : exePath.trim() ? 'pointer' : 'not-allowed',
+                    opacity: exePath.trim() ? 1 : 0.5,
+                    whiteSpace: 'nowrap',
+                    boxShadow: '0 2px 10px rgba(124, 58, 237, 0.35)',
+                  }}
+                >
+                  {isRunning
+                    ? (isUltraCompact ? '⏳' : '⏳ Launching...')
+                    : runAsAdmin
+                      ? (isUltraCompact ? '🛡️' : isCompact ? '🛡️ Admin' : '🛡️ Launch Admin')
+                      : (isUltraCompact ? '🚀' : isCompact ? '🚀 Launch' : '🚀 Launch App')}
+                </button>
+              ) : runnerMode ? (
                 <button
                   type="button"
                   disabled={isRunning}
@@ -3136,45 +3625,318 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
               </div>
             </div>
 
-            {/* PowerShell Code Textarea */}
-            <textarea
-              ref={textareaRef}
-              value={code}
-              onChange={(e) => {
-                setCode(e.target.value);
-                setIsDirty(true);
-              }}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey && e.key === 'Enter') || e.key === 'F5') {
-                  e.preventDefault();
-                  handlePrimaryRunAction();
-                } else if (!runnerMode && e.ctrlKey && e.key.toLowerCase() === 's') {
-                  e.preventDefault();
-                  handleSaveCurrentSnippet();
-                } else if (e.key === 'Tab') {
-                  e.preventDefault();
-                  insertVariableAtCursor('    ');
-                }
-              }}
-              spellCheck={false}
-              placeholder="Write or paste your PowerShell script here..."
-              style={{
-                flex: 1,
-                width: '100%',
-                resize: 'none',
-                padding: '10px 12px',
-                borderRadius: '7px',
-                border: '1px solid rgba(148, 163, 184, 0.24)',
-                backgroundColor: '#020617',
-                color: '#e2e8f0',
-                fontFamily: 'Consolas, "Cascadia Code", monospace',
-                fontSize: '0.85rem',
-                lineHeight: 1.5,
-                outline: 'none',
-                boxSizing: 'border-box',
-                userSelect: 'text',
-              }}
-            />
+            {/* PowerShell Code Textarea OR External Application Launcher Config */}
+            {itemKind === 'app' ? (
+              <div
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey && e.key === 'Enter') || e.key === 'F5') {
+                    e.preventDefault();
+                    handleRunInCurrentWindow();
+                  } else if (e.ctrlKey && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    handleSaveCurrentSnippet();
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                  padding: '12px 14px',
+                  borderRadius: '7px',
+                  border: '1px solid rgba(139, 92, 246, 0.35)',
+                  backgroundColor: '#020617',
+                  overflowY: 'auto',
+                }}
+              >
+                {/* 1. Executable Path (.exe) */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#c4b5fd', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🖥️ Executable Path (.exe / .bat / .cmd)</span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        width: '30px',
+                        height: '30px',
+                        borderRadius: '6px',
+                        backgroundColor: '#0f172a',
+                        border: '1px solid rgba(148, 163, 184, 0.25)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {exePath && appIcons[exePath.trim()] ? (
+                        <img
+                          src={appIcons[exePath.trim()]}
+                          alt=""
+                          style={{ width: '18px', height: '18px', objectFit: 'contain' }}
+                        />
+                      ) : (
+                        <span style={{ fontSize: '0.95rem' }}>🖥️</span>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={exePath}
+                      onChange={(e) => {
+                        setExePath(e.target.value);
+                        setIsDirty(true);
+                      }}
+                      placeholder="e.g. C:\Program Files\Notepad++\notepad++.exe"
+                      style={{
+                        flex: 1,
+                        height: '30px',
+                        boxSizing: 'border-box',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(148, 163, 184, 0.28)',
+                        backgroundColor: '#0f172a',
+                        color: '#f8fafc',
+                        fontFamily: 'Consolas, monospace',
+                        fontSize: '0.8rem',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleBrowseAppExe}
+                      style={{
+                        height: '30px',
+                        padding: '0 12px',
+                        borderRadius: '6px',
+                        border: '1px solid #8b5cf6',
+                        backgroundColor: 'rgba(124, 58, 237, 0.28)',
+                        color: '#ede9fe',
+                        fontWeight: 700,
+                        fontSize: '0.76rem',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      📂 Browse .exe...
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Command-Line Arguments Template */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#c4b5fd' }}>
+                      ⚙️ Command-Line Arguments
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Placeholders:</span>
+                      {[
+                        { label: '+{SelectedFiles}', val: '{SelectedFiles}', tip: 'All selected file paths (quoted)' },
+                        { label: '+{SelectedFile}', val: '{SelectedFile}', tip: 'First selected file path (quoted)' },
+                        { label: '+{CurrentDir}', val: '{CurrentDir}', tip: 'Current FileExplorer folder path (quoted)' },
+                      ].map((ph) => (
+                        <button
+                          key={ph.val}
+                          type="button"
+                          onClick={() => {
+                            setAppArgs((prev) => (prev.trim() ? `${prev.trim()} ${ph.val}` : ph.val));
+                            setIsDirty(true);
+                          }}
+                          title={ph.tip}
+                          style={{
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid rgba(139, 92, 246, 0.4)',
+                            backgroundColor: 'rgba(124, 58, 237, 0.16)',
+                            color: '#ddd6fe',
+                            fontSize: '0.68rem',
+                            fontFamily: 'Consolas, monospace',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {ph.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={appArgs}
+                    onChange={(e) => {
+                      setAppArgs(e.target.value);
+                      setIsDirty(true);
+                    }}
+                    placeholder="e.g. {SelectedFiles}  or  --folder {CurrentDir}"
+                    style={{
+                      width: '100%',
+                      height: '30px',
+                      boxSizing: 'border-box',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(148, 163, 184, 0.28)',
+                      backgroundColor: '#0f172a',
+                      color: '#7dd3fc',
+                      fontFamily: 'Consolas, monospace',
+                      fontSize: '0.8rem',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+
+                {/* 3. Working Directory Mode & Launch Options */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.74rem', color: '#94a3b8', fontWeight: 600 }}>Working Dir:</span>
+                    <select
+                      value={appWorkingDirMode}
+                      onChange={(e) => {
+                        setAppWorkingDirMode(e.target.value as AppWorkingDirMode);
+                        setIsDirty(true);
+                      }}
+                      style={{
+                        height: '28px',
+                        padding: '0 8px',
+                        borderRadius: '5px',
+                        border: '1px solid rgba(148, 163, 184, 0.28)',
+                        backgroundColor: '#0f172a',
+                        color: '#e2e8f0',
+                        fontSize: '0.75rem',
+                        outline: 'none',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <option value="current">📁 Explorer $CurrentDir</option>
+                      <option value="exe_dir">🖥️ App Executable Folder</option>
+                      <option value="custom">📌 Custom Directory</option>
+                    </select>
+                  </div>
+
+                  {appWorkingDirMode === 'custom' && (
+                    <input
+                      type="text"
+                      value={appCustomWorkingDir}
+                      onChange={(e) => {
+                        setAppCustomWorkingDir(e.target.value);
+                        setIsDirty(true);
+                      }}
+                      placeholder="Custom working directory path..."
+                      style={{
+                        flex: 1,
+                        minWidth: '150px',
+                        height: '28px',
+                        boxSizing: 'border-box',
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        border: '1px solid rgba(148, 163, 184, 0.28)',
+                        backgroundColor: '#0f172a',
+                        color: '#f8fafc',
+                        fontFamily: 'Consolas, monospace',
+                        fontSize: '0.75rem',
+                        outline: 'none',
+                      }}
+                    />
+                  )}
+
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.74rem', color: '#fcd34d', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={runAsAdmin}
+                      onChange={(e) => {
+                        setRunAsAdmin(e.target.checked);
+                        setIsDirty(true);
+                      }}
+                      style={{ accentColor: '#f59e0b', cursor: 'pointer' }}
+                    />
+                    <span>🛡️ Run as Administrator</span>
+                  </label>
+
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.74rem', color: '#7dd3fc', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={waitForOutput}
+                      onChange={(e) => {
+                        setWaitForOutput(e.target.checked);
+                        setIsDirty(true);
+                      }}
+                      style={{ accentColor: '#0284c7', cursor: 'pointer' }}
+                    />
+                    <span>📟 Capture CLI Output</span>
+                  </label>
+
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '0.74rem', color: '#c4b5fd', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={showInContextMenu}
+                      onChange={(e) => {
+                        setShowInContextMenu(e.target.checked);
+                        setIsDirty(true);
+                      }}
+                      style={{ accentColor: '#8b5cf6', cursor: 'pointer' }}
+                    />
+                    <span>📌 Show in Explorer Context Menu</span>
+                  </label>
+                </div>
+
+                {/* 4. Resolved Command Preview */}
+                <div
+                  style={{
+                    marginTop: 'auto',
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    border: '1px solid rgba(148, 163, 184, 0.16)',
+                    fontSize: '0.73rem',
+                    fontFamily: 'Consolas, monospace',
+                    color: '#94a3b8',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                  title={resolvedAppCommandPreview}
+                >
+                  <span style={{ color: '#64748b', fontWeight: 700 }}>Preview: </span>
+                  <span style={{ color: '#e2e8f0' }}>{resolvedAppCommandPreview}</span>
+                </div>
+              </div>
+            ) : (
+              <textarea
+                ref={textareaRef}
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setIsDirty(true);
+                }}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey && e.key === 'Enter') || e.key === 'F5') {
+                    e.preventDefault();
+                    handlePrimaryRunAction();
+                  } else if (!runnerMode && e.ctrlKey && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    handleSaveCurrentSnippet();
+                  } else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    insertVariableAtCursor('    ');
+                  }
+                }}
+                spellCheck={false}
+                placeholder="Write or paste your PowerShell script here..."
+                style={{
+                  flex: 1,
+                  width: '100%',
+                  resize: 'none',
+                  padding: '10px 12px',
+                  borderRadius: '7px',
+                  border: '1px solid rgba(148, 163, 184, 0.24)',
+                  backgroundColor: '#020617',
+                  color: '#e2e8f0',
+                  fontFamily: 'Consolas, "Cascadia Code", monospace',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.5,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  userSelect: 'text',
+                }}
+              />
+            )}
           </section>
 
           {/* Draggable Top/Bottom Horizontal Splitter Bar */}
@@ -3184,7 +3946,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
               setIsResizingVertical(true);
             }}
             onDoubleClick={() => setTopPaneRatio(50)}
-            title="Drag to resize Top (Code) / Bottom (Result) height (Double-click to reset 50/50)"
+            title="Drag to resize Top / Bottom height (Double-click to reset 50/50)"
             style={{
               height: '5px',
               cursor: 'row-resize',
@@ -3202,6 +3964,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
               flexDirection: 'column',
               backgroundColor: '#090d16',
               minHeight: '110px',
+              overflow: 'hidden',
             }}
           >
             {/* Output Action Bar */}
@@ -3578,7 +4341,7 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
             color: '#f1f5f9',
           }}
         >
-          {/* New Script / New Folder */}
+          {/* New Script / New External App / New Folder */}
           <div
             onClick={() => {
               const folderTarget =
@@ -3597,8 +4360,30 @@ const PowerShellManager: React.FC<PowerShellManagerProps> = ({
               cursor: 'pointer',
             }}
           >
-            <span>📜 New Script</span>
+            <span>📜 New PowerShell Script</span>
             <span style={{ color: '#64748b', fontSize: '0.72rem' }}>Ctrl+N</span>
+          </div>
+
+          <div
+            onClick={() => {
+              const folderTarget =
+                treeContextMenu.targetKind === 'folder'
+                  ? treeContextMenu.targetId
+                  : activeFolderId;
+              setTreeContextMenu(null);
+              handleCreateNewApp(folderTarget);
+            }}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '6px 10px',
+              borderRadius: '5px',
+              cursor: 'pointer',
+              color: '#c4b5fd',
+            }}
+          >
+            <span>🖥️ Register External App (.exe)</span>
           </div>
 
           <div

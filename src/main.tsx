@@ -17,6 +17,7 @@ const isPowerShellManager = view === 'powershell-manager';
 const filePath = params.get('filePath') || (window as any).__INITIAL_FILE_PATH__ || '';
 const workingDir = params.get('workingDir') || (window as any).__INITIAL_WORKING_DIR__ || '';
 const scriptFilePath = params.get('scriptFilePath') || (window as any).__INITIAL_SCRIPT_FILE_PATH__ || '';
+const appExePath = params.get('appExePath') || (window as any).__INITIAL_APP_EXE_PATH__ || '';
 const runnerMode = params.get('runnerMode') === '1' || !!(window as any).__INITIAL_RUNNER_MODE__;
 const runId = params.get('runId') || (window as any).__INITIAL_RUN_ID__ || '';
 
@@ -33,6 +34,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
         <PowerShellManager
           initialWorkingDir={workingDir}
           initialScriptFilePath={scriptFilePath}
+          initialAppExePath={appExePath}
           runnerMode={runnerMode}
           runId={runId}
         />

@@ -7,6 +7,7 @@ export interface PowerShellManagerLaunchTarget {
   workingDir?: string;
   selectedFiles?: string[];
   scriptFilePath?: string;
+  appExePath?: string;
 }
 
 export interface PowerShellRunnerLaunchTarget {
@@ -19,7 +20,7 @@ export interface PowerShellRunnerLaunchTarget {
 const PS_MANAGER_LABEL = 'powershell-manager';
 
 /**
- * MHZipy PowerShell Studio / Manager 독립 윈도우를 열거나,
+ * MHZipy Command Studio (PowerShell & External App Launcher) 독립 윈도우를 열거나,
  * 이미 열려 있으면 포커스 후 현재 폴더/선택된 파일 컨텍스트를 전달합니다.
  */
 export const openPowerShellManagerWindow = async (target: PowerShellManagerLaunchTarget = {}) => {
@@ -27,6 +28,7 @@ export const openPowerShellManagerWindow = async (target: PowerShellManagerLaunc
     workingDir: target.workingDir || '',
     selectedFiles: target.selectedFiles || [],
     scriptFilePath: target.scriptFilePath || '',
+    appExePath: target.appExePath || '',
   };
 
   try {
@@ -59,11 +61,12 @@ export const openPowerShellManagerWindow = async (target: PowerShellManagerLaunc
       view: 'powershell-manager',
       workingDir: payload.workingDir,
       scriptFilePath: payload.scriptFilePath,
+      appExePath: payload.appExePath,
     });
 
     const webview = new WebviewWindow(PS_MANAGER_LABEL, {
       url: `index.html?${params.toString()}`,
-      title: '⚡ MHZipy PowerShell Studio & Result Manager',
+      title: '⚡ MHZipy Command Studio — PowerShell & App Launcher',
       width: 1180,
       height: 780,
       minWidth: 760,

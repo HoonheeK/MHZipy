@@ -1,0 +1,123 @@
+/* MHZipy Command Studio (PowerShell & External App Launcher) Styles */
+
+:root,
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #0b1120;
+  color-scheme: dark;
+}
+
+.mhz-cs-root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #0b1120;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+.mhz-cs-root.maximized {
+  border: none;
+}
+
+/* Custom Frameless Titlebar */
+.mhz-cs-titlebar {
+  height: 38px;
+  min-height: 38px;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0 12px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  -webkit-app-region: drag;
+  cursor: default;
+}
+
+.mhz-cs-titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 0.86rem;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.mhz-cs-app-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 4px;
+  color: #38bdf8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.mhz-cs-win-controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.mhz-cs-win-btn {
+  width: 44px;
+  height: 38px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background-color 0.14s ease, color 0.14s ease;
+  -webkit-app-region: no-drag;
+}
+
+.mhz-cs-win-btn:hover {
+  background-color: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.mhz-cs-win-btn.close:hover {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+/* Custom Dark Scrollbars */
+.mhz-cs-root ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.mhz-cs-root ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+.mhz-cs-root ::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.45);
+  border-radius: 4px;
+}
+
+.mhz-cs-root ::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
